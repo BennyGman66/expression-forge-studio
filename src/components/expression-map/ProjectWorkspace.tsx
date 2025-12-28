@@ -238,45 +238,83 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
       // Step 2: Process prompts one at a time from the frontend
       // This runs in the background - we don't await the whole loop
       (async () => {
+        const MAX_RETRIES = 3;
+        const BASE_DELAY = 1000; // 1 second
+
         for (let i = 0; i < prompts.length; i++) {
-          try {
-            const response = await supabase.functions.invoke("generate-images", {
-              body: {
-                projectId: project.id,
-                jobId,
-                promptIndex: i,
-                prompt: prompts[i],
-                total: prompts.length,
-              },
-            });
+          let retryCount = 0;
+          let success = false;
 
-            if (response.error) {
-              console.error(`Error on prompt ${i}:`, response.error);
-              continue;
+          while (retryCount <= MAX_RETRIES && !success) {
+            try {
+              const response = await supabase.functions.invoke("generate-images", {
+                body: {
+                  projectId: project.id,
+                  jobId,
+                  promptIndex: i,
+                  prompt: prompts[i],
+                  total: prompts.length,
+                },
+              });
+
+              if (response.error) {
+                console.error(`Error on prompt ${i} (attempt ${retryCount + 1}):`, response.error);
+                retryCount++;
+                if (retryCount <= MAX_RETRIES) {
+                  const delay = BASE_DELAY * Math.pow(2, retryCount - 1); // 1s, 2s, 4s
+                  console.log(`Retrying in ${delay}ms...`);
+                  await new Promise(r => setTimeout(r, delay));
+                  continue;
+                }
+                break; // Max retries exceeded, move to next prompt
+              }
+
+              const result = response.data;
+
+              // Handle rate limiting with exponential backoff
+              if (result?.rateLimited) {
+                retryCount++;
+                const delay = result.retryAfter || BASE_DELAY * Math.pow(2, retryCount);
+                console.log(`Rate limited, waiting ${delay}ms (attempt ${retryCount})...`);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+              }
+
+              // Handle stop/credits exhausted - break out entirely
+              if (result?.stopped || result?.creditsExhausted) {
+                console.log("Generation stopped or credits exhausted");
+                return; // Exit the entire loop
+              }
+
+              // Handle other failures with retry
+              if (result?.success === false && !result?.skipped) {
+                retryCount++;
+                if (retryCount <= MAX_RETRIES) {
+                  const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
+                  console.log(`Generation failed, retrying in ${delay}ms (attempt ${retryCount})...`);
+                  await new Promise(r => setTimeout(r, delay));
+                  continue;
+                }
+                console.error(`Failed after ${MAX_RETRIES} retries, moving on`);
+                break;
+              }
+
+              // Success!
+              success = true;
+
+              // Small delay between successful requests
+              if (i < prompts.length - 1) {
+                await new Promise(r => setTimeout(r, 500));
+              }
+            } catch (err) {
+              console.error(`Error processing prompt ${i} (attempt ${retryCount + 1}):`, err);
+              retryCount++;
+              if (retryCount <= MAX_RETRIES) {
+                const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
+                console.log(`Exception caught, retrying in ${delay}ms...`);
+                await new Promise(r => setTimeout(r, delay));
+              }
             }
-
-            const result = response.data;
-
-            // Handle rate limiting
-            if (result?.rateLimited) {
-              console.log("Rate limited, waiting...");
-              await new Promise(r => setTimeout(r, result.retryAfter || 5000));
-              i--; // Retry this prompt
-              continue;
-            }
-
-            // Handle stop/credits exhausted
-            if (result?.stopped || result?.creditsExhausted) {
-              console.log("Generation stopped or credits exhausted");
-              break;
-            }
-
-            // Small delay between requests
-            if (i < prompts.length - 1) {
-              await new Promise(r => setTimeout(r, 500));
-            }
-          } catch (err) {
-            console.error(`Error processing prompt ${i}:`, err);
           }
         }
 
