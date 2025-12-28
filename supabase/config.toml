@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.generate-images]
 verify_jwt = false
+
+[functions.scrape-brand]
+verify_jwt = false
