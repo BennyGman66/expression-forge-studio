@@ -21,6 +21,33 @@ interface ProjectsGridProps {
   onDelete: (id: string) => void;
 }
 
+function ThumbnailGrid({ images, emptyCount = 3 }: { images: string[]; emptyCount?: number }) {
+  // Always show a grid - fill with empty placeholders if needed
+  const slots = [...images.slice(0, emptyCount)];
+  while (slots.length < emptyCount) {
+    slots.push('');
+  }
+
+  return (
+    <div className="flex-1 grid grid-rows-3 gap-1 h-full">
+      {slots.map((url, idx) => (
+        <div 
+          key={idx}
+          className="w-full h-full bg-secondary/50 rounded-sm overflow-hidden"
+        >
+          {url && (
+            <img 
+              src={url} 
+              alt="" 
+              className="w-full h-full object-cover"
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ProjectsGrid({ projects, onSelect, onDelete }: ProjectsGridProps) {
   const [thumbnails, setThumbnails] = useState<Record<string, ProjectThumbnails>>({});
 
@@ -106,52 +133,11 @@ export function ProjectsGrid({ projects, onSelect, onDelete }: ProjectsGridProps
             className="project-card"
             onClick={() => onSelect(project)}
           >
-            {/* Image preview area - split left/right */}
-            <div className="project-card-images">
-              {/* Left side - Brand Refs (Expressions) */}
-              <div className="flex-1 grid grid-cols-1 gap-1">
-                {projectThumbs.brandRefs.length > 0 ? (
-                  projectThumbs.brandRefs.slice(0, 3).map((url, idx) => (
-                    <div 
-                      key={idx}
-                      className="bg-secondary/50 rounded overflow-hidden"
-                      style={{ height: idx === 0 ? '100%' : '50%' }}
-                    >
-                      <img 
-                        src={url} 
-                        alt="" 
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  ))
-                ) : (
-                  <div className="project-card-image h-full" />
-                )}
-              </div>
-
-              {/* Divider */}
-              <div className="w-px bg-border/30" />
-
-              {/* Right side - Model Refs */}
-              <div className="flex-1 grid grid-cols-1 gap-1">
-                {projectThumbs.modelRefs.length > 0 ? (
-                  projectThumbs.modelRefs.slice(0, 3).map((url, idx) => (
-                    <div 
-                      key={idx}
-                      className="bg-secondary/50 rounded overflow-hidden"
-                      style={{ height: idx === 0 ? '100%' : '50%' }}
-                    >
-                      <img 
-                        src={url} 
-                        alt="" 
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  ))
-                ) : (
-                  <div className="project-card-image h-full" />
-                )}
-              </div>
+            {/* Image preview area - fixed height with left/right split */}
+            <div className="h-48 bg-muted p-2 flex gap-2">
+              <ThumbnailGrid images={projectThumbs.brandRefs} />
+              <div className="w-px bg-border/30 shrink-0" />
+              <ThumbnailGrid images={projectThumbs.modelRefs} />
             </div>
             
             {/* Footer */}
