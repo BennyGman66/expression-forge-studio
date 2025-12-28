@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Check, Upload, Wand2, Users, Play } from "lucide-react";
+import { Flex, Text, Badge } from "@radix-ui/themes";
 
 export type WorkflowStep = 1 | 2 | 3 | 4;
 
@@ -42,14 +43,14 @@ export function WorkflowNav({
 
   return (
     <nav className="bg-card border-b border-border px-6 py-4">
-      <div className="flex items-center justify-center gap-2 md:gap-4">
+      <Flex align="center" justify="center" gap="2" className="md:gap-4">
         {steps.map((step, index) => {
           const status = getStepStatus(step.id);
           const badge = getStepBadge(step.id);
           const Icon = step.icon;
           
           return (
-            <div key={step.id} className="flex items-center">
+            <Flex key={step.id} align="center">
               <button
                 onClick={() => onStepClick(step.id)}
                 className={cn(
@@ -71,13 +72,13 @@ export function WorkflowNav({
                     <Icon className="w-4 h-4" />
                   )}
                 </div>
-                <span className="hidden md:inline text-sm font-medium">
+                <Text size="2" weight="medium" className="hidden md:inline">
                   {step.label}
-                </span>
+                </Text>
                 {badge && (
-                  <span className="ml-1 px-1.5 py-0.5 text-xs font-medium rounded-full bg-primary/20 text-primary">
+                  <Badge color="lime" size="1" variant="soft">
                     {badge}
-                  </span>
+                  </Badge>
                 )}
               </button>
               
@@ -87,10 +88,10 @@ export function WorkflowNav({
                   index < currentStep - 1 ? "bg-primary/40" : "bg-border"
                 )} />
               )}
-            </div>
+            </Flex>
           );
         })}
-      </div>
+      </Flex>
     </nav>
   );
 }

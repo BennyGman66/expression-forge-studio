@@ -1,7 +1,5 @@
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { Button, Flex, Text, Heading, TextField, TextArea, Card, Box, Badge, IconButton } from "@radix-ui/themes";
 import { 
   Wand2, 
   Loader2, 
@@ -47,29 +45,22 @@ export function ExtractRecipesStep({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const intensityColors = {
-    0: 'bg-muted text-muted-foreground',
-    1: 'bg-primary/20 text-primary',
-    2: 'bg-warning/20 text-warning',
-    3: 'bg-destructive/20 text-destructive',
-  };
-
   return (
-    <div className="workflow-step animate-fade-in">
-      <div className="workflow-step-header">
+    <Card className="animate-fade-in" size="3">
+      <Flex align="center" gap="4" mb="4">
         <div className="step-indicator active">
           <Wand2 className="w-4 h-4" />
         </div>
-        <div className="flex-1">
-          <h2 className="text-xl font-semibold">Expression Recipes</h2>
-          <p className="text-sm text-muted-foreground mt-1">
+        <Box className="flex-1">
+          <Heading size="5">Expression Recipes</Heading>
+          <Text size="2" color="gray" className="mt-1">
             AI-extracted expression recipes from your brand references
-          </p>
-        </div>
+          </Text>
+        </Box>
         <Button 
-          variant="glow" 
           onClick={onExtract}
           disabled={isExtracting || brandRefs.length === 0}
+          className="glow-border"
         >
           {isExtracting ? (
             <>
@@ -83,58 +74,69 @@ export function ExtractRecipesStep({
             </>
           )}
         </Button>
-      </div>
+      </Flex>
 
       {brandRefs.length === 0 && (
-        <div className="p-8 text-center text-muted-foreground">
-          <p>Upload brand reference images first to extract expression recipes</p>
-        </div>
+        <Flex justify="center" py="8">
+          <Text color="gray">Upload brand reference images first to extract expression recipes</Text>
+        </Flex>
       )}
 
       {brandRefs.length > 0 && recipes.length === 0 && !isExtracting && (
-        <div className="p-8 text-center border border-dashed border-border rounded-lg">
-          <Wand2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-          <p className="text-muted-foreground">
+        <Flex 
+          direction="column" 
+          align="center" 
+          justify="center" 
+          py="8" 
+          className="border border-dashed border-border rounded-lg"
+        >
+          <Wand2 className="w-12 h-12 mb-4 text-muted-foreground" />
+          <Text color="gray">
             Click "Extract Recipes" to analyze {brandRefs.length} brand reference{brandRefs.length !== 1 ? 's' : ''}
-          </p>
-        </div>
+          </Text>
+        </Flex>
       )}
 
       {recipes.length > 0 && (
         <div className="grid lg:grid-cols-2 gap-6">
           {/* Recipe List */}
-          <div className="space-y-2 max-h-[600px] overflow-y-auto scrollbar-thin pr-2">
-            <h3 className="text-sm font-medium text-muted-foreground mb-3">
-              {recipes.length} recipes extracted
-            </h3>
+          <Flex direction="column" gap="2" className="max-h-[600px] overflow-y-auto scrollbar-thin pr-2">
+            <Text size="2" color="gray" mb="2">
+              <Badge color="lime" variant="soft" mr="2">{recipes.length}</Badge>
+              recipes extracted
+            </Text>
             {recipes.map((recipe) => (
-              <div
+              <Card
                 key={recipe.id}
                 className={cn(
-                  "recipe-card flex items-center gap-3",
-                  selectedRecipeId === recipe.id && "selected"
+                  "cursor-pointer transition-all hover:border-primary/50",
+                  selectedRecipeId === recipe.id && "border-primary bg-primary/5"
                 )}
                 onClick={() => setSelectedRecipeId(recipe.id)}
               >
-                <div className={cn(
-                  "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold",
-                  intensityColors[recipe.recipe_json.intensity as keyof typeof intensityColors] || intensityColors[1]
-                )}>
-                  {recipe.recipe_json.intensity}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{recipe.name}</p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {recipe.recipe_json.emotionLabel}
-                  </p>
-                </div>
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-              </div>
+                <Flex align="center" gap="3" p="3">
+                  <Badge 
+                    size="2" 
+                    color={recipe.recipe_json.intensity >= 2 ? "orange" : "lime"}
+                    variant="soft"
+                    radius="full"
+                  >
+                    {recipe.recipe_json.intensity}
+                  </Badge>
+                  <Box className="flex-1 min-w-0">
+                    <Text weight="medium" className="block truncate">{recipe.name}</Text>
+                    <Text size="1" color="gray" className="truncate">
+                      {recipe.recipe_json.emotionLabel}
+                    </Text>
+                  </Box>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                </Flex>
+              </Card>
             ))}
-          </div>
+          </Flex>
 
           {/* Recipe Detail */}
-          <div className="border border-border rounded-lg p-4 bg-muted/20">
+          <Card variant="surface" className="p-4">
             {selectedRecipe ? (
               <RecipeDetail 
                 recipe={selectedRecipe}
@@ -150,14 +152,14 @@ export function ExtractRecipesStep({
                 copied={copiedId === selectedRecipe.id}
               />
             ) : (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
-                Select a recipe to view details
-              </div>
+              <Flex align="center" justify="center" className="h-full min-h-[200px]">
+                <Text color="gray">Select a recipe to view details</Text>
+              </Flex>
             )}
-          </div>
+          </Card>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -199,88 +201,89 @@ function RecipeDetail({
   ] as const;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">{recipe.name}</h3>
-        <div className="flex gap-2">
+    <Flex direction="column" gap="4">
+      <Flex align="center" justify="between">
+        <Heading size="4">{recipe.name}</Heading>
+        <Flex gap="2">
           {isEditing ? (
             <>
-              <Button size="sm" variant="ghost" onClick={onCancel}>
+              <IconButton variant="ghost" onClick={onCancel}>
                 <X className="w-4 h-4" />
-              </Button>
-              <Button size="sm" onClick={() => onSave(editedRecipe)}>
-                <Save className="w-4 h-4 mr-1" />
+              </IconButton>
+              <Button size="2" onClick={() => onSave(editedRecipe)}>
+                <Save className="w-4 h-4" />
                 Save
               </Button>
             </>
           ) : (
-            <Button size="sm" variant="outline" onClick={onEdit}>
-              <Edit3 className="w-4 h-4 mr-1" />
+            <Button size="2" variant="soft" onClick={onEdit}>
+              <Edit3 className="w-4 h-4" />
               Edit
             </Button>
           )}
-        </div>
-      </div>
+        </Flex>
+      </Flex>
 
       <div className="grid grid-cols-2 gap-3 text-sm">
         {fields.map(({ key, label }) => (
-          <div key={key}>
-            <span className="text-muted-foreground">{label}:</span>
+          <Box key={key}>
+            <Text size="1" color="gray">{label}:</Text>
             {isEditing ? (
-              <Input
+              <TextField.Root
                 value={editedRecipe.recipe_json[key] || ''}
                 onChange={(e) => setEditedRecipe({
                   ...editedRecipe,
                   recipe_json: { ...editedRecipe.recipe_json, [key]: e.target.value }
                 })}
-                className="mt-1 h-8 text-sm"
+                size="1"
+                className="mt-1"
               />
             ) : (
-              <p className="font-medium">{recipe.recipe_json[key] || '—'}</p>
+              <Text weight="medium" className="block">{recipe.recipe_json[key] || '—'}</Text>
             )}
-          </div>
+          </Box>
         ))}
-        <div>
-          <span className="text-muted-foreground">Intensity:</span>
-          <p className="font-medium">{recipe.recipe_json.intensity}/3</p>
-        </div>
+        <Box>
+          <Text size="1" color="gray">Intensity:</Text>
+          <Text weight="medium">{recipe.recipe_json.intensity}/3</Text>
+        </Box>
       </div>
 
-      <div>
-        <span className="text-sm text-muted-foreground">Delta Line:</span>
+      <Box>
+        <Text size="1" color="gray">Delta Line:</Text>
         {isEditing ? (
-          <Textarea
+          <TextArea
             value={editedRecipe.delta_line || ''}
             onChange={(e) => setEditedRecipe({ ...editedRecipe, delta_line: e.target.value })}
             className="mt-1 text-sm font-mono"
             rows={2}
           />
         ) : (
-          <p className="mt-1 text-sm font-mono bg-muted/50 p-2 rounded">
+          <Box className="mt-1 text-sm font-mono bg-muted/50 p-2 rounded">
             {recipe.delta_line || 'No delta line'}
-          </p>
+          </Box>
         )}
-      </div>
+      </Box>
 
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-muted-foreground">Full Prompt:</span>
-          <Button 
-            size="sm" 
+      <Box>
+        <Flex align="center" justify="between" mb="2">
+          <Text size="1" color="gray">Full Prompt:</Text>
+          <IconButton 
             variant="ghost" 
+            size="1"
             onClick={() => onCopy(fullPrompt)}
           >
             {copied ? (
-              <Check className="w-4 h-4 text-success" />
+              <Check className="w-4 h-4 text-green-500" />
             ) : (
               <Copy className="w-4 h-4" />
             )}
-          </Button>
-        </div>
-        <div className="prompt-display text-xs max-h-40 overflow-y-auto scrollbar-thin">
+          </IconButton>
+        </Flex>
+        <Box className="prompt-display text-xs max-h-40 overflow-y-auto scrollbar-thin">
           {fullPrompt}
-        </div>
-      </div>
-    </div>
+        </Box>
+      </Box>
+    </Flex>
   );
 }
