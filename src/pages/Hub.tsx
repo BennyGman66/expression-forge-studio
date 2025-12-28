@@ -1,16 +1,8 @@
 import { useNavigate } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
-import { Grid3X3, Film, MapPin, Users } from "lucide-react";
+import { Grid3X3, Users } from "lucide-react";
 
 const apps = [
-  {
-    id: "internal",
-    title: "Internal",
-    description: "Leapfrog internal tooling",
-    icon: Grid3X3,
-    path: null, // Not implemented yet
-    disabled: true,
-  },
   {
     id: "expression-map",
     title: "Expression Map",
@@ -20,26 +12,18 @@ const apps = [
     disabled: false,
   },
   {
-    id: "image2video",
-    title: "Image2Video",
-    description: "Create videos from images at scale.",
-    icon: Film,
-    path: null,
-    disabled: true,
-  },
-  {
-    id: "studio-to-setting",
-    title: "Studio to Setting",
-    description: "Place talent at location without the travel.",
-    icon: MapPin,
-    path: null,
-    disabled: true,
-  },
-  {
-    id: "talent-replacement",
-    title: "Talent Replacement",
-    description: "Create PDP using digital talent.",
+    id: "avatar-repose",
+    title: "Avatar Repose",
+    description: "Repose digital avatars with new poses and expressions.",
     icon: Users,
+    path: null,
+    disabled: true,
+  },
+  {
+    id: "face-creator",
+    title: "Face Creator",
+    description: "Create and customize digital faces from scratch.",
+    icon: Grid3X3,
     path: null,
     disabled: true,
   },
