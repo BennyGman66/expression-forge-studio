@@ -8,14 +8,22 @@ const corsHeaders = {
 
 interface GenerationRequest {
   projectId: string;
-  prompts: {
+  jobId?: string;
+  promptIndex: number;
+  prompt: {
     modelId: string;
     modelName: string;
     recipeId: string;
     recipeName: string;
     fullPrompt: string;
     modelRefUrl: string;
-  }[];
+  };
+  total: number;
+}
+
+interface CreateJobRequest {
+  projectId: string;
+  total: number;
 }
 
 serve(async (req) => {
@@ -38,274 +46,289 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { projectId, prompts }: GenerationRequest = await req.json();
+    const body = await req.json();
 
-    if (!projectId || !prompts || prompts.length === 0) {
+    // Check if this is a "create job" request
+    if (body.action === "create-job") {
+      const { projectId, total } = body as CreateJobRequest;
+      
+      const { data: job, error: jobError } = await supabase
+        .from("jobs")
+        .insert({
+          project_id: projectId,
+          type: "generate",
+          status: "running",
+          progress: 0,
+          total: total,
+          logs: [],
+        })
+        .select()
+        .single();
+
+      if (jobError) {
+        console.error("Failed to create job:", jobError);
+        return new Response(
+          JSON.stringify({ error: "Failed to create job" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       return new Response(
-        JSON.stringify({ error: "Missing projectId or prompts" }),
+        JSON.stringify({ success: true, jobId: job.id }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Otherwise this is a single image generation request
+    const { projectId, jobId, promptIndex, prompt, total }: GenerationRequest = body;
+
+    if (!projectId || !prompt || !jobId) {
+      return new Response(
+        JSON.stringify({ error: "Missing projectId, jobId, or prompt" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Starting generation of ${prompts.length} images for project ${projectId}`);
-
-    // Create a job to track progress
-    const { data: job, error: jobError } = await supabase
+    // Check job status first
+    const { data: currentJob } = await supabase
       .from("jobs")
-      .insert({
-        project_id: projectId,
-        type: "generate",
-        status: "running",
-        progress: 0,
-        total: prompts.length,
-        logs: [],
-      })
-      .select()
+      .select("status, result, logs")
+      .eq("id", jobId)
       .single();
 
-    if (jobError) {
-      console.error("Failed to create job:", jobError);
+    if (currentJob?.status === "stopped") {
       return new Response(
-        JSON.stringify({ error: "Failed to create job" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ success: false, stopped: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Created job ${job.id}`);
+    // Check for skip_current flag
+    const jobResult = currentJob?.result as { skip_current?: boolean } | null;
+    if (jobResult?.skip_current) {
+      // Clear the skip flag and return skipped
+      await supabase
+        .from("jobs")
+        .update({
+          result: { ...jobResult, skip_current: false },
+          progress: promptIndex + 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", jobId);
+      
+      return new Response(
+        JSON.stringify({ success: true, skipped: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    // Process images in background
-    const processImages = async () => {
-      const results: any[] = [];
-      const logs: string[] = [];
+    const logEntry = `[${promptIndex + 1}/${total}] Generating ${prompt.recipeName} for ${prompt.modelName}`;
+    console.log(logEntry);
+    
+    // Get existing logs and append
+    const existingLogs = Array.isArray(currentJob?.logs) ? currentJob.logs : [];
+    const logs = [...existingLogs, logEntry].slice(-50);
 
-      for (let i = 0; i < prompts.length; i++) {
-        // Check if job was stopped or should skip current
-        const { data: currentJob } = await supabase
-          .from("jobs")
-          .select("status, result")
-          .eq("id", job.id)
-          .single();
+    // Update job with current status
+    await supabase
+      .from("jobs")
+      .update({
+        logs,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", jobId);
 
-        if (currentJob?.status === "stopped") {
-          console.log(`Job ${job.id} was stopped by user`);
-          logs.push("⏹ Generation stopped by user");
-          break;
-        }
+    try {
+      // Create abort controller with 60 second timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-        // Check for skip_current flag
-        const jobResult = currentJob?.result as { skip_current?: boolean } | null;
-        if (jobResult?.skip_current) {
-          console.log(`Skipping prompt ${i + 1}`);
-          logs.push(`⏭ Skipped ${prompts[i].recipeName} for ${prompts[i].modelName}`);
-          
-          // Clear the skip flag
-          await supabase
-            .from("jobs")
-            .update({ 
-              result: { ...jobResult, skip_current: false },
-              progress: i + 1,
-              logs: logs.slice(-50),
-              updated_at: new Date().toISOString()
-            })
-            .eq("id", job.id);
-          continue;
-        }
-
-        const prompt = prompts[i];
-        const logEntry = `[${i + 1}/${prompts.length}] Generating ${prompt.recipeName} for ${prompt.modelName}`;
-        console.log(logEntry);
-        logs.push(logEntry);
-
-        // Update job with current status immediately so UI shows progress
-        await supabase
-          .from("jobs")
-          .update({
-            logs: logs.slice(-50),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", job.id);
-
-        try {
-          // Create abort controller with 90 second timeout
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 90000);
-
-          // Call Gemini 3 Pro Image for generation
-          const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${LOVABLE_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "google/gemini-3-pro-image-preview",
-              messages: [
+      // Call Gemini 3 Pro Image for generation
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3-pro-image-preview",
+          messages: [
+            {
+              role: "user",
+              content: [
                 {
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: prompt.fullPrompt,
-                    },
-                    {
-                      type: "image_url",
-                      image_url: {
-                        url: prompt.modelRefUrl,
-                      },
-                    },
-                  ],
+                  type: "text",
+                  text: prompt.fullPrompt,
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: prompt.modelRefUrl,
+                  },
                 },
               ],
-              modalities: ["image", "text"],
-            }),
-            signal: controller.signal,
-          });
+            },
+          ],
+          modalities: ["image", "text"],
+        }),
+        signal: controller.signal,
+      });
 
-          clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
 
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`Generation failed for prompt ${i}:`, response.status, errorText);
-            
-            if (response.status === 429) {
-              logs.push(`Rate limited, waiting...`);
-              await new Promise(r => setTimeout(r, 5000));
-              i--; // Retry this prompt
-              continue;
-            }
-            
-            if (response.status === 402) {
-              logs.push(`Credits exhausted`);
-              break;
-            }
-
-            // Create failed output record
-            await supabase.from("outputs").insert({
-              project_id: projectId,
-              digital_model_id: prompt.modelId,
-              recipe_id: prompt.recipeId,
-              prompt_used: prompt.fullPrompt,
-              status: "failed",
-              metrics_json: { error: errorText },
-            });
-            continue;
-          }
-
-          const data = await response.json();
-          const imageData = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-
-          if (!imageData) {
-            console.error(`No image returned for prompt ${i}`);
-            logs.push(`No image returned`);
-            continue;
-          }
-
-          // Upload base64 image to storage
-          const base64Data = imageData.replace(/^data:image\/\w+;base64,/, "");
-          const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-          const fileName = `projects/${projectId}/outputs/${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
-
-          const { error: uploadError } = await supabase.storage
-            .from("images")
-            .upload(fileName, imageBytes, {
-              contentType: "image/png",
-              upsert: false,
-            });
-
-          if (uploadError) {
-            console.error("Upload error:", uploadError);
-            logs.push(`Upload failed: ${uploadError.message}`);
-            continue;
-          }
-
-          const { data: { publicUrl } } = supabase.storage
-            .from("images")
-            .getPublicUrl(fileName);
-
-          // Save output record
-          const { data: output, error: outputError } = await supabase
-            .from("outputs")
-            .insert({
-              project_id: projectId,
-              digital_model_id: prompt.modelId,
-              recipe_id: prompt.recipeId,
-              prompt_used: prompt.fullPrompt,
-              image_url: publicUrl,
-              status: "completed",
-            })
-            .select()
-            .single();
-
-          if (outputError) {
-            console.error("Failed to save output:", outputError);
-          } else {
-            results.push(output);
-            logs.push(`✓ Generated successfully`);
-          }
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : "Unknown error";
-          console.error(`Error processing prompt ${i}:`, err);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Generation failed:`, response.status, errorText);
+        
+        if (response.status === 429) {
+          // Rate limited - tell client to retry after delay
+          return new Response(
+            JSON.stringify({ success: false, rateLimited: true, retryAfter: 5000 }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        
+        if (response.status === 402) {
+          // Credits exhausted
+          const updatedLogs = [...logs, "❌ Credits exhausted"];
+          await supabase.from("jobs").update({ 
+            status: "failed",
+            logs: updatedLogs.slice(-50),
+            updated_at: new Date().toISOString()
+          }).eq("id", jobId);
           
-          // Check if it was aborted (timeout or skip)
-          if (err instanceof Error && err.name === "AbortError") {
-            logs.push(`⏱ Timed out, skipping...`);
-          } else {
-            logs.push(`Error: ${errorMessage}`);
-          }
+          return new Response(
+            JSON.stringify({ success: false, creditsExhausted: true }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
         }
 
-        // Update job progress
-        await supabase
-          .from("jobs")
-          .update({
-            progress: i + 1,
-            logs: logs.slice(-50), // Keep last 50 log entries
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", job.id);
+        // Create failed output record
+        await supabase.from("outputs").insert({
+          project_id: projectId,
+          digital_model_id: prompt.modelId,
+          recipe_id: prompt.recipeId,
+          prompt_used: prompt.fullPrompt,
+          status: "failed",
+          metrics_json: { error: errorText },
+        });
 
-        // Small delay between requests to avoid rate limiting
-        if (i < prompts.length - 1) {
-          await new Promise(r => setTimeout(r, 1000));
-        }
+        const updatedLogs = [...logs, `❌ Failed: ${response.status}`];
+        await supabase.from("jobs").update({ 
+          progress: promptIndex + 1,
+          logs: updatedLogs.slice(-50),
+          updated_at: new Date().toISOString()
+        }).eq("id", jobId);
+
+        return new Response(
+          JSON.stringify({ success: false, error: errorText }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
 
-      // Check final status before marking complete
-      const { data: finalJob } = await supabase
-        .from("jobs")
-        .select("status")
-        .eq("id", job.id)
+      const data = await response.json();
+      const imageData = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+
+      if (!imageData) {
+        console.error("No image returned");
+        const updatedLogs = [...logs, "❌ No image returned"];
+        await supabase.from("jobs").update({ 
+          progress: promptIndex + 1,
+          logs: updatedLogs.slice(-50),
+          updated_at: new Date().toISOString()
+        }).eq("id", jobId);
+
+        return new Response(
+          JSON.stringify({ success: false, error: "No image returned" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Upload base64 image to storage
+      const base64Data = imageData.replace(/^data:image\/\w+;base64,/, "");
+      const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+      const fileName = `projects/${projectId}/outputs/${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("images")
+        .upload(fileName, imageBytes, {
+          contentType: "image/png",
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("Upload error:", uploadError);
+        const updatedLogs = [...logs, `❌ Upload failed: ${uploadError.message}`];
+        await supabase.from("jobs").update({ 
+          progress: promptIndex + 1,
+          logs: updatedLogs.slice(-50),
+          updated_at: new Date().toISOString()
+        }).eq("id", jobId);
+
+        return new Response(
+          JSON.stringify({ success: false, error: uploadError.message }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("images")
+        .getPublicUrl(fileName);
+
+      // Save output record
+      const { data: output, error: outputError } = await supabase
+        .from("outputs")
+        .insert({
+          project_id: projectId,
+          digital_model_id: prompt.modelId,
+          recipe_id: prompt.recipeId,
+          prompt_used: prompt.fullPrompt,
+          image_url: publicUrl,
+          status: "completed",
+        })
+        .select()
         .single();
 
-      // Only mark as completed if not already stopped
-      if (finalJob?.status !== "stopped") {
-        await supabase
-          .from("jobs")
-          .update({
-            status: "completed",
-            progress: prompts.length,
-            result: { generated: results.length, total: prompts.length },
-            logs: logs.slice(-50),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", job.id);
+      if (outputError) {
+        console.error("Failed to save output:", outputError);
       }
 
-      console.log(`Job ${job.id} finished: ${results.length}/${prompts.length} images generated`);
-    };
+      // Update job progress with success
+      const updatedLogs = [...logs, "✓ Generated successfully"];
+      await supabase.from("jobs").update({
+        progress: promptIndex + 1,
+        logs: updatedLogs.slice(-50),
+        updated_at: new Date().toISOString(),
+      }).eq("id", jobId);
 
-    // Start background processing
-    (globalThis as any).EdgeRuntime?.waitUntil?.(processImages()) ?? processImages();
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          output,
+          imageUrl: publicUrl
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.error(`Error processing:`, err);
+      
+      const logMessage = err instanceof Error && err.name === "AbortError" 
+        ? "⏱ Timed out" 
+        : `❌ Error: ${errorMessage}`;
+      
+      const updatedLogs = [...logs, logMessage];
+      await supabase.from("jobs").update({
+        progress: promptIndex + 1,
+        logs: updatedLogs.slice(-50),
+        updated_at: new Date().toISOString(),
+      }).eq("id", jobId);
 
-    // Return immediately with job ID
-    return new Response(
-      JSON.stringify({ 
-        success: true, 
-        jobId: job.id,
-        message: `Started generating ${prompts.length} images` 
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+      return new Response(
+        JSON.stringify({ success: false, error: errorMessage }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("Generate images error:", error);
