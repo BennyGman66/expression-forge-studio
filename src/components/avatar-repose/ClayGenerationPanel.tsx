@@ -7,7 +7,13 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, Palette, Image as ImageIcon, Trash2 } from "lucide-react";
+import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import type { Brand, ProductImage, ClayImage, ImageSlot } from "@/types/avatar-repose";
 
@@ -148,6 +154,28 @@ export function ClayGenerationPanel() {
     }
   };
 
+  const handleMoveToSlot = async (imageId: string, newSlot: string) => {
+    try {
+      const { error } = await supabase
+        .from("product_images")
+        .update({ slot: newSlot })
+        .eq("id", imageId);
+
+      if (error) throw error;
+
+      // Update local state
+      setProductImages((prev) =>
+        prev.map((img) =>
+          img.id === imageId ? { ...img, slot: newSlot } : img
+        )
+      );
+      toast.success(`Moved to slot ${newSlot}`);
+    } catch (err) {
+      console.error("Move error:", err);
+      toast.error("Failed to move image");
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Controls */}
@@ -264,14 +292,37 @@ export function ClayGenerationPanel() {
                               <ImageIcon className="w-8 h-8 text-muted-foreground" />
                             </div>
                           )}
-                          <Button
-                            variant="destructive"
-                            size="icon"
-                            className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={() => handleDeleteImage(img.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="secondary"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                >
+                                  <ArrowRightLeft className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent>
+                                {slots.filter((s) => s !== img.slot).map((s) => (
+                                  <DropdownMenuItem
+                                    key={s}
+                                    onClick={() => handleMoveToSlot(img.id, s)}
+                                  >
+                                    Move to {s} ({slotLabels[s]})
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <Button
+                              variant="destructive"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => handleDeleteImage(img.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                         {clay && (
                           <div className="aspect-[3/4] rounded-lg overflow-hidden bg-muted border border-primary/50">
