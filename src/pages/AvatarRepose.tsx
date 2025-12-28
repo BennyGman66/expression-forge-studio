@@ -5,7 +5,8 @@ import { BrandIngestPanel } from "@/components/avatar-repose/BrandIngestPanel";
 import { ClayGenerationPanel } from "@/components/avatar-repose/ClayGenerationPanel";
 import { TalentLibraryPanel } from "@/components/avatar-repose/TalentLibraryPanel";
 import { PoseGeneratorPanel } from "@/components/avatar-repose/PoseGeneratorPanel";
-import { Globe, Palette, Users, Sparkles } from "lucide-react";
+import { ClayPoseLibrary } from "@/components/avatar-repose/ClayPoseLibrary";
+import { Globe, Palette, Users, Sparkles, Library } from "lucide-react";
 
 export default function AvatarRepose() {
   const [activeTab, setActiveTab] = useState("ingest");
@@ -33,6 +34,10 @@ export default function AvatarRepose() {
                 <Palette className="w-4 h-4" />
                 Clay Generation
               </TabsTrigger>
+              <TabsTrigger value="library" className="gap-2">
+                <Library className="w-4 h-4" />
+                Clay Pose Library
+              </TabsTrigger>
               <TabsTrigger value="talent" className="gap-2">
                 <Users className="w-4 h-4" />
                 Talent Library
@@ -49,6 +54,10 @@ export default function AvatarRepose() {
 
             <TabsContent value="clay">
               <ClayGenerationPanel />
+            </TabsContent>
+
+            <TabsContent value="library">
+              <ClayPoseLibrary />
             </TabsContent>
 
             <TabsContent value="talent">

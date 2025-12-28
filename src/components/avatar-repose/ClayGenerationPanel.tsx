@@ -311,11 +311,14 @@ export function ClayGenerationPanel() {
         )}
       </Card>
 
-      {/* Image Gallery by Slot */}
+      {/* Image Gallery by Slot - Shows only images without clay versions */}
       {selectedBrand && (
         <div className="space-y-6">
           {slots.map((slot) => {
-            const slotImages = getImagesForSlot(slot);
+            const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
+            const slotImages = getImagesForSlot(slot).filter(
+              (img) => !existingClayIds.has(img.id)
+            );
             if (!selectedSlots.has(slot) || slotImages.length === 0) return null;
 
             return (
@@ -324,71 +327,59 @@ export function ClayGenerationPanel() {
                   <Badge variant="outline">{slot}</Badge>
                   <span className="text-sm font-medium">{slotLabels[slot]}</span>
                   <span className="text-sm text-muted-foreground">
-                    ({slotImages.length} images)
+                    ({slotImages.length} pending)
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                  {slotImages.slice(0, 12).map((img) => {
-                    const clay = getClayForImage(img.id);
-                    return (
-                      <div key={img.id} className="space-y-2 group relative">
-                        <div className="aspect-[3/4] rounded-lg overflow-hidden bg-muted border relative">
-                          {img.stored_url ? (
-                            <img
-                              src={img.stored_url}
-                              alt="Product"
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <ImageIcon className="w-8 h-8 text-muted-foreground" />
-                            </div>
-                          )}
-                          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="secondary"
-                                  size="icon"
-                                  className="h-7 w-7"
-                                >
-                                  <ArrowRightLeft className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent>
-                                {slots.filter((s) => s !== img.slot).map((s) => (
-                                  <DropdownMenuItem
-                                    key={s}
-                                    onClick={() => handleMoveToSlot(img.id, s)}
-                                  >
-                                    Move to {s} ({slotLabels[s]})
-                                  </DropdownMenuItem>
-                                ))}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                            <Button
-                              variant="destructive"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => handleDeleteImage(img.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        {clay && (
-                          <div className="aspect-[3/4] rounded-lg overflow-hidden bg-muted border border-primary/50">
-                            <img
-                              src={clay.stored_url}
-                              alt="Clay model"
-                              className="w-full h-full object-cover"
-                            />
+                  {slotImages.slice(0, 12).map((img) => (
+                    <div key={img.id} className="space-y-2 group relative">
+                      <div className="aspect-[3/4] rounded-lg overflow-hidden bg-muted border relative">
+                        {img.stored_url ? (
+                          <img
+                            src={img.stored_url}
+                            alt="Product"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <ImageIcon className="w-8 h-8 text-muted-foreground" />
                           </div>
                         )}
+                        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="secondary"
+                                size="icon"
+                                className="h-7 w-7"
+                              >
+                                <ArrowRightLeft className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent>
+                              {slots.filter((s) => s !== img.slot).map((s) => (
+                                <DropdownMenuItem
+                                  key={s}
+                                  onClick={() => handleMoveToSlot(img.id, s)}
+                                >
+                                  Move to {s} ({slotLabels[s]})
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                          <Button
+                            variant="destructive"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => handleDeleteImage(img.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               </div>
             );
@@ -402,6 +393,24 @@ export function ClayGenerationPanel() {
           <p>No product images found</p>
           <p className="text-sm">Scrape a brand first to get images</p>
         </Card>
+      )}
+
+      {selectedBrand && productImages.length > 0 && (
+        (() => {
+          const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
+          const pendingCount = productImages.filter((img) => !existingClayIds.has(img.id)).length;
+          const completedCount = clayImages.length;
+          
+          return pendingCount === 0 ? (
+            <Card className="p-6 text-center border-primary/30 bg-primary/5">
+              <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-primary" />
+              <p className="font-medium">All images have clay versions</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {completedCount} clay poses ready in the library
+              </p>
+            </Card>
+          ) : null;
+        })()
       )}
     </div>
   );
