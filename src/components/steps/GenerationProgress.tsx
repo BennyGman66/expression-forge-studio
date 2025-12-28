@@ -114,9 +114,9 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
     fetchJobs();
     fetchOutputs();
 
-    // Subscribe to job updates
+    // Subscribe to job updates with unique channel name
     const jobChannel = supabase
-      .channel("job-updates")
+      .channel(`job-updates-${projectId}`)
       .on(
         "postgres_changes",
         {
@@ -126,6 +126,7 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
           filter: `project_id=eq.${projectId}`,
         },
         (payload) => {
+          console.log("Job update received:", payload);
           if (payload.eventType === "INSERT") {
             setJobs((prev) => [payload.new as Job, ...prev].slice(0, 5));
           } else if (payload.eventType === "UPDATE") {
@@ -133,6 +134,8 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
               prev.map((j) => (j.id === payload.new.id ? (payload.new as Job) : j))
             );
           }
+          // Refetch to ensure we have latest data
+          fetchJobs();
         }
       )
       .subscribe();
