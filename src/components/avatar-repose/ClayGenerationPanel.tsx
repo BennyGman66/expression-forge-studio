@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Loader2, Palette, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
-import type { Brand, ProductImage, ClayImage } from "@/types/avatar-repose";
+import type { Brand, ProductImage, ClayImage, ImageSlot } from "@/types/avatar-repose";
 
 export function ClayGenerationPanel() {
   const [brands, setBrands] = useState<Brand[]>([]);
