@@ -116,7 +116,20 @@ serve(async (req) => {
         console.log(logEntry);
         logs.push(logEntry);
 
+        // Update job with current status immediately so UI shows progress
+        await supabase
+          .from("jobs")
+          .update({
+            logs: logs.slice(-50),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", job.id);
+
         try {
+          // Create abort controller with 90 second timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 90000);
+
           // Call Gemini 3 Pro Image for generation
           const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
             method: "POST",
@@ -145,7 +158,10 @@ serve(async (req) => {
               ],
               modalities: ["image", "text"],
             }),
+            signal: controller.signal,
           });
+
+          clearTimeout(timeoutId);
 
           if (!response.ok) {
             const errorText = await response.text();
@@ -229,7 +245,13 @@ serve(async (req) => {
         } catch (err) {
           const errorMessage = err instanceof Error ? err.message : "Unknown error";
           console.error(`Error processing prompt ${i}:`, err);
-          logs.push(`Error: ${errorMessage}`);
+          
+          // Check if it was aborted (timeout or skip)
+          if (err instanceof Error && err.name === "AbortError") {
+            logs.push(`⏱ Timed out, skipping...`);
+          } else {
+            logs.push(`Error: ${errorMessage}`);
+          }
         }
 
         // Update job progress
