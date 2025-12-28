@@ -195,25 +195,25 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
           )}
           
           {/* Skip and Stop Controls */}
-          <div className="mt-3 flex gap-2">
+          <div className="mt-4 flex gap-2">
             <Button 
-              variant="outline" 
+              variant="secondary" 
               size="sm" 
               onClick={handleSkipCurrent}
               disabled={isSkipping}
-              className="flex-1"
+              className="flex-1 gap-2"
             >
-              <SkipForward className="w-4 h-4 mr-2" />
+              <SkipForward className="w-3.5 h-3.5" />
               {isSkipping ? "Skipping..." : "Skip Current"}
             </Button>
             <Button 
-              variant="destructive" 
+              variant="outline" 
               size="sm" 
               onClick={handleStopGeneration}
               disabled={isStopping}
-              className="flex-1"
+              className="flex-1 gap-2 border-muted-foreground/30 text-muted-foreground hover:text-foreground hover:bg-secondary"
             >
-              <Square className="w-4 h-4 mr-2" />
+              <Square className="w-3.5 h-3.5" />
               {isStopping ? "Stopping..." : "Stop & Keep"}
             </Button>
           </div>
