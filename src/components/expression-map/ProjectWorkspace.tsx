@@ -216,23 +216,81 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
         toast.info(`Starting generation of ${prompts.length} images...`);
       }
 
-      const { data, error } = await supabase.functions.invoke("generate-images", {
+      // Step 1: Create the job first
+      const { data: jobData, error: jobError } = await supabase.functions.invoke("generate-images", {
         body: {
+          action: "create-job",
           projectId: project.id,
-          prompts,
+          total: prompts.length,
         },
       });
 
-      if (error) {
-        console.error("Generation error:", error);
-        toast.error("Failed to start generation: " + error.message);
+      if (jobError || !jobData?.jobId) {
+        console.error("Failed to create job:", jobError);
+        toast.error("Failed to start generation");
         setIsGenerating(false);
         return;
       }
 
-      if (data?.jobId) {
-        toast.success(`Generation started! Job ID: ${data.jobId}`);
-      }
+      const jobId = jobData.jobId;
+      toast.success(`Generation started! Processing ${prompts.length} images...`);
+
+      // Step 2: Process prompts one at a time from the frontend
+      // This runs in the background - we don't await the whole loop
+      (async () => {
+        for (let i = 0; i < prompts.length; i++) {
+          try {
+            const response = await supabase.functions.invoke("generate-images", {
+              body: {
+                projectId: project.id,
+                jobId,
+                promptIndex: i,
+                prompt: prompts[i],
+                total: prompts.length,
+              },
+            });
+
+            if (response.error) {
+              console.error(`Error on prompt ${i}:`, response.error);
+              continue;
+            }
+
+            const result = response.data;
+
+            // Handle rate limiting
+            if (result?.rateLimited) {
+              console.log("Rate limited, waiting...");
+              await new Promise(r => setTimeout(r, result.retryAfter || 5000));
+              i--; // Retry this prompt
+              continue;
+            }
+
+            // Handle stop/credits exhausted
+            if (result?.stopped || result?.creditsExhausted) {
+              console.log("Generation stopped or credits exhausted");
+              break;
+            }
+
+            // Small delay between requests
+            if (i < prompts.length - 1) {
+              await new Promise(r => setTimeout(r, 500));
+            }
+          } catch (err) {
+            console.error(`Error processing prompt ${i}:`, err);
+          }
+        }
+
+        // Mark job as completed
+        await supabase
+          .from("jobs")
+          .update({
+            status: "completed",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId)
+          .eq("status", "running"); // Only update if still running
+      })();
+
     } catch (err) {
       console.error("Generation error:", err);
       toast.error("Failed to start generation");
