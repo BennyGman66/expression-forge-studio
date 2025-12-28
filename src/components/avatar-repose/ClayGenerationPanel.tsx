@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, Palette, Image as ImageIcon } from "lucide-react";
+import { Loader2, Palette, Image as ImageIcon, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Brand, ProductImage, ClayImage, ImageSlot } from "@/types/avatar-repose";
 
@@ -122,6 +122,32 @@ export function ClayGenerationPanel() {
     return clayImages.find((c) => c.product_image_id === imageId);
   };
 
+  const handleDeleteImage = async (imageId: string) => {
+    try {
+      // First delete any clay images associated with this product image
+      await supabase
+        .from("clay_images")
+        .delete()
+        .eq("product_image_id", imageId);
+
+      // Then delete the product image
+      const { error } = await supabase
+        .from("product_images")
+        .delete()
+        .eq("id", imageId);
+
+      if (error) throw error;
+
+      // Update local state
+      setProductImages((prev) => prev.filter((img) => img.id !== imageId));
+      setClayImages((prev) => prev.filter((c) => c.product_image_id !== imageId));
+      toast.success("Image deleted");
+    } catch (err) {
+      console.error("Delete error:", err);
+      toast.error("Failed to delete image");
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Controls */}
@@ -225,8 +251,8 @@ export function ClayGenerationPanel() {
                   {slotImages.slice(0, 12).map((img) => {
                     const clay = getClayForImage(img.id);
                     return (
-                      <div key={img.id} className="space-y-2">
-                        <div className="aspect-[3/4] rounded-lg overflow-hidden bg-muted border">
+                      <div key={img.id} className="space-y-2 group relative">
+                        <div className="aspect-[3/4] rounded-lg overflow-hidden bg-muted border relative">
                           {img.stored_url ? (
                             <img
                               src={img.stored_url}
@@ -238,6 +264,14 @@ export function ClayGenerationPanel() {
                               <ImageIcon className="w-8 h-8 text-muted-foreground" />
                             </div>
                           )}
+                          <Button
+                            variant="destructive"
+                            size="icon"
+                            className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => handleDeleteImage(img.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                         {clay && (
                           <div className="aspect-[3/4] rounded-lg overflow-hidden bg-muted border border-primary/50">
