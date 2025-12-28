@@ -222,24 +222,42 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
 
       {/* Recent Jobs Summary */}
       {!activeJob && jobs.length > 0 && (
-        <div className="flex items-center gap-2 text-sm">
-          {jobs[0].status === "completed" ? (
-            <>
-              <CheckCircle className="w-4 h-4 text-green-500" />
-              <span>Last job completed</span>
-              {jobs[0].result && typeof jobs[0].result === 'object' && 'generated' in jobs[0].result && (
-                <span className="text-muted-foreground">
-                  ({(jobs[0].result as { generated: number; total: number }).generated}/
-                  {(jobs[0].result as { generated: number; total: number }).total} images)
-                </span>
-              )}
-            </>
-          ) : jobs[0].status === "failed" ? (
-            <>
-              <XCircle className="w-4 h-4 text-destructive" />
-              <span>Last job failed</span>
-            </>
-          ) : null}
+        <div className="p-3 rounded-lg bg-secondary/50 border border-border">
+          <div className="flex items-center gap-2 text-sm">
+            {jobs[0].status === "completed" ? (
+              <>
+                <CheckCircle className="w-4 h-4 text-primary" />
+                <span className="font-medium">Generation completed</span>
+                {jobs[0].result && typeof jobs[0].result === 'object' && 'generated' in jobs[0].result && (
+                  <span className="text-muted-foreground">
+                    ({(jobs[0].result as { generated: number; total: number }).generated}/
+                    {(jobs[0].result as { generated: number; total: number }).total} images)
+                  </span>
+                )}
+              </>
+            ) : jobs[0].status === "stopped" ? (
+              <>
+                <Square className="w-4 h-4 text-muted-foreground" />
+                <span className="font-medium">Generation stopped</span>
+                {jobs[0].result && typeof jobs[0].result === 'object' && 'generated' in jobs[0].result && (
+                  <span className="text-muted-foreground">
+                    ({(jobs[0].result as { generated: number; total: number }).generated}/
+                    {(jobs[0].result as { generated: number; total: number }).total} images generated)
+                  </span>
+                )}
+              </>
+            ) : jobs[0].status === "failed" ? (
+              <>
+                <XCircle className="w-4 h-4 text-destructive" />
+                <span className="font-medium">Generation failed</span>
+              </>
+            ) : null}
+          </div>
+          {jobs[0].status === "stopped" && jobs[0].result && typeof jobs[0].result === 'object' && 'total' in jobs[0].result && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Click "Generate Images" to resume — existing images will be skipped automatically.
+            </p>
+          )}
         </div>
       )}
 
