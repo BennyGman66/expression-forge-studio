@@ -114,6 +114,12 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
     fetchJobs();
     fetchOutputs();
 
+    // Auto-refresh polling every 3 seconds for reliable updates
+    const pollInterval = setInterval(() => {
+      fetchJobs();
+      fetchOutputs();
+    }, 3000);
+
     // Subscribe to job updates with unique channel name
     const jobChannel = supabase
       .channel(`job-updates-${projectId}`)
@@ -158,6 +164,7 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
       .subscribe();
 
     return () => {
+      clearInterval(pollInterval);
       supabase.removeChannel(jobChannel);
       supabase.removeChannel(outputChannel);
     };
