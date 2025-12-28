@@ -21,19 +21,19 @@ interface ProjectsGridProps {
   onDelete: (id: string) => void;
 }
 
-function ThumbnailGrid({ images, emptyCount = 3 }: { images: string[]; emptyCount?: number }) {
-  // Always show a grid - fill with empty placeholders if needed
+function ThumbnailGrid({ images, emptyCount = 4 }: { images: string[]; emptyCount?: number }) {
+  // Always show a 2x2 grid - fill with empty placeholders if needed
   const slots = [...images.slice(0, emptyCount)];
   while (slots.length < emptyCount) {
     slots.push('');
   }
 
   return (
-    <div className="flex-1 grid grid-rows-3 gap-1 h-full">
+    <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-1 h-full">
       {slots.map((url, idx) => (
         <div 
           key={idx}
-          className="w-full h-full bg-secondary/50 rounded-sm overflow-hidden"
+          className="aspect-square bg-secondary/50 rounded-sm overflow-hidden"
         >
           {url && (
             <img 
@@ -88,14 +88,14 @@ export function ProjectsGrid({ projects, onSelect, onDelete }: ProjectsGridProps
         result[id] = { brandRefs: [], modelRefs: [] };
       });
 
-      // Add brand refs (limit to 3)
+      // Add brand refs (limit to 4)
       (brandRefs || []).forEach(ref => {
-        if (result[ref.project_id] && result[ref.project_id].brandRefs.length < 3) {
+        if (result[ref.project_id] && result[ref.project_id].brandRefs.length < 4) {
           result[ref.project_id].brandRefs.push(ref.image_url);
         }
       });
 
-      // Map model refs to projects (limit to 3)
+      // Map model refs to projects (limit to 4)
       const modelToProject: Record<string, string> = {};
       (models || []).forEach(m => {
         modelToProject[m.id] = m.project_id;
@@ -103,7 +103,7 @@ export function ProjectsGrid({ projects, onSelect, onDelete }: ProjectsGridProps
 
       modelRefsData.forEach(ref => {
         const projectId = modelToProject[ref.digital_model_id];
-        if (projectId && result[projectId] && result[projectId].modelRefs.length < 3) {
+        if (projectId && result[projectId] && result[projectId].modelRefs.length < 4) {
           result[projectId].modelRefs.push(ref.image_url);
         }
       });
