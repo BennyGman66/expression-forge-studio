@@ -269,6 +269,7 @@ export default function Index() {
                 modelRefs={modelRefs}
                 recipes={recipes}
                 masterPrompt={masterPrompt}
+                projectId={currentProject.id}
                 onGenerate={handleGenerate}
                 isGenerating={isGenerating}
               />

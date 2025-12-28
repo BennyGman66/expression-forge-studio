@@ -5,7 +5,6 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { 
   Play, 
-  Download, 
   Copy, 
   FileJson, 
   FileSpreadsheet,
@@ -17,12 +16,14 @@ import { cn } from "@/lib/utils";
 import type { DigitalModel, ExpressionRecipe, DigitalModelRef } from "@/types";
 import { buildFullPrompt } from "@/lib/constants";
 import { toast } from "sonner";
+import { GenerationProgress } from "./GenerationProgress";
 
 interface GenerateStepProps {
   models: DigitalModel[];
   modelRefs: Record<string, DigitalModelRef[]>;
   recipes: ExpressionRecipe[];
   masterPrompt: string;
+  projectId: string;
   onGenerate: (payload: {
     modelIds: string[];
     recipeIds: string[];
@@ -36,6 +37,7 @@ export function GenerateStep({
   modelRefs,
   recipes,
   masterPrompt,
+  projectId,
   onGenerate,
   isGenerating,
 }: GenerateStepProps) {
@@ -361,6 +363,11 @@ export function GenerateStep({
             Preview Grid
           </Button>
         </div>
+      </div>
+
+      {/* Generation Progress & Outputs */}
+      <div className="mt-6">
+        <GenerationProgress projectId={projectId} />
       </div>
     </div>
   );
