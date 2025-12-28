@@ -114,10 +114,10 @@ export function ClayGenerationPanel() {
 
   const slots: ImageSlot[] = ["A", "B", "C", "D"];
   const slotLabels: Record<ImageSlot, string> = {
-    A: "Front",
-    B: "3/4 View",
+    A: "Cropped",
+    B: "Detail",
     C: "Back",
-    D: "Detail",
+    D: "Full Front",
   };
 
   const getImagesForSlot = (slot: string) => {
