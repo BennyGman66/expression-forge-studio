@@ -14,10 +14,10 @@ const apps = [
   {
     id: "avatar-repose",
     title: "Avatar Repose",
-    description: "Repose digital avatars with new poses and expressions.",
+    description: "Scrape brands, generate clay poses, transfer to digital talent.",
     icon: Users,
-    path: null,
-    disabled: true,
+    path: "/avatar-repose",
+    disabled: false,
   },
   {
     id: "face-creator",
