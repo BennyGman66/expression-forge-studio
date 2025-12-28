@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ImageUploader, ImageThumbnail } from "@/components/ImageUploader";
-import { Button } from "@/components/ui/button";
+import { Button, Flex, Text, Heading, Card, Box, Badge } from "@radix-ui/themes";
 import { Trash2, Image as ImageIcon } from "lucide-react";
 import type { BrandRef } from "@/types";
 
@@ -23,24 +23,24 @@ export function BrandRefsStep({
   const selectedRef = brandRefs.find(ref => ref.id === selectedId);
 
   return (
-    <div className="workflow-step animate-fade-in">
-      <div className="workflow-step-header">
+    <Card className="animate-fade-in" size="3">
+      <Flex align="center" gap="4" mb="4">
         <div className="step-indicator active">
           <ImageIcon className="w-4 h-4" />
         </div>
-        <div className="flex-1">
-          <h2 className="text-xl font-semibold">Brand Reference Images</h2>
-          <p className="text-sm text-muted-foreground mt-1">
+        <Box className="flex-1">
+          <Heading size="5">Brand Reference Images</Heading>
+          <Text size="2" color="gray" className="mt-1">
             Upload 10–15+ reference images from your brand photography to extract expression recipes
-          </p>
-        </div>
+          </Text>
+        </Box>
         {brandRefs.length > 0 && (
-          <Button variant="outline" size="sm" onClick={onClearAll}>
-            <Trash2 className="w-4 h-4 mr-2" />
+          <Button variant="soft" color="gray" onClick={onClearAll}>
+            <Trash2 className="w-4 h-4" />
             Clear All
           </Button>
         )}
-      </div>
+      </Flex>
 
       <ImageUploader 
         onUpload={onAddRefs} 
@@ -49,12 +49,13 @@ export function BrandRefsStep({
       />
 
       {brandRefs.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-muted-foreground">
-              {brandRefs.length} image{brandRefs.length !== 1 ? 's' : ''} uploaded
-            </h3>
-          </div>
+        <Flex direction="column" gap="4">
+          <Flex align="center" justify="between">
+            <Text size="2" color="gray">
+              <Badge color="lime" variant="soft" mr="2">{brandRefs.length}</Badge>
+              image{brandRefs.length !== 1 ? 's' : ''} uploaded
+            </Text>
+          </Flex>
           
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
             {brandRefs.map((ref) => (
@@ -68,26 +69,26 @@ export function BrandRefsStep({
               />
             ))}
           </div>
-        </div>
+        </Flex>
       )}
 
       {selectedRef && (
-        <div className="mt-6 p-4 rounded-lg bg-muted/30 border border-border">
-          <div className="flex gap-4">
+        <Card className="mt-6" variant="surface">
+          <Flex gap="4" p="3">
             <img 
               src={selectedRef.image_url} 
               alt={selectedRef.file_name || "Selected"} 
               className="w-32 h-32 object-cover rounded-lg"
             />
-            <div>
-              <h4 className="font-medium">{selectedRef.file_name || 'Image'}</h4>
-              <p className="text-sm text-muted-foreground mt-1">
+            <Box>
+              <Text weight="medium">{selectedRef.file_name || 'Image'}</Text>
+              <Text size="2" color="gray" className="mt-1">
                 Click "Extract Recipes" to analyze this and other images
-              </p>
-            </div>
-          </div>
-        </div>
+              </Text>
+            </Box>
+          </Flex>
+        </Card>
       )}
-    </div>
+    </Card>
   );
 }

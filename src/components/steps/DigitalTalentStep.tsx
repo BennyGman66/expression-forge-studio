@@ -1,14 +1,6 @@
 import { useState } from "react";
 import { ImageUploader, ImageThumbnail } from "@/components/ImageUploader";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { 
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Button, Flex, Text, Heading, TextField, Card, Box, IconButton, Dialog } from "@radix-ui/themes";
 import { Plus, Users, Trash2, Edit2, X, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DigitalModel, DigitalModelRef } from "@/types";
@@ -61,77 +53,80 @@ export function DigitalTalentStep({
   const selectedRefs = selectedModelId ? (modelRefs[selectedModelId] || []) : [];
 
   return (
-    <div className="workflow-step animate-fade-in">
-      <div className="workflow-step-header">
+    <Card className="animate-fade-in" size="3">
+      <Flex align="center" gap="4" mb="4">
         <div className="step-indicator active">
           <Users className="w-4 h-4" />
         </div>
-        <div className="flex-1">
-          <h2 className="text-xl font-semibold">Digital Talent Packs</h2>
-          <p className="text-sm text-muted-foreground mt-1">
+        <Box className="flex-1">
+          <Heading size="5">Digital Talent Packs</Heading>
+          <Text size="2" color="gray" className="mt-1">
             Create up to 4 digital model packs with reference images
-          </p>
-        </div>
-        <Dialog open={isCreating} onOpenChange={setIsCreating}>
-          <DialogTrigger asChild>
-            <Button variant="glow" disabled={models.length >= 4}>
+          </Text>
+        </Box>
+        <Dialog.Root open={isCreating} onOpenChange={setIsCreating}>
+          <Dialog.Trigger>
+            <Button disabled={models.length >= 4}>
               <Plus className="w-4 h-4" />
               Add Model
             </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create Digital Model</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 pt-4">
-              <Input
+          </Dialog.Trigger>
+          <Dialog.Content style={{ maxWidth: 400 }}>
+            <Dialog.Title>Create Digital Model</Dialog.Title>
+            <Flex direction="column" gap="4" pt="4">
+              <TextField.Root
                 placeholder="Model name (e.g., 'Alex', 'Model A')"
                 value={newModelName}
                 onChange={(e) => setNewModelName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
               />
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setIsCreating(false)}>
+              <Flex justify="end" gap="2">
+                <Button variant="soft" color="gray" onClick={() => setIsCreating(false)}>
                   Cancel
                 </Button>
                 <Button onClick={handleCreate} disabled={!newModelName.trim()}>
                   Create
                 </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+              </Flex>
+            </Flex>
+          </Dialog.Content>
+        </Dialog.Root>
+      </Flex>
 
       {models.length === 0 ? (
-        <div className="p-8 text-center border border-dashed border-border rounded-lg">
-          <Users className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-          <p className="text-muted-foreground">
+        <Flex 
+          direction="column" 
+          align="center" 
+          py="8" 
+          className="border border-dashed border-border rounded-lg"
+        >
+          <Users className="w-12 h-12 mb-4 text-muted-foreground" />
+          <Text color="gray">
             Create your first digital model to upload reference images
-          </p>
-        </div>
+          </Text>
+        </Flex>
       ) : (
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Model List */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-medium text-muted-foreground">
+          <Flex direction="column" gap="3">
+            <Text size="2" color="gray">
               {models.length}/4 models
-            </h3>
+            </Text>
             {models.map((model) => {
               const refs = modelRefs[model.id] || [];
               const isEditing = editingId === model.id;
               
               return (
-                <div
+                <Card
                   key={model.id}
                   className={cn(
-                    "model-card cursor-pointer",
+                    "cursor-pointer transition-all",
                     selectedModelId === model.id && "border-primary bg-primary/5"
                   )}
                   onClick={() => !isEditing && setSelectedModelId(model.id)}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-lg bg-muted overflow-hidden flex-shrink-0">
+                  <Flex align="center" gap="3" p="3">
+                    <Box className="w-12 h-12 rounded-lg bg-muted overflow-hidden flex-shrink-0">
                       {refs.length > 0 ? (
                         <img 
                           src={refs[0].image_url} 
@@ -139,19 +134,19 @@ export function DigitalTalentStep({
                           className="w-full h-full object-cover"
                         />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                          <Users className="w-5 h-5" />
-                        </div>
+                        <Flex align="center" justify="center" className="w-full h-full">
+                          <Users className="w-5 h-5 text-muted-foreground" />
+                        </Flex>
                       )}
-                    </div>
+                    </Box>
                     
-                    <div className="flex-1 min-w-0">
+                    <Box className="flex-1 min-w-0">
                       {isEditing ? (
-                        <div className="flex items-center gap-2">
-                          <Input
+                        <Flex align="center" gap="2">
+                          <TextField.Root
                             value={editName}
                             onChange={(e) => setEditName(e.target.value)}
-                            className="h-8"
+                            size="1"
                             autoFocus
                             onClick={(e) => e.stopPropagation()}
                             onKeyDown={(e) => {
@@ -159,39 +154,36 @@ export function DigitalTalentStep({
                               if (e.key === 'Escape') setEditingId(null);
                             }}
                           />
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            className="h-8 w-8"
+                          <IconButton 
+                            size="1" 
+                            variant="ghost"
                             onClick={(e) => { e.stopPropagation(); handleRename(model.id); }}
                           >
                             <Check className="w-4 h-4" />
-                          </Button>
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            className="h-8 w-8"
+                          </IconButton>
+                          <IconButton 
+                            size="1" 
+                            variant="ghost"
                             onClick={(e) => { e.stopPropagation(); setEditingId(null); }}
                           >
                             <X className="w-4 h-4" />
-                          </Button>
-                        </div>
+                          </IconButton>
+                        </Flex>
                       ) : (
                         <>
-                          <p className="font-medium truncate">{model.name}</p>
-                          <p className="text-xs text-muted-foreground">
+                          <Text weight="medium" className="block truncate">{model.name}</Text>
+                          <Text size="1" color="gray">
                             {refs.length} reference{refs.length !== 1 ? 's' : ''}
-                          </p>
+                          </Text>
                         </>
                       )}
-                    </div>
+                    </Box>
                     
                     {!isEditing && (
-                      <div className="flex gap-1">
-                        <Button
-                          size="icon"
+                      <Flex gap="1">
+                        <IconButton
+                          size="1"
                           variant="ghost"
-                          className="h-8 w-8"
                           onClick={(e) => {
                             e.stopPropagation();
                             setEditName(model.name);
@@ -199,31 +191,31 @@ export function DigitalTalentStep({
                           }}
                         >
                           <Edit2 className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="icon"
+                        </IconButton>
+                        <IconButton
+                          size="1"
                           variant="ghost"
-                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          color="red"
                           onClick={(e) => {
                             e.stopPropagation();
                             onDeleteModel(model.id);
                           }}
                         >
                           <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
+                        </IconButton>
+                      </Flex>
                     )}
-                  </div>
-                </div>
+                  </Flex>
+                </Card>
               );
             })}
-          </div>
+          </Flex>
 
           {/* Selected Model References */}
-          <div className="lg:col-span-2 border border-border rounded-lg p-4 bg-muted/10">
+          <Card variant="surface" className="lg:col-span-2 p-4">
             {selectedModel ? (
-              <div className="space-y-4">
-                <h3 className="font-medium">{selectedModel.name} References</h3>
+              <Flex direction="column" gap="4">
+                <Heading size="4">{selectedModel.name} References</Heading>
                 
                 <ImageUploader
                   onUpload={(urls) => onAddRefs(selectedModel.id, urls)}
@@ -243,15 +235,15 @@ export function DigitalTalentStep({
                     ))}
                   </div>
                 )}
-              </div>
+              </Flex>
             ) : (
-              <div className="h-full flex items-center justify-center text-muted-foreground">
-                Select a model to manage references
-              </div>
+              <Flex align="center" justify="center" className="h-full min-h-[200px]">
+                <Text color="gray">Select a model to manage references</Text>
+              </Flex>
             )}
-          </div>
+          </Card>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
