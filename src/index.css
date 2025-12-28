@@ -134,11 +134,11 @@
   }
 
   .project-card-images {
-    @apply aspect-[4/3] bg-muted p-3 grid grid-cols-2 gap-1;
+    @apply aspect-[4/3] bg-muted p-2 flex gap-2;
   }
 
   .project-card-image {
-    @apply rounded-sm overflow-hidden bg-secondary;
+    @apply rounded-sm overflow-hidden bg-secondary/50;
   }
 
   .project-card-footer {
