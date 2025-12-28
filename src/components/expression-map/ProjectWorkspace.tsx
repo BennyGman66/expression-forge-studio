@@ -141,6 +141,23 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
     setIsGenerating(true);
 
     try {
+      // Fetch existing completed outputs to avoid regenerating
+      const { data: existingOutputs } = await supabase
+        .from("outputs")
+        .select("digital_model_id, recipe_id")
+        .eq("project_id", project.id)
+        .eq("status", "completed")
+        .not("image_url", "is", null);
+
+      // Count existing outputs per model+recipe combo
+      const existingCounts: Record<string, number> = {};
+      if (existingOutputs) {
+        for (const output of existingOutputs) {
+          const key = `${output.digital_model_id}-${output.recipe_id}`;
+          existingCounts[key] = (existingCounts[key] || 0) + 1;
+        }
+      }
+
       const prompts: Array<{
         modelId: string;
         modelName: string;
@@ -149,6 +166,8 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
         fullPrompt: string;
         modelRefUrl: string;
       }> = [];
+
+      let skippedCount = 0;
 
       for (const modelId of payload.modelIds) {
         const model = digitalModels.find((m) => m.id === modelId);
@@ -159,9 +178,14 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
           const recipe = recipes.find((r) => r.id === recipeId);
           if (!recipe) continue;
 
+          const key = `${modelId}-${recipeId}`;
+          const existingCount = existingCounts[key] || 0;
+          const neededVariations = Math.max(0, payload.variations - existingCount);
+          skippedCount += existingCount;
+
           const fullPrompt = buildFullPrompt(masterPrompt, recipe.delta_line || "");
 
-          for (let v = 0; v < payload.variations; v++) {
+          for (let v = 0; v < neededVariations; v++) {
             prompts.push({
               modelId,
               modelName: model.name,
@@ -174,13 +198,23 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
         }
       }
 
+      if (prompts.length === 0 && skippedCount > 0) {
+        toast.success(`All ${skippedCount} images already generated!`);
+        setIsGenerating(false);
+        return;
+      }
+
       if (prompts.length === 0) {
         toast.error("No valid prompts to generate. Make sure models have reference images.");
         setIsGenerating(false);
         return;
       }
 
-      toast.info(`Starting generation of ${prompts.length} images...`);
+      if (skippedCount > 0) {
+        toast.info(`Skipping ${skippedCount} already generated, creating ${prompts.length} new images...`);
+      } else {
+        toast.info(`Starting generation of ${prompts.length} images...`);
+      }
 
       const { data, error } = await supabase.functions.invoke("generate-images", {
         body: {
