@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft } from "lucide-react";
+import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft, CheckCircle2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +26,7 @@ export function ClayGenerationPanel() {
   const [clayImages, setClayImages] = useState<ClayImage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const processingIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetchBrands();
@@ -37,6 +38,42 @@ export function ClayGenerationPanel() {
       fetchClayImages();
     }
   }, [selectedBrand, selectedGender]);
+
+  // Subscribe to clay_images inserts for real-time progress
+  useEffect(() => {
+    if (!isGenerating) return;
+
+    const channel = supabase
+      .channel("clay-progress")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "clay_images" },
+        (payload) => {
+          const newClay = payload.new as ClayImage;
+          
+          // Check if this clay image is for one of our processing images
+          if (processingIdsRef.current.has(newClay.product_image_id)) {
+            setClayImages((prev) => [...prev, newClay]);
+            setProgress((prev) => {
+              const newCurrent = prev.current + 1;
+              
+              // Check if complete
+              if (newCurrent >= prev.total) {
+                setIsGenerating(false);
+                toast.success("Clay generation complete!");
+              }
+              
+              return { ...prev, current: newCurrent };
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isGenerating]);
 
   const fetchBrands = async () => {
     const { data } = await supabase
@@ -81,15 +118,20 @@ export function ClayGenerationPanel() {
   };
 
   const handleGenerateClay = async () => {
+    // Filter images that don't already have clay versions
+    const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
     const imagesToProcess = productImages.filter(
-      (img) => selectedSlots.has(img.slot) && img.stored_url
+      (img) => selectedSlots.has(img.slot) && img.stored_url && !existingClayIds.has(img.id)
     );
 
     if (imagesToProcess.length === 0) {
-      toast.error("No images to process");
+      toast.error("No new images to process (all already have clay versions)");
       return;
     }
 
+    // Store processing IDs for realtime tracking
+    processingIdsRef.current = new Set(imagesToProcess.map((img) => img.id));
+    
     setIsGenerating(true);
     setProgress({ current: 0, total: imagesToProcess.length });
 
@@ -107,7 +149,6 @@ export function ClayGenerationPanel() {
     } catch (err) {
       console.error("Clay generation error:", err);
       toast.error("Failed to start clay generation");
-    } finally {
       setIsGenerating(false);
     }
   };
@@ -250,10 +291,22 @@ export function ClayGenerationPanel() {
 
         {isGenerating && (
           <div className="mt-4">
-            <Progress value={(progress.current / progress.total) * 100} className="h-2" />
-            <p className="text-xs text-muted-foreground mt-1">
+            <div className="flex items-center gap-2 mb-2">
+              <Progress value={(progress.current / Math.max(progress.total, 1)) * 100} className="h-2 flex-1" />
+              <span className="text-sm font-medium">
+                {Math.round((progress.current / Math.max(progress.total, 1)) * 100)}%
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
               {progress.current} / {progress.total} images processed
             </p>
+          </div>
+        )}
+        
+        {!isGenerating && progress.total > 0 && progress.current >= progress.total && (
+          <div className="mt-4 flex items-center gap-2 text-sm text-green-600">
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Generation complete!</span>
           </div>
         )}
       </Card>
