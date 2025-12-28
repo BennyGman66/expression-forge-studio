@@ -287,7 +287,7 @@ export function GenerateStep({
           value={[variations]}
           onValueChange={([v]) => setVariations(v)}
           min={1}
-          max={5}
+          max={20}
           step={1}
           className="w-full"
         />
