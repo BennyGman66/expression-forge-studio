@@ -275,12 +275,18 @@ export function useProjectData(projectId: string | null) {
   }>) => {
     if (!projectId) return;
     
+    // Cast to any to bypass strict Json type checking
+    const insertData = newRecipes.map(r => ({
+      project_id: r.project_id,
+      name: r.name,
+      delta_line: r.delta_line,
+      full_prompt_text: r.full_prompt_text,
+      recipe_json: JSON.parse(JSON.stringify(r.recipe_json)),
+    }));
+    
     const { data, error } = await supabase
       .from('expression_recipes')
-      .insert(newRecipes.map(r => ({
-        ...r,
-        recipe_json: r.recipe_json as unknown as Record<string, unknown>
-      })))
+      .insert(insertData)
       .select();
     
     if (error) {
