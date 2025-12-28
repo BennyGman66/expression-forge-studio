@@ -126,14 +126,78 @@ export default function Index() {
     recipeIds: string[];
     variations: number;
   }) => {
+    if (!currentProject) return;
+    
     setIsGenerating(true);
     
-    // For now, just show a toast - actual Nano Banana generation would go here
-    toast.info('Nano Banana batch generation coming soon! Use the export options for now.');
-    
-    setTimeout(() => {
+    try {
+      // Build prompts array for the edge function
+      const prompts: Array<{
+        modelId: string;
+        modelName: string;
+        recipeId: string;
+        recipeName: string;
+        fullPrompt: string;
+        modelRefUrl: string;
+      }> = [];
+
+      for (const modelId of payload.modelIds) {
+        const model = digitalModels.find(m => m.id === modelId);
+        const refs = modelRefs[modelId] || [];
+        if (!model || refs.length === 0) continue;
+
+        for (const recipeId of payload.recipeIds) {
+          const recipe = recipes.find(r => r.id === recipeId);
+          if (!recipe) continue;
+
+          const fullPrompt = buildFullPrompt(masterPrompt, recipe.delta_line || '');
+
+          // Create prompts for each variation
+          for (let v = 0; v < payload.variations; v++) {
+            prompts.push({
+              modelId,
+              modelName: model.name,
+              recipeId,
+              recipeName: recipe.name,
+              fullPrompt,
+              modelRefUrl: refs[0].image_url, // Use first ref as the base image
+            });
+          }
+        }
+      }
+
+      if (prompts.length === 0) {
+        toast.error('No valid prompts to generate. Make sure models have reference images.');
+        setIsGenerating(false);
+        return;
+      }
+
+      toast.info(`Starting generation of ${prompts.length} images...`);
+
+      const { data, error } = await supabase.functions.invoke('generate-images', {
+        body: {
+          projectId: currentProject.id,
+          prompts,
+        },
+      });
+
+      if (error) {
+        console.error('Generation error:', error);
+        toast.error('Failed to start generation: ' + error.message);
+        setIsGenerating(false);
+        return;
+      }
+
+      if (data?.jobId) {
+        toast.success(`Generation started! Job ID: ${data.jobId}`);
+        // TODO: Poll job status for progress updates
+      }
+    } catch (err) {
+      console.error('Generation error:', err);
+      toast.error('Failed to start generation');
+    } finally {
       setIsGenerating(false);
-    }, 1000);
+    }
   };
 
   const masterPrompt = currentProject?.master_prompt || '';
