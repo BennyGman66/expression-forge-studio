@@ -255,8 +255,10 @@ export function BrandIngestPanel() {
                       {/* Logs */}
                       {job && Array.isArray(job.logs) && job.logs.length > 0 && (
                         <div className="mt-3 max-h-20 overflow-y-auto text-xs font-mono text-muted-foreground bg-muted/50 rounded p-2">
-                          {(job.logs as string[]).slice(-5).map((log, i) => (
-                            <div key={i}>{log}</div>
+                          {(job.logs as Array<{ time?: string; message?: string } | string>).slice(-5).map((log, i) => (
+                            <div key={i}>
+                              {typeof log === 'string' ? log : log?.message || JSON.stringify(log)}
+                            </div>
                           ))}
                         </div>
                       )}
