@@ -49,6 +49,56 @@ export type Database = {
           },
         ]
       }
+      brands: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          start_url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          start_url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          start_url?: string
+        }
+        Relationships: []
+      }
+      clay_images: {
+        Row: {
+          created_at: string
+          id: string
+          product_image_id: string
+          stored_url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          product_image_id: string
+          stored_url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          product_image_id?: string
+          stored_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clay_images_product_image_id_fkey"
+            columns: ["product_image_id"]
+            isOneToOne: false
+            referencedRelation: "product_images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       digital_model_refs: {
         Row: {
           created_at: string
@@ -161,6 +211,111 @@ export type Database = {
           },
         ]
       }
+      generation_jobs: {
+        Row: {
+          attempts_per_pose: number | null
+          brand_id: string
+          created_at: string
+          id: string
+          logs: Json | null
+          progress: number | null
+          random_count: number | null
+          slot: string
+          status: string
+          talent_id: string
+          total: number | null
+          updated_at: string
+          view: string
+        }
+        Insert: {
+          attempts_per_pose?: number | null
+          brand_id: string
+          created_at?: string
+          id?: string
+          logs?: Json | null
+          progress?: number | null
+          random_count?: number | null
+          slot: string
+          status?: string
+          talent_id: string
+          total?: number | null
+          updated_at?: string
+          view: string
+        }
+        Update: {
+          attempts_per_pose?: number | null
+          brand_id?: string
+          created_at?: string
+          id?: string
+          logs?: Json | null
+          progress?: number | null
+          random_count?: number | null
+          slot?: string
+          status?: string
+          talent_id?: string
+          total?: number | null
+          updated_at?: string
+          view?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generation_jobs_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generation_jobs_talent_id_fkey"
+            columns: ["talent_id"]
+            isOneToOne: false
+            referencedRelation: "talents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      generations: {
+        Row: {
+          attempt_index: number
+          created_at: string
+          generation_job_id: string
+          id: string
+          pose_clay_image_id: string
+          stored_url: string
+        }
+        Insert: {
+          attempt_index: number
+          created_at?: string
+          generation_job_id: string
+          id?: string
+          pose_clay_image_id: string
+          stored_url: string
+        }
+        Update: {
+          attempt_index?: number
+          created_at?: string
+          generation_job_id?: string
+          id?: string
+          pose_clay_image_id?: string
+          stored_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generations_generation_job_id_fkey"
+            columns: ["generation_job_id"]
+            isOneToOne: false
+            referencedRelation: "generation_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generations_pose_clay_image_id_fkey"
+            columns: ["pose_clay_image_id"]
+            isOneToOne: false
+            referencedRelation: "clay_images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       jobs: {
         Row: {
           created_at: string
@@ -266,6 +421,76 @@ export type Database = {
           },
         ]
       }
+      product_images: {
+        Row: {
+          created_at: string
+          id: string
+          product_id: string
+          slot: string
+          source_url: string
+          stored_url: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          product_id: string
+          slot: string
+          source_url: string
+          stored_url?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          product_id?: string
+          slot?: string
+          source_url?: string
+          stored_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_images_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      products: {
+        Row: {
+          brand_id: string
+          created_at: string
+          gender: string | null
+          id: string
+          product_url: string
+          sku: string | null
+        }
+        Insert: {
+          brand_id: string
+          created_at?: string
+          gender?: string | null
+          id?: string
+          product_url: string
+          sku?: string | null
+        }
+        Update: {
+          brand_id?: string
+          created_at?: string
+          gender?: string | null
+          id?: string
+          product_url?: string
+          sku?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "products_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       projects: {
         Row: {
           created_at: string
@@ -287,6 +512,124 @@ export type Database = {
           master_prompt?: string | null
           name?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      prompt_templates: {
+        Row: {
+          created_at: string
+          id: string
+          key: string
+          prompt: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          key: string
+          prompt: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          key?: string
+          prompt?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      scrape_jobs: {
+        Row: {
+          brand_id: string
+          created_at: string
+          id: string
+          logs: Json | null
+          progress: number | null
+          status: string
+          total: number | null
+          updated_at: string
+        }
+        Insert: {
+          brand_id: string
+          created_at?: string
+          id?: string
+          logs?: Json | null
+          progress?: number | null
+          status?: string
+          total?: number | null
+          updated_at?: string
+        }
+        Update: {
+          brand_id?: string
+          created_at?: string
+          id?: string
+          logs?: Json | null
+          progress?: number | null
+          status?: string
+          total?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scrape_jobs_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talent_images: {
+        Row: {
+          created_at: string
+          id: string
+          stored_url: string
+          talent_id: string
+          view: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          stored_url: string
+          talent_id: string
+          view: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          stored_url?: string
+          talent_id?: string
+          view?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_images_talent_id_fkey"
+            columns: ["talent_id"]
+            isOneToOne: false
+            referencedRelation: "talents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talents: {
+        Row: {
+          created_at: string
+          gender: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          gender?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          gender?: string | null
+          id?: string
+          name?: string
         }
         Relationships: []
       }
