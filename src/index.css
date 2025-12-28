@@ -2,91 +2,84 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Expression Map Factory - Radix Lime Theme */
+/* AVA Design System - Light Cream Theme with Lime Accents */
 
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap');
 
 @layer base {
   :root {
-    /* Lime-based dark theme */
-    --background: 80 10% 6%;
-    --foreground: 80 10% 95%;
+    /* Light cream theme */
+    --background: 50 20% 95%;
+    --foreground: 40 10% 15%;
 
-    --card: 80 10% 9%;
-    --card-foreground: 80 10% 95%;
+    --card: 0 0% 100%;
+    --card-foreground: 40 10% 15%;
 
-    --popover: 80 10% 11%;
-    --popover-foreground: 80 10% 95%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 40 10% 15%;
 
-    /* Lime accent */
-    --primary: 82 85% 55%;
-    --primary-foreground: 80 10% 6%;
+    /* Lime accent - bright yellow-green */
+    --primary: 75 85% 50%;
+    --primary-foreground: 40 10% 10%;
 
-    --secondary: 80 8% 14%;
-    --secondary-foreground: 80 10% 85%;
+    --secondary: 50 15% 90%;
+    --secondary-foreground: 40 10% 25%;
 
-    --muted: 80 8% 16%;
-    --muted-foreground: 80 8% 50%;
+    --muted: 50 10% 88%;
+    --muted-foreground: 40 8% 45%;
 
-    --accent: 82 70% 45%;
-    --accent-foreground: 80 10% 95%;
+    --accent: 75 80% 48%;
+    --accent-foreground: 40 10% 10%;
 
     --destructive: 0 70% 50%;
-    --destructive-foreground: 80 10% 98%;
+    --destructive-foreground: 0 0% 100%;
 
-    --success: 82 85% 55%;
-    --success-foreground: 80 10% 6%;
+    --success: 75 85% 50%;
+    --success-foreground: 40 10% 10%;
 
     --warning: 45 92% 55%;
-    --warning-foreground: 80 10% 6%;
+    --warning-foreground: 40 10% 10%;
 
-    --border: 80 8% 18%;
-    --input: 80 8% 14%;
-    --ring: 82 85% 55%;
+    --border: 40 15% 85%;
+    --input: 50 15% 90%;
+    --ring: 75 85% 50%;
 
-    --radius: 0.625rem;
+    --radius: 0.5rem;
 
-    /* Custom design tokens - Lime glow */
-    --glow-primary: 0 0 20px hsl(82 85% 55% / 0.3);
-    --glow-accent: 0 0 40px hsl(82 85% 55% / 0.15);
+    /* Custom design tokens */
+    --avatar-bg: 55 90% 55%;
     
-    /* Gradients - Lime based */
-    --gradient-primary: linear-gradient(135deg, hsl(82 85% 55%), hsl(90 75% 45%));
-    --gradient-surface: linear-gradient(180deg, hsl(80 10% 9%), hsl(80 10% 6%));
-    --gradient-subtle: linear-gradient(135deg, hsl(80 8% 14%), hsl(80 8% 10%));
-    --gradient-glow: radial-gradient(ellipse at top, hsl(82 85% 55% / 0.1), transparent 50%);
-
-    /* Sidebar - Lime theme */
-    --sidebar-background: 80 10% 5%;
-    --sidebar-foreground: 80 10% 85%;
-    --sidebar-primary: 82 85% 55%;
-    --sidebar-primary-foreground: 80 10% 6%;
-    --sidebar-accent: 80 8% 12%;
-    --sidebar-accent-foreground: 80 10% 95%;
-    --sidebar-border: 80 8% 14%;
-    --sidebar-ring: 82 85% 55%;
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 40 10% 25%;
+    --sidebar-primary: 75 85% 50%;
+    --sidebar-primary-foreground: 40 10% 10%;
+    --sidebar-accent: 50 15% 92%;
+    --sidebar-accent-foreground: 40 10% 15%;
+    --sidebar-border: 40 15% 88%;
+    --sidebar-ring: 75 85% 50%;
   }
 
   .dark {
-    --background: 80 10% 6%;
-    --foreground: 80 10% 95%;
-    --card: 80 10% 9%;
-    --card-foreground: 80 10% 95%;
-    --popover: 80 10% 11%;
-    --popover-foreground: 80 10% 95%;
-    --primary: 82 85% 55%;
-    --primary-foreground: 80 10% 6%;
-    --secondary: 80 8% 14%;
-    --secondary-foreground: 80 10% 85%;
-    --muted: 80 8% 16%;
-    --muted-foreground: 80 8% 50%;
-    --accent: 82 70% 45%;
-    --accent-foreground: 80 10% 95%;
+    --background: 40 10% 8%;
+    --foreground: 50 10% 95%;
+    --card: 40 10% 12%;
+    --card-foreground: 50 10% 95%;
+    --popover: 40 10% 14%;
+    --popover-foreground: 50 10% 95%;
+    --primary: 75 85% 55%;
+    --primary-foreground: 40 10% 8%;
+    --secondary: 40 8% 18%;
+    --secondary-foreground: 50 10% 85%;
+    --muted: 40 8% 20%;
+    --muted-foreground: 40 8% 55%;
+    --accent: 75 75% 50%;
+    --accent-foreground: 40 10% 95%;
     --destructive: 0 70% 50%;
-    --destructive-foreground: 80 10% 98%;
-    --border: 80 8% 18%;
-    --input: 80 8% 14%;
-    --ring: 82 85% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 8% 22%;
+    --input: 40 8% 18%;
+    --ring: 75 85% 55%;
   }
 }
 
@@ -97,137 +90,160 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: var(--default-font-family, 'Plus Jakarta Sans'), system-ui, sans-serif;
+    font-family: 'Inter', system-ui, sans-serif;
   }
 
-  h1, h2, h3, h4, h5, h6 {
-    font-family: var(--heading-font-family, 'Plus Jakarta Sans'), system-ui, sans-serif;
-    @apply font-semibold tracking-tight;
+  h1, h2, h3 {
+    font-family: 'Instrument Serif', Georgia, serif;
+    @apply font-normal tracking-tight;
   }
 
-  code, pre, .font-mono {
-    font-family: 'JetBrains Mono', monospace;
+  h4, h5, h6 {
+    font-family: 'Inter', system-ui, sans-serif;
+    @apply font-medium;
   }
 }
 
 @layer components {
-  .glass-panel {
-    @apply bg-card/80 backdrop-blur-xl border border-border/50 rounded-lg;
+  /* App Cards for Hub */
+  .app-card {
+    @apply relative flex flex-col justify-end p-6 bg-card border border-border rounded-lg transition-all cursor-pointer;
+    min-height: 200px;
   }
 
-  .glow-border {
-    box-shadow: var(--glow-primary);
+  .app-card:hover {
+    @apply border-muted-foreground/30 shadow-sm;
   }
 
-  .gradient-primary {
-    background: var(--gradient-primary);
+  .app-card-title {
+    font-family: 'Instrument Serif', Georgia, serif;
+    @apply text-2xl text-foreground;
   }
 
-  .gradient-surface {
-    background: var(--gradient-surface);
+  .app-card-description {
+    @apply text-sm text-muted-foreground mt-1;
   }
 
-  .gradient-subtle {
-    background: var(--gradient-subtle);
+  /* Project Cards */
+  .project-card {
+    @apply bg-card border border-border rounded-lg overflow-hidden transition-all cursor-pointer;
   }
 
-  .text-gradient {
-    background: var(--gradient-primary);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  .project-card:hover {
+    @apply border-muted-foreground/30 shadow-sm;
   }
 
-  .step-indicator {
-    @apply flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold transition-all;
+  .project-card-images {
+    @apply aspect-[4/3] bg-muted p-3 grid grid-cols-2 gap-1;
   }
 
-  .step-indicator.active {
-    @apply bg-primary text-primary-foreground glow-border;
+  .project-card-image {
+    @apply rounded-sm overflow-hidden bg-secondary;
   }
 
-  .step-indicator.completed {
-    @apply bg-primary/20 text-primary border border-primary/40;
+  .project-card-footer {
+    @apply p-4 flex items-center justify-between;
   }
 
-  .step-indicator.pending {
-    @apply bg-muted text-muted-foreground border border-border;
+  /* Breadcrumb Navigation */
+  .breadcrumb {
+    @apply flex items-center gap-2 text-sm;
   }
 
+  .breadcrumb-item {
+    @apply text-muted-foreground hover:text-foreground transition-colors cursor-pointer;
+  }
+
+  .breadcrumb-item.active {
+    @apply text-foreground;
+  }
+
+  .breadcrumb-separator {
+    @apply text-muted-foreground;
+  }
+
+  /* Workflow Steps */
+  .step-tabs {
+    @apply flex items-center gap-1 bg-secondary/50 p-1 rounded-lg;
+  }
+
+  .step-tab {
+    @apply px-4 py-2 rounded-md text-sm font-medium transition-all text-muted-foreground;
+  }
+
+  .step-tab.active {
+    @apply bg-card text-foreground shadow-sm;
+  }
+
+  .step-tab:not(.active):hover {
+    @apply text-foreground/80;
+  }
+
+  /* Image Grid */
   .image-grid {
     @apply grid gap-3;
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
 
   .image-thumbnail {
-    @apply relative aspect-square rounded-lg overflow-hidden bg-muted border border-border/50 cursor-pointer transition-all hover:border-primary/50 hover:shadow-lg;
+    @apply relative aspect-square rounded-md overflow-hidden bg-muted border border-border cursor-pointer transition-all hover:border-muted-foreground/50;
   }
 
   .image-thumbnail img {
     @apply w-full h-full object-cover;
   }
 
+  /* Recipe Cards */
   .recipe-card {
-    @apply p-4 rounded-lg bg-secondary/50 border border-border/50 hover:border-primary/30 transition-all cursor-pointer;
+    @apply p-4 rounded-lg bg-card border border-border hover:border-muted-foreground/30 transition-all cursor-pointer;
   }
 
   .recipe-card.selected {
-    @apply border-primary/60 bg-primary/5;
+    @apply border-primary bg-primary/5;
   }
 
-  .model-card {
-    @apply p-4 rounded-xl bg-card border border-border hover:border-primary/40 transition-all;
+  /* Buttons */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground font-medium text-sm transition-all hover:opacity-90;
   }
 
-  .prompt-display {
-    @apply p-4 rounded-lg bg-muted/50 border border-border font-mono text-sm leading-relaxed whitespace-pre-wrap;
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border border-border bg-card text-foreground font-medium text-sm transition-all hover:bg-secondary;
   }
 
-  .workflow-step {
-    @apply p-6 rounded-xl bg-card border border-border;
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md text-muted-foreground font-medium text-sm transition-all hover:bg-secondary hover:text-foreground;
   }
 
-  .workflow-step-header {
-    @apply flex items-center gap-4 mb-4;
+  /* Panels */
+  .panel {
+    @apply bg-card border border-border rounded-lg;
+  }
+
+  .panel-header {
+    @apply p-4 border-b border-border;
+  }
+
+  .panel-body {
+    @apply p-4;
+  }
+
+  /* Avatar */
+  .user-avatar {
+    @apply w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold;
+    background: hsl(var(--avatar-bg));
+    color: hsl(var(--foreground));
   }
 }
 
 @layer utilities {
   .animate-fade-in {
-    animation: fadeIn 0.3s ease-out;
-  }
-
-  .animate-slide-up {
-    animation: slideUp 0.4s ease-out;
-  }
-
-  .animate-pulse-glow {
-    animation: pulseGlow 2s ease-in-out infinite;
+    animation: fadeIn 0.2s ease-out;
   }
 
   @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
-  }
-
-  @keyframes slideUp {
-    from { 
-      opacity: 0; 
-      transform: translateY(10px); 
-    }
-    to { 
-      opacity: 1; 
-      transform: translateY(0); 
-    }
-  }
-
-  @keyframes pulseGlow {
-    0%, 100% { 
-      box-shadow: 0 0 20px hsl(82 85% 55% / 0.2); 
-    }
-    50% { 
-      box-shadow: 0 0 30px hsl(82 85% 55% / 0.4); 
-    }
   }
 
   .scrollbar-thin {
@@ -252,11 +268,4 @@
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground));
   }
-}
-
-/* Radix Themes overrides to match our design system */
-.radix-themes {
-  --color-background: hsl(var(--background));
-  --color-panel-solid: hsl(var(--card));
-  --default-font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
 }
