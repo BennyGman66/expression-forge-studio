@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Loader2, CheckCircle, XCircle, Image as ImageIcon, X } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, Image as ImageIcon, X, SkipForward, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import type { Json } from "@/integrations/supabase/types";
 
 interface Job {
@@ -33,6 +34,55 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
   const [jobs, setJobs] = useState<Job[]>([]);
   const [outputs, setOutputs] = useState<Output[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isSkipping, setIsSkipping] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+
+  const handleSkipCurrent = async () => {
+    const activeJob = jobs.find((j) => j.status === "running");
+    if (!activeJob) return;
+    
+    setIsSkipping(true);
+    try {
+      await supabase
+        .from("jobs")
+        .update({ 
+          result: { ...(activeJob.result as object || {}), skip_current: true },
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", activeJob.id);
+      toast.success("Skipping current image...");
+    } catch (err) {
+      toast.error("Failed to skip");
+    } finally {
+      setIsSkipping(false);
+    }
+  };
+
+  const handleStopGeneration = async () => {
+    const activeJob = jobs.find((j) => j.status === "running");
+    if (!activeJob) return;
+    
+    setIsStopping(true);
+    try {
+      await supabase
+        .from("jobs")
+        .update({ 
+          status: "stopped",
+          result: { 
+            generated: activeJob.progress || 0, 
+            total: activeJob.total || 0,
+            stopped_by_user: true 
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", activeJob.id);
+      toast.success("Generation stopped. Already generated images are kept.");
+    } catch (err) {
+      toast.error("Failed to stop generation");
+    } finally {
+      setIsStopping(false);
+    }
+  };
 
   // Fetch initial data and subscribe to updates
   useEffect(() => {
@@ -143,6 +193,30 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
               ))}
             </div>
           )}
+          
+          {/* Skip and Stop Controls */}
+          <div className="mt-3 flex gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleSkipCurrent}
+              disabled={isSkipping}
+              className="flex-1"
+            >
+              <SkipForward className="w-4 h-4 mr-2" />
+              {isSkipping ? "Skipping..." : "Skip Current"}
+            </Button>
+            <Button 
+              variant="destructive" 
+              size="sm" 
+              onClick={handleStopGeneration}
+              disabled={isStopping}
+              className="flex-1"
+            >
+              <Square className="w-4 h-4 mr-2" />
+              {isStopping ? "Stopping..." : "Stop & Keep"}
+            </Button>
+          </div>
         </div>
       )}
 

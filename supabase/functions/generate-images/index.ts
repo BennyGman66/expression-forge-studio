@@ -79,6 +79,38 @@ serve(async (req) => {
       const logs: string[] = [];
 
       for (let i = 0; i < prompts.length; i++) {
+        // Check if job was stopped or should skip current
+        const { data: currentJob } = await supabase
+          .from("jobs")
+          .select("status, result")
+          .eq("id", job.id)
+          .single();
+
+        if (currentJob?.status === "stopped") {
+          console.log(`Job ${job.id} was stopped by user`);
+          logs.push("⏹ Generation stopped by user");
+          break;
+        }
+
+        // Check for skip_current flag
+        const jobResult = currentJob?.result as { skip_current?: boolean } | null;
+        if (jobResult?.skip_current) {
+          console.log(`Skipping prompt ${i + 1}`);
+          logs.push(`⏭ Skipped ${prompts[i].recipeName} for ${prompts[i].modelName}`);
+          
+          // Clear the skip flag
+          await supabase
+            .from("jobs")
+            .update({ 
+              result: { ...jobResult, skip_current: false },
+              progress: i + 1,
+              logs: logs.slice(-50),
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", job.id);
+          continue;
+        }
+
         const prompt = prompts[i];
         const logEntry = `[${i + 1}/${prompts.length}] Generating ${prompt.recipeName} for ${prompt.modelName}`;
         console.log(logEntry);
@@ -216,19 +248,28 @@ serve(async (req) => {
         }
       }
 
-      // Mark job as complete
-      await supabase
+      // Check final status before marking complete
+      const { data: finalJob } = await supabase
         .from("jobs")
-        .update({
-          status: "completed",
-          progress: prompts.length,
-          result: { generated: results.length, total: prompts.length },
-          logs: logs.slice(-50),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", job.id);
+        .select("status")
+        .eq("id", job.id)
+        .single();
 
-      console.log(`Job ${job.id} completed: ${results.length}/${prompts.length} images generated`);
+      // Only mark as completed if not already stopped
+      if (finalJob?.status !== "stopped") {
+        await supabase
+          .from("jobs")
+          .update({
+            status: "completed",
+            progress: prompts.length,
+            result: { generated: results.length, total: prompts.length },
+            logs: logs.slice(-50),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", job.id);
+      }
+
+      console.log(`Job ${job.id} finished: ${results.length}/${prompts.length} images generated`);
     };
 
     // Start background processing
