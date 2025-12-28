@@ -75,7 +75,7 @@ export default function ExpressionMap() {
             className="btn-primary"
           >
             <Plus className="w-4 h-4" />
-            Create New Campaign
+            Create new expression map
           </button>
         </div>
 
