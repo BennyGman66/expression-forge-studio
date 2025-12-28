@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { HubHeader } from "@/components/layout/HubHeader";
 import { WorkflowTabs, type WorkflowStep } from "@/components/expression-map/WorkflowTabs";
 import { BrandRefsPanel } from "@/components/expression-map/BrandRefsPanel";
 import { RecipesPanel } from "@/components/expression-map/RecipesPanel";
 import { TalentPanel } from "@/components/expression-map/TalentPanel";
 import { GeneratePanel } from "@/components/expression-map/GeneratePanel";
+import { ReviewPanel } from "@/components/expression-map/ReviewPanel";
 import { useProjectData } from "@/hooks/useProject";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -21,6 +22,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("brand-refs");
   const [isExtracting, setIsExtracting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [outputsCount, setOutputsCount] = useState(0);
 
   const {
     brandRefs,
@@ -41,6 +43,42 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
 
   const masterPrompt = project.master_prompt || "";
 
+  // Fetch outputs count
+  useEffect(() => {
+    const fetchOutputsCount = async () => {
+      const { count } = await supabase
+        .from("outputs")
+        .select("*", { count: "exact", head: true })
+        .eq("project_id", project.id)
+        .eq("status", "completed")
+        .not("image_url", "is", null);
+      
+      setOutputsCount(count || 0);
+    };
+
+    fetchOutputsCount();
+
+    // Subscribe to new outputs
+    const channel = supabase
+      .channel("workspace-outputs")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "outputs",
+          filter: `project_id=eq.${project.id}`,
+        },
+        () => {
+          fetchOutputsCount();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [project.id]);
   const handleExtractRecipes = async () => {
     if (brandRefs.length === 0) return;
 
@@ -180,6 +218,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
           brandRefsCount={brandRefs.length}
           recipesCount={recipes.length}
           modelsCount={digitalModels.length}
+          outputsCount={outputsCount}
         />
       </div>
 
@@ -227,6 +266,14 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
             projectId={project.id}
             onGenerate={handleGenerate}
             isGenerating={isGenerating}
+          />
+        )}
+
+        {currentStep === "review" && (
+          <ReviewPanel
+            projectId={project.id}
+            models={digitalModels}
+            modelRefs={modelRefs}
           />
         )}
       </main>
