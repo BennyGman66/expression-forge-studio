@@ -44,7 +44,7 @@ serve(async (req) => {
 
     console.log(`Created scrape job ${job.id}`);
 
-    // Start background task for scraping (fire and forget)
+    // Start background task for scraping
     runScrapeJob(supabase, job.id, brandId, startUrl, limit).catch(err => {
       console.error('Background scrape failed:', err);
     });
@@ -70,10 +70,21 @@ async function runScrapeJob(
   startUrl: string,
   limit: number
 ) {
+  const logs: Array<{ time: string; message: string }> = [];
+  
+  const addLog = async (message: string) => {
+    console.log(message);
+    logs.push({ time: new Date().toISOString(), message });
+    await supabase
+      .from('scrape_jobs')
+      .update({ logs })
+      .eq('id', jobId);
+  };
+
   try {
-    // Step 1: Map the website to find product URLs
-    console.log('Mapping website to find product URLs...');
+    await addLog('Starting site mapping...');
     
+    // Step 1: Map the website to find category and product URLs
     const mapResponse = await fetch('https://api.firecrawl.dev/v1/map', {
       method: 'POST',
       headers: {
@@ -82,8 +93,7 @@ async function runScrapeJob(
       },
       body: JSON.stringify({
         url: startUrl,
-        search: 'product',
-        limit: limit * 10, // Get more URLs to filter
+        limit: 5000,
         includeSubdomains: false,
       }),
     });
@@ -96,31 +106,105 @@ async function runScrapeJob(
       return;
     }
 
-    // Filter for product URLs (common patterns)
-    const productPatterns = ['/product/', '/products/', '/p/', '/item/', '/shop/'];
-    let productUrls = (mapData.links || []).filter((url: string) => 
-      productPatterns.some(pattern => url.toLowerCase().includes(pattern))
-    ).slice(0, limit);
+    const allLinks = mapData.links || [];
+    await addLog(`Found ${allLinks.length} total URLs on site`);
 
-    // If no product URLs found, try to use any URLs that look like products
-    if (productUrls.length === 0) {
-      productUrls = (mapData.links || []).slice(0, limit);
+    // Step 2: Identify product page URLs (URLs that look like individual product pages)
+    // Product pages typically have patterns like: /product/, /p/, /products/, or contain SKU-like patterns
+    const productPatterns = [
+      /\/product\//i,
+      /\/products\//i,
+      /\/p\//i,
+      /\/item\//i,
+      /\/[A-Z]{2}\d{5,}/i,  // SKU patterns like WW0WW12345
+      /-[a-z]+-\d{5,}/i,    // slug-sku patterns
+    ];
+    
+    // Exclude patterns that are definitely NOT product pages
+    const excludePatterns = [
+      /\/collections\//i,
+      /\/category\//i,
+      /\/search/i,
+      /\/cart/i,
+      /\/checkout/i,
+      /\/account/i,
+      /\/help/i,
+      /\/faq/i,
+      /\/about/i,
+      /\/contact/i,
+      /\/stores/i,
+      /\/size-guide/i,
+      /\.pdf$/i,
+      /\?/,  // Query params usually indicate filters, not products
+    ];
+
+    // Find URLs that look like product pages
+    let productUrls = allLinks.filter((url: string) => {
+      // Must match at least one product pattern
+      const matchesProduct = productPatterns.some(p => p.test(url));
+      // Must NOT match any exclude pattern
+      const matchesExclude = excludePatterns.some(p => p.test(url));
+      return matchesProduct && !matchesExclude;
+    });
+
+    // If we didn't find product URLs with patterns, look for pages with long URL paths
+    if (productUrls.length < limit) {
+      const additionalUrls = allLinks.filter((url: string) => {
+        // Check if URL has a path with multiple segments (likely a product)
+        const urlObj = new URL(url);
+        const pathParts = urlObj.pathname.split('/').filter(Boolean);
+        // Products usually have 2+ path segments and the last one is long
+        return pathParts.length >= 2 && 
+               pathParts[pathParts.length - 1].length > 10 &&
+               !excludePatterns.some(p => p.test(url)) &&
+               !productUrls.includes(url);
+      });
+      productUrls = [...productUrls, ...additionalUrls];
     }
 
-    console.log(`Found ${productUrls.length} product URLs`);
+    // Separate by gender based on URL
+    const menUrls = productUrls.filter((url: string) => 
+      /\/men[\/\-]/i.test(url) || /\/homme/i.test(url) || /\/male/i.test(url)
+    );
+    const womenUrls = productUrls.filter((url: string) => 
+      /\/women[\/\-]/i.test(url) || /\/femme/i.test(url) || /\/female/i.test(url)
+    );
+    const otherUrls = productUrls.filter((url: string) => 
+      !menUrls.includes(url) && !womenUrls.includes(url)
+    );
+
+    await addLog(`Found ${menUrls.length} men's, ${womenUrls.length} women's, ${otherUrls.length} other products`);
+
+    // Balance the selection between genders
+    const halfLimit = Math.floor(limit / 2);
+    const selectedUrls = [
+      ...menUrls.slice(0, halfLimit),
+      ...womenUrls.slice(0, halfLimit),
+      ...otherUrls.slice(0, limit - Math.min(menUrls.length, halfLimit) - Math.min(womenUrls.length, halfLimit))
+    ].slice(0, limit);
+
+    await addLog(`Selected ${selectedUrls.length} products to scrape`);
 
     await supabase
       .from('scrape_jobs')
-      .update({ total: productUrls.length, logs: [{ message: `Found ${productUrls.length} products`, time: new Date().toISOString() }] })
+      .update({ total: selectedUrls.length })
       .eq('id', jobId);
 
-    // Step 2: Scrape each product page for images
+    // Step 3: Scrape each product page for images
     let processed = 0;
     const slots = ['A', 'B', 'C', 'D'];
 
-    for (const productUrl of productUrls) {
+    for (const productUrl of selectedUrls) {
       try {
-        console.log(`[${processed + 1}/${productUrls.length}] Scraping ${productUrl}`);
+        await addLog(`[${processed + 1}/${selectedUrls.length}] Scraping: ${productUrl.substring(0, 80)}...`);
+
+        // Determine gender from URL
+        let gender = null;
+        if (/\/men[\/\-]/i.test(productUrl) || /\/homme/i.test(productUrl)) {
+          gender = 'men';
+        } else if (/\/women[\/\-]/i.test(productUrl) || /\/femme/i.test(productUrl)) {
+          gender = 'women';
+        }
 
         // Create product record
         const { data: product, error: productError } = await supabase
@@ -129,7 +213,7 @@ async function runScrapeJob(
             brand_id: brandId,
             product_url: productUrl,
             sku: extractSku(productUrl),
-            gender: detectGender(productUrl),
+            gender,
           })
           .select()
           .single();
@@ -139,7 +223,7 @@ async function runScrapeJob(
           continue;
         }
 
-        // Scrape the product page for images
+        // Scrape the product page
         const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
           method: 'POST',
           headers: {
@@ -148,18 +232,23 @@ async function runScrapeJob(
           },
           body: JSON.stringify({
             url: productUrl,
-            formats: ['html', 'links'],
+            formats: ['html'],
             onlyMainContent: false,
+            waitFor: 2000, // Wait for images to load
           }),
         });
 
         const scrapeData = await scrapeResponse.json();
 
         if (scrapeResponse.ok && scrapeData.success) {
-          // Extract image URLs from the page
-          const imageUrls = extractProductImages(scrapeData.data?.html || '', productUrl);
+          const html = scrapeData.data?.html || '';
           
-          // Store up to 4 images (slots A-D)
+          // Extract product gallery images (main product images, not thumbnails)
+          const imageUrls = extractProductGalleryImages(html, productUrl);
+          
+          await addLog(`  Found ${imageUrls.length} product images`);
+          
+          // Store up to 4 images (slots A-D: Front, 3/4, Back, Detail)
           for (let i = 0; i < Math.min(imageUrls.length, 4); i++) {
             await supabase
               .from('product_images')
@@ -170,8 +259,8 @@ async function runScrapeJob(
                 stored_url: imageUrls[i], // For now, use source URL directly
               });
           }
-
-          console.log(`  Found ${imageUrls.length} images for product`);
+        } else {
+          await addLog(`  Failed to scrape product page`);
         }
 
         processed++;
@@ -180,14 +269,18 @@ async function runScrapeJob(
           .update({ progress: processed })
           .eq('id', jobId);
 
+        // Small delay to be respectful to the server
+        await new Promise(resolve => setTimeout(resolve, 500));
+
       } catch (err) {
         console.error(`Error processing ${productUrl}:`, err);
+        await addLog(`  Error: ${err instanceof Error ? err.message : 'Unknown'}`);
       }
     }
 
     // Mark job as complete
     await updateJobStatus(supabase, jobId, 'completed');
-    console.log(`Scrape job ${jobId} completed: ${processed} products processed`);
+    await addLog(`Completed: ${processed} products scraped`);
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -206,74 +299,183 @@ async function updateJobStatus(supabase: any, jobId: string, status: string, ext
 function extractSku(url: string): string | null {
   // Try to extract SKU from URL patterns
   const patterns = [
-    /\/([A-Z0-9]{6,})/i,
-    /sku[=\/]([A-Z0-9-]+)/i,
-    /product[=\/]([A-Z0-9-]+)/i,
+    /\/([A-Z]{2}\d{5,})/i,           // WW0WW12345
+    /[-_]([A-Z0-9]{6,12})(?:[-_]|$)/i, // SKU in slug
+    /product\/([^\/]+)$/i,            // Last path segment
   ];
   
   for (const pattern of patterns) {
     const match = url.match(pattern);
-    if (match) return match[1];
+    if (match) return match[1].toUpperCase();
   }
   return null;
 }
 
-function detectGender(url: string): string | null {
-  const lowerUrl = url.toLowerCase();
-  if (lowerUrl.includes('/men') || lowerUrl.includes('/male') || lowerUrl.includes('/homme')) {
-    return 'men';
-  }
-  if (lowerUrl.includes('/women') || lowerUrl.includes('/female') || lowerUrl.includes('/femme')) {
-    return 'women';
-  }
-  return null;
-}
-
-function extractProductImages(html: string, baseUrl: string): string[] {
+function extractProductGalleryImages(html: string, baseUrl: string): string[] {
   const images: string[] = [];
+  const seenUrls = new Set<string>();
   
-  // Match img tags with src attributes
-  const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+  // Parse the base URL for resolving relative URLs
+  let baseOrigin: string;
+  try {
+    baseOrigin = new URL(baseUrl).origin;
+  } catch {
+    baseOrigin = '';
+  }
+
+  // Look for high-resolution product images
+  // Common patterns in e-commerce sites:
+  // 1. data-zoom-image, data-large-image, data-src (lazy loading)
+  // 2. srcset with high-res versions
+  // 3. Images in product gallery containers
+
+  // Pattern 1: Data attributes for zoom/large images (these are usually the high-res versions)
+  const dataAttrRegex = /data-(?:zoom|large|full|high|src|lazy)(?:-image|-src)?=["']([^"']+)["']/gi;
   let match;
-  
-  while ((match = imgRegex.exec(html)) !== null) {
-    let src = match[1];
-    
-    // Skip small images, icons, logos
-    if (src.includes('icon') || src.includes('logo') || src.includes('sprite')) {
-      continue;
-    }
-    
-    // Convert relative URLs to absolute
-    if (src.startsWith('//')) {
-      src = 'https:' + src;
-    } else if (src.startsWith('/')) {
-      const urlObj = new URL(baseUrl);
-      src = urlObj.origin + src;
-    }
-    
-    // Only include image URLs
-    if (src.match(/\.(jpg|jpeg|png|webp)/i) || src.includes('image') || src.includes('media')) {
+  while ((match = dataAttrRegex.exec(html)) !== null) {
+    const src = normalizeImageUrl(match[1], baseOrigin);
+    if (src && isValidProductImage(src) && !seenUrls.has(src)) {
+      seenUrls.add(src);
       images.push(src);
     }
   }
-  
-  // Also check for srcset and data-src
-  const srcsetRegex = /(?:srcset|data-src)=["']([^"']+)["']/gi;
+
+  // Pattern 2: srcset (get the largest version)
+  const srcsetRegex = /srcset=["']([^"']+)["']/gi;
   while ((match = srcsetRegex.exec(html)) !== null) {
-    const srcset = match[1].split(',')[0].split(' ')[0];
-    if (srcset && !images.includes(srcset)) {
-      let src = srcset;
-      if (src.startsWith('//')) {
-        src = 'https:' + src;
-      } else if (src.startsWith('/')) {
-        const urlObj = new URL(baseUrl);
-        src = urlObj.origin + src;
+    const srcset = match[1];
+    // Parse srcset and get the largest image
+    const sources = srcset.split(',').map(s => s.trim());
+    let largestSrc = '';
+    let largestWidth = 0;
+    
+    for (const source of sources) {
+      const parts = source.split(/\s+/);
+      if (parts.length >= 2) {
+        const src = parts[0];
+        const widthMatch = parts[1].match(/(\d+)w/);
+        const width = widthMatch ? parseInt(widthMatch[1]) : 0;
+        if (width > largestWidth) {
+          largestWidth = width;
+          largestSrc = src;
+        }
       }
-      images.push(src);
+    }
+    
+    if (largestSrc) {
+      const src = normalizeImageUrl(largestSrc, baseOrigin);
+      if (src && isValidProductImage(src) && !seenUrls.has(src)) {
+        seenUrls.add(src);
+        images.push(src);
+      }
     }
   }
+
+  // Pattern 3: Regular img tags with large dimensions or product-related class names
+  const imgRegex = /<img[^>]+>/gi;
+  while ((match = imgRegex.exec(html)) !== null) {
+    const imgTag = match[0];
+    
+    // Check if this looks like a product image (by class or context)
+    const isProductImage = /class=["'][^"']*(product|gallery|pdp|hero|main|zoom)[^"']*["']/i.test(imgTag);
+    const hasLargeWidth = /width=["']?(\d+)["']?/i.exec(imgTag);
+    const width = hasLargeWidth ? parseInt(hasLargeWidth[1]) : 0;
+    
+    // Extract src
+    const srcMatch = /src=["']([^"']+)["']/i.exec(imgTag);
+    if (srcMatch) {
+      const src = normalizeImageUrl(srcMatch[1], baseOrigin);
+      if (src && isValidProductImage(src) && !seenUrls.has(src)) {
+        // Prioritize images that look like product images or are large
+        if (isProductImage || width >= 400) {
+          seenUrls.add(src);
+          images.push(src);
+        }
+      }
+    }
+  }
+
+  // Pattern 4: Look for images in JSON-LD structured data
+  const jsonLdRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  while ((match = jsonLdRegex.exec(html)) !== null) {
+    try {
+      const jsonContent = match[1];
+      const data = JSON.parse(jsonContent);
+      
+      // Extract images from Product schema
+      const extractFromSchema = (obj: any) => {
+        if (obj?.image) {
+          const imageData = Array.isArray(obj.image) ? obj.image : [obj.image];
+          for (const img of imageData) {
+            const src = typeof img === 'string' ? img : img?.url || img?.contentUrl;
+            if (src) {
+              const normalizedSrc = normalizeImageUrl(src, baseOrigin);
+              if (normalizedSrc && !seenUrls.has(normalizedSrc)) {
+                seenUrls.add(normalizedSrc);
+                images.unshift(normalizedSrc); // Prioritize schema images
+              }
+            }
+          }
+        }
+      };
+      
+      if (Array.isArray(data)) {
+        data.forEach(extractFromSchema);
+      } else {
+        extractFromSchema(data);
+      }
+    } catch {
+      // Invalid JSON, skip
+    }
+  }
+
+  // Return unique images, preferring larger/better quality versions
+  return images.slice(0, 10);
+}
+
+function normalizeImageUrl(src: string, baseOrigin: string): string | null {
+  if (!src || src.startsWith('data:')) return null;
   
-  // Remove duplicates and return first 10
-  return [...new Set(images)].slice(0, 10);
+  let url = src.trim();
+  
+  // Handle protocol-relative URLs
+  if (url.startsWith('//')) {
+    url = 'https:' + url;
+  }
+  // Handle relative URLs
+  else if (url.startsWith('/')) {
+    url = baseOrigin + url;
+  }
+  // Handle relative paths
+  else if (!url.startsWith('http')) {
+    url = baseOrigin + '/' + url;
+  }
+  
+  return url;
+}
+
+function isValidProductImage(url: string): boolean {
+  const lowerUrl = url.toLowerCase();
+  
+  // Exclude non-product images
+  const excludePatterns = [
+    'icon', 'logo', 'sprite', 'spacer', 'pixel', 'tracking',
+    'badge', 'rating', 'star', 'flag', 'payment', 'social',
+    'facebook', 'twitter', 'instagram', 'pinterest',
+    'svg', 'gif', 'placeholder', '1x1', 'blank',
+    'thumbnail', 'thumb', '_xs', '_xxs', '_tiny', 'mini',
+  ];
+  
+  if (excludePatterns.some(p => lowerUrl.includes(p))) {
+    return false;
+  }
+  
+  // Must be an image format
+  if (!lowerUrl.match(/\.(jpg|jpeg|png|webp)/i) && 
+      !lowerUrl.includes('/image') && 
+      !lowerUrl.includes('/media')) {
+    return false;
+  }
+  
+  return true;
 }
