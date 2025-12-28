@@ -462,6 +462,7 @@ export type Database = {
           created_at: string
           gender: string | null
           id: string
+          product_type: string | null
           product_url: string
           sku: string | null
         }
@@ -470,6 +471,7 @@ export type Database = {
           created_at?: string
           gender?: string | null
           id?: string
+          product_type?: string | null
           product_url: string
           sku?: string | null
         }
@@ -478,6 +480,7 @@ export type Database = {
           created_at?: string
           gender?: string | null
           id?: string
+          product_type?: string | null
           product_url?: string
           sku?: string | null
         }
