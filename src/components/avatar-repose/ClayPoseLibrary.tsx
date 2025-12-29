@@ -4,8 +4,14 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, User, Shirt, AlertCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, User, Shirt, AlertCircle, Building2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+
+interface Brand {
+  id: string;
+  name: string;
+}
 
 interface ClayPoseItem {
   id: string;
@@ -15,6 +21,8 @@ interface ClayPoseItem {
   gender: string | null;
   product_type: string | null;
   sku: string | null;
+  brand_id: string;
+  brand_name: string;
 }
 
 const SLOTS = ["A", "B", "C", "D"] as const;
@@ -23,12 +31,26 @@ const PRODUCT_TYPES = ["tops", "trousers"] as const;
 
 export function ClayPoseLibrary() {
   const [clayPoses, setClayPoses] = useState<ClayPoseItem[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedGender, setSelectedGender] = useState<string>("all");
+  const [selectedBrand, setSelectedBrand] = useState<string>("all");
 
   useEffect(() => {
+    fetchBrands();
     fetchClayPoses();
   }, []);
+
+  const fetchBrands = async () => {
+    const { data, error } = await supabase
+      .from("brands")
+      .select("id, name")
+      .order("name");
+    
+    if (!error && data) {
+      setBrands(data);
+    }
+  };
 
   const fetchClayPoses = async () => {
     setLoading(true);
@@ -45,7 +67,12 @@ export function ClayPoseLibrary() {
           products!inner (
             gender,
             product_type,
-            sku
+            sku,
+            brand_id,
+            brands!inner (
+              id,
+              name
+            )
           )
         )
       `);
@@ -65,14 +92,22 @@ export function ClayPoseLibrary() {
       gender: clay.product_images?.products?.gender || null,
       product_type: clay.product_images?.products?.product_type || null,
       sku: clay.product_images?.products?.sku || null,
+      brand_id: clay.product_images?.products?.brand_id || "",
+      brand_name: clay.product_images?.products?.brands?.name || "Unknown Brand",
     }));
 
     setClayPoses(poses);
     setLoading(false);
   };
 
+  // Filter poses by selected brand
+  const getFilteredByBrand = () => {
+    if (selectedBrand === "all") return clayPoses;
+    return clayPoses.filter((pose) => pose.brand_id === selectedBrand);
+  };
+
   const getFilteredPoses = (gender: string | null, productType: string | null, slot: string) => {
-    return clayPoses.filter((pose) => {
+    return getFilteredByBrand().filter((pose) => {
       const genderMatch = gender === null 
         ? pose.gender === null 
         : pose.gender?.toLowerCase() === gender.toLowerCase();
@@ -83,16 +118,8 @@ export function ClayPoseLibrary() {
     });
   };
 
-  const getCategorizedCount = () => {
-    return clayPoses.filter(
-      (p) => p.gender && p.product_type && 
-        GENDERS.includes(p.gender.toLowerCase() as any) &&
-        PRODUCT_TYPES.includes(p.product_type.toLowerCase() as any)
-    ).length;
-  };
-
   const getUncategorizedCount = () => {
-    return clayPoses.filter(
+    return getFilteredByBrand().filter(
       (p) => !p.gender || !p.product_type ||
         !GENDERS.includes((p.gender || "").toLowerCase() as any) ||
         !PRODUCT_TYPES.includes((p.product_type || "").toLowerCase() as any)
@@ -100,8 +127,10 @@ export function ClayPoseLibrary() {
   };
 
   const getPosesBySlot = (slot: string) => {
-    return clayPoses.filter((pose) => pose.slot === slot);
+    return getFilteredByBrand().filter((pose) => pose.slot === slot);
   };
+
+  const filteredPoses = getFilteredByBrand();
 
   if (loading) {
     return (
@@ -123,7 +152,26 @@ export function ClayPoseLibrary() {
           <User className="w-5 h-5" />
           Clay Pose Library
         </h2>
-        <Badge variant="secondary">{clayPoses.length} total poses</Badge>
+        <div className="flex items-center gap-3">
+          {/* Brand Filter */}
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-muted-foreground" />
+            <Select value={selectedBrand} onValueChange={setSelectedBrand}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filter by brand" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Brands</SelectItem>
+                {brands.map((brand) => (
+                  <SelectItem key={brand.id} value={brand.id}>
+                    {brand.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Badge variant="secondary">{filteredPoses.length} poses</Badge>
+        </div>
       </div>
 
       {uncategorizedCount > 0 && (
@@ -131,7 +179,7 @@ export function ClayPoseLibrary() {
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             {uncategorizedCount} pose{uncategorizedCount > 1 ? 's' : ''} need gender/product type classification. 
-            Set these on your products to organize them properly.
+            New scrapes will auto-classify using AI vision.
           </AlertDescription>
         </Alert>
       )}
@@ -177,7 +225,7 @@ export function ClayPoseLibrary() {
                               className="w-full aspect-[3/4] object-cover rounded border bg-background"
                             />
                             <div className="absolute bottom-1 left-1 right-1 bg-background/80 text-xs px-1 py-0.5 rounded truncate">
-                              {pose.sku || "No SKU"}
+                              {pose.sku || pose.brand_name}
                             </div>
                           </div>
                         ))
@@ -194,7 +242,7 @@ export function ClayPoseLibrary() {
         {GENDERS.map((gender) => (
           <TabsContent key={gender} value={gender} className="space-y-4 mt-4">
             {PRODUCT_TYPES.map((productType) => {
-              const count = clayPoses.filter(
+              const count = filteredPoses.filter(
                 (p) =>
                   p.gender?.toLowerCase() === gender.toLowerCase() &&
                   p.product_type?.toLowerCase() === productType.toLowerCase()
@@ -255,7 +303,7 @@ export function ClayPoseLibrary() {
             })}
 
             {/* Uncategorized for this gender */}
-            {clayPoses.filter(
+            {filteredPoses.filter(
               (p) =>
                 p.gender?.toLowerCase() === gender.toLowerCase() &&
                 (!p.product_type || !PRODUCT_TYPES.includes(p.product_type.toLowerCase() as any))
@@ -264,7 +312,7 @@ export function ClayPoseLibrary() {
                 <div className="flex items-center gap-2">
                   <h3 className="font-medium text-muted-foreground">Uncategorized (no product type)</h3>
                   <Badge variant="outline" className="text-xs">
-                    {clayPoses.filter(
+                    {filteredPoses.filter(
                       (p) =>
                         p.gender?.toLowerCase() === gender.toLowerCase() &&
                         (!p.product_type || !PRODUCT_TYPES.includes(p.product_type.toLowerCase() as any))
@@ -272,7 +320,7 @@ export function ClayPoseLibrary() {
                   </Badge>
                 </div>
                 <div className="grid grid-cols-6 gap-2">
-                  {clayPoses
+                  {filteredPoses
                     .filter(
                       (p) =>
                         p.gender?.toLowerCase() === gender.toLowerCase() &&
