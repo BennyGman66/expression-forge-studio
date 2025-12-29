@@ -239,18 +239,34 @@ async function runScrapeJob(
     await addLog('Starting site mapping...');
     
     // Step 1: Map the entire website from root to find all product URLs
-    const mapResponse = await fetch('https://api.firecrawl.dev/v1/map', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${firecrawlApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: baseOrigin,
-        limit: 10000,
-        includeSubdomains: false,
-      }),
-    });
+    const mapController = new AbortController();
+    const mapTimeoutId = setTimeout(() => mapController.abort(), 60000); // 60 second timeout for mapping
+    
+    let mapResponse;
+    try {
+      mapResponse = await fetch('https://api.firecrawl.dev/v1/map', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${firecrawlApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: mapController.signal,
+        body: JSON.stringify({
+          url: baseOrigin,
+          limit: 10000,
+          includeSubdomains: false,
+        }),
+      });
+      clearTimeout(mapTimeoutId);
+    } catch (err) {
+      clearTimeout(mapTimeoutId);
+      if (err instanceof Error && err.name === 'AbortError') {
+        console.error('Site mapping timed out after 60 seconds');
+        await updateJobStatus(supabase, jobId, 'failed', { error: 'Site mapping timed out' });
+        return;
+      }
+      throw err;
+    }
 
     const mapData = await mapResponse.json();
     
@@ -376,21 +392,38 @@ async function runScrapeJob(
         }
 
         // Scrape the product page first to get images
-        const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${firecrawlApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            url: productUrl,
-            formats: ['html'],
-            onlyMainContent: false,
-            waitFor: 3000,
-          }),
-        });
-
-        const scrapeData = await scrapeResponse.json();
+        const scrapeController = new AbortController();
+        const scrapeTimeoutId = setTimeout(() => scrapeController.abort(), 30000); // 30 second timeout
+        
+        let scrapeResponse;
+        let scrapeData;
+        try {
+          scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${firecrawlApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            signal: scrapeController.signal,
+            body: JSON.stringify({
+              url: productUrl,
+              formats: ['html'],
+              onlyMainContent: false,
+              waitFor: 3000,
+            }),
+          });
+          clearTimeout(scrapeTimeoutId);
+          scrapeData = await scrapeResponse.json();
+        } catch (err) {
+          clearTimeout(scrapeTimeoutId);
+          if (err instanceof Error && err.name === 'AbortError') {
+            await addLog(`  Scrape timed out after 30 seconds, skipping`);
+            processed++;
+            await supabase.from('scrape_jobs').update({ progress: processed }).eq('id', jobId);
+            continue;
+          }
+          throw err;
+        }
 
         if (!scrapeResponse.ok || !scrapeData.success) {
           await addLog(`  Failed to scrape product page`);
