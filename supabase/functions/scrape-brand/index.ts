@@ -64,8 +64,43 @@ serve(async (req) => {
   }
 });
 
-// AI-powered classification using Lovable AI vision
-async function classifyProductFromImage(imageUrl: string): Promise<{ gender: string | null; productType: string | null }> {
+// URL-based product type classification (more reliable than AI for bottoms)
+function classifyProductTypeFromUrl(url: string): 'tops' | 'trousers' | null {
+  const urlLower = url.toLowerCase();
+  
+  // Check for bottoms keywords first
+  const bottomsKeywords = [
+    'jean', 'jeans', 'chino', 'chinos', 'pant', 'pants', 
+    'short', 'shorts', 'trouser', 'trousers', 'skirt', 'skirts',
+    'legging', 'leggings', 'jogger', 'joggers', 'cargo',
+    'denim', 'slim-fit', 'straight-leg', 'wide-leg', 'bootcut',
+    'culottes', 'capri', 'bermuda'
+  ];
+  
+  for (const keyword of bottomsKeywords) {
+    if (urlLower.includes(keyword)) {
+      return 'trousers';
+    }
+  }
+  
+  // Check for tops keywords
+  const topsKeywords = [
+    'shirt', 'tshirt', 't-shirt', 'blouse', 'top', 'sweater',
+    'hoodie', 'jacket', 'coat', 'polo', 'vest', 'cardigan',
+    'pullover', 'sweatshirt', 'blazer', 'jumper', 'tee'
+  ];
+  
+  for (const keyword of topsKeywords) {
+    if (urlLower.includes(keyword)) {
+      return 'tops';
+    }
+  }
+  
+  return null; // No clear signal from URL
+}
+
+// AI-powered classification using Lovable AI vision (used as fallback)
+async function classifyProductFromImage(imageUrl: string, urlProductType: 'tops' | 'trousers' | null): Promise<{ gender: string | null; productType: string | null }> {
   try {
     console.log(`Classifying image: ${imageUrl.substring(0, 80)}...`);
     
@@ -84,7 +119,12 @@ async function classifyProductFromImage(imageUrl: string): Promise<{ gender: str
 1. Gender: Is this a men's or women's garment? Look at the fit, style, and typical gender association.
 2. Product Type: Is this primarily a TOP (shirt, t-shirt, jacket, sweater, blouse, coat, hoodie, polo, vest) or TROUSERS (pants, jeans, shorts, skirt, leggings)?
 
-If the image shows a full outfit, determine which is more prominent - the top or the bottom garment.
+IMPORTANT: If the image shows a full outfit with both top and bottom visible:
+- Look at the page context and focus area
+- If the bottom garment (pants, jeans, shorts) appears to be the main focus, classify as "trousers"
+- Only classify as "tops" if the top garment is clearly the main product being sold
+- When in doubt and both are equally prominent, prefer "trousers" if the bottom looks like pants/jeans/shorts
+
 If you cannot determine with confidence, respond with null.`
           },
           {
@@ -133,7 +173,8 @@ If you cannot determine with confidence, respond with null.`
 
     if (!response.ok) {
       console.error('AI classification failed:', response.status);
-      return { gender: null, productType: null };
+      // Return URL-based product type if AI fails
+      return { gender: null, productType: urlProductType };
     }
 
     const data = await response.json();
@@ -142,17 +183,22 @@ If you cannot determine with confidence, respond with null.`
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
     if (toolCall?.function?.arguments) {
       const args = JSON.parse(toolCall.function.arguments);
-      console.log(`Classification result:`, args);
+      console.log(`AI Classification result:`, args);
+      
+      // URL-based product type takes precedence over AI classification
+      // because it's more reliable for identifying bottoms
+      const finalProductType = urlProductType || args.productType || null;
+      
       return {
         gender: args.gender || null,
-        productType: args.productType || null
+        productType: finalProductType
       };
     }
 
-    return { gender: null, productType: null };
+    return { gender: null, productType: urlProductType };
   } catch (err) {
     console.error('Error classifying image:', err);
-    return { gender: null, productType: null };
+    return { gender: null, productType: urlProductType };
   }
 }
 
@@ -353,9 +399,15 @@ async function runScrapeJob(
           continue;
         }
 
+        // First try URL-based product type classification (more reliable for bottoms)
+        const urlProductType = classifyProductTypeFromUrl(productUrl);
+        if (urlProductType) {
+          await addLog(`  URL-based product type: ${urlProductType}`);
+        }
+        
         // Use AI to classify from the first image (main product image)
         await addLog(`  Classifying product with AI vision...`);
-        const classification = await classifyProductFromImage(imageUrls[0]);
+        const classification = await classifyProductFromImage(imageUrls[0], urlProductType);
         
         // Use AI classification if available, fall back to URL-based gender
         const finalGender = classification.gender || urlGender;
