@@ -53,13 +53,23 @@ interface ClayImageWithMeta extends ClayImage {
     products: {
       brand_id: string;
       gender: string;
+      product_type: string;
     };
   };
+}
+
+interface TalentLook {
+  id: string;
+  talent_id: string;
+  name: string;
+  product_type: 'tops' | 'bottoms' | null;
+  created_at: string;
 }
 
 export function PoseGeneratorPanel() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [talents, setTalents] = useState<Talent[]>([]);
+  const [talentLooks, setTalentLooks] = useState<TalentLook[]>([]);
   const [talentImages, setTalentImages] = useState<TalentImage[]>([]);
   const [allClayImages, setAllClayImages] = useState<ClayImageWithMeta[]>([]);
   const [generations, setGenerations] = useState<Generation[]>([]);
@@ -70,10 +80,14 @@ export function PoseGeneratorPanel() {
   const [selectedGender, setSelectedGender] = useState("all");
   const [selectedSlots, setSelectedSlots] = useState<ImageSlot[]>([]);
   const [selectedTalent, setSelectedTalent] = useState("");
+  const [selectedLookId, setSelectedLookId] = useState("");
   const [selectedViews, setSelectedViews] = useState<TalentView[]>([]);
   const [randomCount, setRandomCount] = useState(5);
   const [attemptsPerPose, setAttemptsPerPose] = useState(3);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Get selected look
+  const selectedLook = talentLooks.find(l => l.id === selectedLookId);
 
   // Compute available views for selected talent
   const availableViews = useMemo(() => {
@@ -84,21 +98,31 @@ export function PoseGeneratorPanel() {
     }));
   }, [talentImages]);
 
-  // Compute clay image counts per slot
+  // Compute clay image counts per slot (filtered by look's product_type)
   const clayImagesBySlot = useMemo(() => {
     const result: Record<ImageSlot, ClayImageWithMeta[]> = { A: [], B: [], C: [], D: [] };
+    
+    // Map look product_type to product's product_type
+    const lookProductType = selectedLook?.product_type;
+    const productTypeFilter = lookProductType === 'tops' ? 'tops' : lookProductType === 'bottoms' ? 'trousers' : null;
     
     allClayImages.forEach(clay => {
       const slot = clay.product_images?.slot as ImageSlot;
       if (slot && result[slot]) {
-        if (selectedGender === "all" || clay.product_images?.products?.gender === selectedGender) {
-          result[slot].push(clay);
+        // Gender filter
+        if (selectedGender !== "all" && clay.product_images?.products?.gender !== selectedGender) {
+          return;
         }
+        // Product type filter based on look
+        if (productTypeFilter && clay.product_images?.products?.product_type !== productTypeFilter) {
+          return;
+        }
+        result[slot].push(clay);
       }
     });
     
     return result;
-  }, [allClayImages, selectedGender]);
+  }, [allClayImages, selectedGender, selectedLook]);
 
   // Compute pairing breakdown
   const pairingBreakdown = useMemo(() => {
@@ -188,9 +212,17 @@ export function PoseGeneratorPanel() {
 
   useEffect(() => {
     if (selectedTalent) {
-      fetchTalentImages();
+      fetchTalentLooks();
+      setSelectedLookId("");
+      setTalentImages([]);
     }
   }, [selectedTalent]);
+
+  useEffect(() => {
+    if (selectedLookId) {
+      fetchTalentImages();
+    }
+  }, [selectedLookId]);
 
   const fetchData = async () => {
     const [brandsRes, talentsRes] = await Promise.all([
@@ -205,7 +237,7 @@ export function PoseGeneratorPanel() {
   const fetchClayImages = async () => {
     const { data } = await supabase
       .from("clay_images")
-      .select("*, product_images!inner(slot, products!inner(brand_id, gender))")
+      .select("*, product_images!inner(slot, products!inner(brand_id, gender, product_type))")
       .eq("product_images.products.brand_id", selectedBrand);
 
     if (data) {
@@ -213,11 +245,27 @@ export function PoseGeneratorPanel() {
     }
   };
 
+  const fetchTalentLooks = async () => {
+    const { data } = await supabase
+      .from("talent_looks")
+      .select("*")
+      .eq("talent_id", selectedTalent)
+      .order("created_at", { ascending: true });
+
+    if (data) {
+      setTalentLooks(data as TalentLook[]);
+      // Auto-select first look
+      if (data.length > 0) {
+        setSelectedLookId(data[0].id);
+      }
+    }
+  };
+
   const fetchTalentImages = async () => {
     const { data } = await supabase
       .from("talent_images")
       .select("*")
-      .eq("talent_id", selectedTalent);
+      .eq("look_id", selectedLookId);
 
     if (data) setTalentImages(data);
   };
@@ -389,8 +437,8 @@ export function PoseGeneratorPanel() {
       <Card className="p-6">
         <h3 className="text-lg font-medium mb-4">Generate Pose Transfers</h3>
         
-        {/* Row 1: Brand, Gender, Talent */}
-        <div className="grid md:grid-cols-3 gap-4 mb-6">
+        {/* Row 1: Brand, Gender, Talent, Look */}
+        <div className="grid md:grid-cols-4 gap-4 mb-6">
           <div className="space-y-2">
             <Label>Brand</Label>
             <Select value={selectedBrand} onValueChange={setSelectedBrand}>
@@ -435,6 +483,31 @@ export function PoseGeneratorPanel() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Look</Label>
+            <Select 
+              value={selectedLookId} 
+              onValueChange={setSelectedLookId}
+              disabled={!selectedTalent || talentLooks.length === 0}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={talentLooks.length === 0 ? "No looks" : "Select look"} />
+              </SelectTrigger>
+              <SelectContent>
+                {talentLooks.map((look) => (
+                  <SelectItem key={look.id} value={look.id}>
+                    {look.name} {look.product_type && <span className="text-muted-foreground">({look.product_type})</span>}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedLook?.product_type && (
+              <p className="text-xs text-muted-foreground">
+                Filtering poses to: <Badge variant="secondary" className="text-xs">{selectedLook.product_type}</Badge>
+              </p>
+            )}
           </div>
         </div>
 

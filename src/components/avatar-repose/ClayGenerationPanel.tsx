@@ -21,6 +21,7 @@ export function ClayGenerationPanel() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<string>("");
   const [selectedGender, setSelectedGender] = useState<string>("all");
+  const [selectedProductType, setSelectedProductType] = useState<string>("all");
   const [selectedSlots, setSelectedSlots] = useState<Set<string>>(new Set(["A", "B", "C", "D"]));
   const [productImages, setProductImages] = useState<ProductImage[]>([]);
   const [clayImages, setClayImages] = useState<ClayImage[]>([]);
@@ -39,7 +40,7 @@ export function ClayGenerationPanel() {
       fetchProductImages();
       fetchClayImages();
     }
-  }, [selectedBrand, selectedGender]);
+  }, [selectedBrand, selectedGender, selectedProductType]);
 
   // Subscribe to clay_images inserts for real-time progress
   useEffect(() => {
@@ -88,11 +89,15 @@ export function ClayGenerationPanel() {
   const fetchProductImages = async () => {
     let query = supabase
       .from("product_images")
-      .select("*, products!inner(brand_id, gender)")
+      .select("*, products!inner(brand_id, gender, product_type)")
       .eq("products.brand_id", selectedBrand);
 
     if (selectedGender !== "all") {
       query = query.eq("products.gender", selectedGender);
+    }
+
+    if (selectedProductType !== "all") {
+      query = query.eq("products.product_type", selectedProductType);
     }
 
     const { data } = await query;
@@ -362,7 +367,7 @@ export function ClayGenerationPanel() {
       {/* Controls */}
       <Card className="p-6">
         <h3 className="text-lg font-medium mb-4">Generate Clay Models</h3>
-        <div className="grid md:grid-cols-4 gap-4">
+        <div className="grid md:grid-cols-3 gap-4 mb-4">
           <div className="space-y-2">
             <Label>Brand</Label>
             <Select value={selectedBrand} onValueChange={setSelectedBrand}>
@@ -394,8 +399,24 @@ export function ClayGenerationPanel() {
           </div>
 
           <div className="space-y-2">
+            <Label>Product Type</Label>
+            <Select value={selectedProductType} onValueChange={setSelectedProductType}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="tops">Tops</SelectItem>
+                <SelectItem value="trousers">Trousers</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="flex-1 space-y-2">
             <Label>Slots</Label>
-            <div className="flex gap-3 pt-2">
+            <div className="flex gap-4">
               {slots.map((slot) => (
                 <label key={slot} className="flex items-center gap-1.5 text-sm">
                   <Checkbox
@@ -407,26 +428,22 @@ export function ClayGenerationPanel() {
               ))}
             </div>
           </div>
-
-          <div className="flex items-end">
-            <Button
-              onClick={handleGenerateClay}
-              disabled={isGenerating || !selectedBrand}
-              className="w-full"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Palette className="w-4 h-4 mr-2" />
-                  Generate Clay
-                </>
-              )}
-            </Button>
-          </div>
+          <Button
+            onClick={handleGenerateClay}
+            disabled={isGenerating || !selectedBrand}
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Palette className="w-4 h-4 mr-2" />
+                Generate Clay
+              </>
+            )}
+          </Button>
         </div>
 
         {isGenerating && (

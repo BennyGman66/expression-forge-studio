@@ -15,6 +15,7 @@ interface TalentLook {
   id: string;
   talent_id: string;
   name: string;
+  product_type: 'tops' | 'bottoms' | null;
   created_at: string;
 }
 
@@ -34,6 +35,7 @@ export function TalentLibraryPanel() {
   const [newTalentGender, setNewTalentGender] = useState<string>("");
   const [isCreating, setIsCreating] = useState(false);
   const [newLookNames, setNewLookNames] = useState<Record<string, string>>({});
+  const [newLookProductTypes, setNewLookProductTypes] = useState<Record<string, 'tops' | 'bottoms'>>({});
   const [expandedTalents, setExpandedTalents] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState<string | null>(null);
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -68,7 +70,7 @@ export function TalentLibraryPanel() {
       .order("created_at", { ascending: true });
 
     if (looksData) {
-      setTalentLooks((prev) => ({ ...prev, [talentId]: looksData }));
+      setTalentLooks((prev) => ({ ...prev, [talentId]: looksData as TalentLook[] }));
 
       // Fetch images for each look
       for (const look of looksData) {
@@ -110,6 +112,7 @@ export function TalentLibraryPanel() {
         await supabase.from("talent_looks").insert({
           talent_id: talent.id,
           name: "Look 1",
+          product_type: "tops",
         });
       }
 
@@ -141,17 +144,35 @@ export function TalentLibraryPanel() {
       return;
     }
 
+    const productType = newLookProductTypes[talentId] || 'tops';
+
     try {
       await supabase.from("talent_looks").insert({
         talent_id: talentId,
         name: lookName,
+        product_type: productType,
       });
 
       setNewLookNames((prev) => ({ ...prev, [talentId]: "" }));
+      setNewLookProductTypes((prev) => ({ ...prev, [talentId]: 'tops' }));
       toast.success("Look added");
       fetchLooksForTalent(talentId);
     } catch (err) {
       toast.error("Failed to add look");
+    }
+  };
+
+  const handleUpdateLookProductType = async (lookId: string, talentId: string, productType: 'tops' | 'bottoms') => {
+    try {
+      await supabase
+        .from("talent_looks")
+        .update({ product_type: productType })
+        .eq("id", lookId);
+      
+      toast.success(`Updated to ${productType}`);
+      fetchLooksForTalent(talentId);
+    } catch (err) {
+      toast.error("Failed to update product type");
     }
   };
 
@@ -346,6 +367,20 @@ export function TalentLibraryPanel() {
                         placeholder="New look name (e.g. Summer, Casual)"
                         className="flex-1"
                       />
+                      <Select
+                        value={newLookProductTypes[talent.id] || 'tops'}
+                        onValueChange={(value: 'tops' | 'bottoms') =>
+                          setNewLookProductTypes((prev) => ({ ...prev, [talent.id]: value }))
+                        }
+                      >
+                        <SelectTrigger className="w-28">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="tops">Tops</SelectItem>
+                          <SelectItem value="bottoms">Bottoms</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <Button
                         size="sm"
                         variant="outline"
@@ -364,6 +399,20 @@ export function TalentLibraryPanel() {
                             <div className="flex items-center gap-2">
                               <Palette className="w-4 h-4 text-muted-foreground" />
                               <span className="font-medium text-sm">{look.name}</span>
+                              <Select
+                                value={look.product_type || 'tops'}
+                                onValueChange={(value: 'tops' | 'bottoms') => 
+                                  handleUpdateLookProductType(look.id, talent.id, value)
+                                }
+                              >
+                                <SelectTrigger className="h-6 w-24 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="tops">Tops</SelectItem>
+                                  <SelectItem value="bottoms">Bottoms</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </div>
                             <Button
                               variant="ghost"
