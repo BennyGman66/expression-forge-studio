@@ -80,7 +80,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
       supabase.removeChannel(channel);
     };
   }, [project.id]);
-  const handleExtractRecipes = async () => {
+  const handleExtractRecipes = async (model: string) => {
     if (brandRefs.length === 0) return;
 
     setIsExtracting(true);
@@ -91,6 +91,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
           imageUrls: brandRefs.map((r) => r.image_url),
           customPrompt: RECIPE_EXTRACTION_SYSTEM_PROMPT,
           projectId: project.id,
+          model,
         },
       });
 

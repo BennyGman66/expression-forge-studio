@@ -56,7 +56,7 @@ IMPORTANT:
 - Each recipe should be distinctly different from others`;
 
 // Background task to analyze images
-async function analyzeImagesTask(imageUrls: string[], customPrompt: string | undefined, projectId: string, supabaseUrl: string, supabaseKey: string) {
+async function analyzeImagesTask(imageUrls: string[], customPrompt: string | undefined, projectId: string, model: string, supabaseUrl: string, supabaseKey: string) {
   const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
   const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -97,7 +97,7 @@ async function analyzeImagesTask(imageUrls: string[], customPrompt: string | und
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: model,
         messages: [
           {
             role: 'user',
@@ -173,7 +173,7 @@ serve(async (req) => {
   }
 
   try {
-    const { imageUrls, customPrompt, projectId } = await req.json();
+    const { imageUrls, customPrompt, projectId, model } = await req.json();
 
     if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
       return new Response(
@@ -191,11 +191,12 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const selectedModel = model || 'google/gemini-2.5-pro';
 
-    console.log(`Starting expression analysis for ${imageUrls.length} images`);
+    console.log(`Starting expression analysis for ${imageUrls.length} images with model ${selectedModel}`);
 
     // Start background task
-    EdgeRuntime.waitUntil(analyzeImagesTask(imageUrls, customPrompt, projectId, supabaseUrl, supabaseKey));
+    EdgeRuntime.waitUntil(analyzeImagesTask(imageUrls, customPrompt, projectId, selectedModel, supabaseUrl, supabaseKey));
 
     // Return immediately
     return new Response(
