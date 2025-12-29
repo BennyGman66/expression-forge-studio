@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-export type WorkflowStep = "brand-refs" | "recipes" | "talent" | "generate" | "review";
+export type WorkflowStep = "brand-refs" | "recipes" | "talent" | "generate" | "review" | "expression-maps";
 
 interface WorkflowTabsProps {
   currentStep: WorkflowStep;
@@ -9,6 +9,7 @@ interface WorkflowTabsProps {
   recipesCount: number;
   modelsCount: number;
   outputsCount?: number;
+  exportsCount?: number;
 }
 
 const tabs: { id: WorkflowStep; label: string }[] = [
@@ -17,6 +18,7 @@ const tabs: { id: WorkflowStep; label: string }[] = [
   { id: "talent", label: "Digital Talent" },
   { id: "generate", label: "Generate" },
   { id: "review", label: "Review" },
+  { id: "expression-maps", label: "Expression Maps" },
 ];
 
 export function WorkflowTabs({
@@ -26,6 +28,7 @@ export function WorkflowTabs({
   recipesCount,
   modelsCount,
   outputsCount = 0,
+  exportsCount = 0,
 }: WorkflowTabsProps) {
   const getCount = (id: WorkflowStep): number | null => {
     switch (id) {
@@ -37,6 +40,8 @@ export function WorkflowTabs({
         return modelsCount > 0 ? modelsCount : null;
       case "review":
         return outputsCount > 0 ? outputsCount : null;
+      case "expression-maps":
+        return exportsCount > 0 ? exportsCount : null;
       default:
         return null;
     }
