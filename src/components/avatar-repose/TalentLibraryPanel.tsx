@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, DragEvent } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -35,6 +35,7 @@ export function TalentLibraryPanel() {
   const [isCreating, setIsCreating] = useState(false);
   const [newLookNames, setNewLookNames] = useState<Record<string, string>>({});
   const [expandedTalents, setExpandedTalents] = useState<Set<string>>(new Set());
+  const [dragOver, setDragOver] = useState<string | null>(null);
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
@@ -220,6 +221,34 @@ export function TalentLibraryPanel() {
     });
   };
 
+  const handleDragOver = (e: DragEvent<HTMLDivElement>, inputId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(inputId);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(null);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>, lookId: string, talentId: string, view: TalentView) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(null);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.type.startsWith('image/')) {
+        handleUploadImage(lookId, talentId, view, file);
+      } else {
+        toast.error("Please drop an image file");
+      }
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Create Talent */}
@@ -358,19 +387,28 @@ export function TalentLibraryPanel() {
                                     {VIEW_LABELS[view]}
                                   </p>
                                   <div
-                                    className="aspect-[3/4] rounded-lg border-2 border-dashed border-border bg-background overflow-hidden cursor-pointer hover:border-primary/50 transition-colors"
+                                    className={`aspect-[3/4] rounded-lg border-2 border-dashed bg-background overflow-hidden cursor-pointer transition-colors ${
+                                      dragOver === inputId 
+                                        ? 'border-primary bg-primary/10' 
+                                        : 'border-border hover:border-primary/50'
+                                    }`}
                                     onClick={() => fileInputRefs.current[inputId]?.click()}
+                                    onDragOver={(e) => handleDragOver(e, inputId)}
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={(e) => handleDrop(e, look.id, talent.id, view)}
                                   >
                                     {image ? (
                                       <img
                                         src={image.stored_url}
                                         alt={`${talent.name} ${look.name} ${view}`}
-                                        className="w-full h-full object-cover"
+                                        className="w-full h-full object-cover pointer-events-none"
                                       />
                                     ) : (
-                                      <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
+                                      <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground pointer-events-none">
                                         <Upload className="w-4 h-4 mb-1" />
-                                        <span className="text-[10px]">Upload</span>
+                                        <span className="text-[10px]">
+                                          {dragOver === inputId ? 'Drop here' : 'Drop or click'}
+                                        </span>
                                       </div>
                                     )}
                                   </div>
