@@ -36,7 +36,7 @@ interface ReviewPanelProps {
   }) => Promise<void>;
 }
 
-const GRID_TARGET_OPTIONS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+const GRID_TARGET_OPTIONS = [5, 10, 15, 16, 20, 25, 30, 35, 40, 45, 50];
 
 export function ReviewPanel({ 
   projectId, 
