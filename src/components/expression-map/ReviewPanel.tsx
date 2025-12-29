@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Check, Download, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { DigitalModel, DigitalModelRef } from "@/types";
@@ -170,6 +170,31 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
     }
   };
 
+  const handleLockIn = async () => {
+    const favoriteOutputs = outputs.filter((o) => favorites.has(o.id));
+    if (favoriteOutputs.length === 0) return;
+
+    const imageUrls = favoriteOutputs.map((o) => o.image_url).filter(Boolean);
+    const outputIds = favoriteOutputs.map((o) => o.id);
+    const name = `Expression Map ${new Date().toLocaleDateString()}`;
+
+    const { error } = await supabase.from("expression_map_exports").insert({
+      project_id: projectId,
+      name,
+      image_urls: imageUrls,
+      output_ids: outputIds,
+    });
+
+    if (error) {
+      console.error("Lock in failed:", error);
+      toast.error("Failed to save expression map");
+    } else {
+      toast.success("Expression map locked in!");
+      setFavorites(new Set());
+      setShowExport(false);
+    }
+  };
+
   const selectedModel = models.find((m) => m.id === selectedModelId);
   const modelOutputs = selectedModelId ? getModelOutputs(selectedModelId) : [];
   const favoriteOutputs = outputs.filter((o) => favorites.has(o.id));
@@ -190,10 +215,16 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
               </p>
             </div>
           </div>
-          <Button onClick={handleDownloadGrid}>
-            <Download className="w-4 h-4 mr-2" />
-            Download Grid
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleDownloadGrid}>
+              <Download className="w-4 h-4 mr-2" />
+              Download PNG
+            </Button>
+            <Button onClick={handleLockIn}>
+              <Lock className="w-4 h-4 mr-2" />
+              Lock In
+            </Button>
+          </div>
         </div>
 
         <div 

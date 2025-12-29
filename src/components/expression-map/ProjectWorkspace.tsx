@@ -6,6 +6,7 @@ import { RecipesPanel } from "@/components/expression-map/RecipesPanel";
 import { TalentPanel } from "@/components/expression-map/TalentPanel";
 import { GeneratePanel } from "@/components/expression-map/GeneratePanel";
 import { ReviewPanel } from "@/components/expression-map/ReviewPanel";
+import { ExpressionMapsReviewTab } from "@/components/expression-map/ExpressionMapsReviewTab";
 import { useProjectData } from "@/hooks/useProject";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -23,6 +24,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
   const [isExtracting, setIsExtracting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [outputsCount, setOutputsCount] = useState(0);
+  const [exportsCount, setExportsCount] = useState(0);
 
   const {
     brandRefs,
@@ -44,23 +46,30 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
 
   const masterPrompt = project.master_prompt || "";
 
-  // Fetch outputs count
+  // Fetch outputs and exports count
   useEffect(() => {
-    const fetchOutputsCount = async () => {
-      const { count } = await supabase
-        .from("outputs")
-        .select("*", { count: "exact", head: true })
-        .eq("project_id", project.id)
-        .eq("status", "completed")
-        .not("image_url", "is", null);
-      
-      setOutputsCount(count || 0);
+    const fetchCounts = async () => {
+      const [outputsResult, exportsResult] = await Promise.all([
+        supabase
+          .from("outputs")
+          .select("*", { count: "exact", head: true })
+          .eq("project_id", project.id)
+          .eq("status", "completed")
+          .not("image_url", "is", null),
+        supabase
+          .from("expression_map_exports")
+          .select("*", { count: "exact", head: true })
+          .eq("project_id", project.id),
+      ]);
+
+      setOutputsCount(outputsResult.count || 0);
+      setExportsCount(exportsResult.count || 0);
     };
 
-    fetchOutputsCount();
+    fetchCounts();
 
-    // Subscribe to new outputs
-    const channel = supabase
+    // Subscribe to outputs
+    const outputsChannel = supabase
       .channel("workspace-outputs")
       .on(
         "postgres_changes",
@@ -70,14 +79,28 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
           table: "outputs",
           filter: `project_id=eq.${project.id}`,
         },
-        () => {
-          fetchOutputsCount();
-        }
+        () => fetchCounts()
+      )
+      .subscribe();
+
+    // Subscribe to exports
+    const exportsChannel = supabase
+      .channel("workspace-exports")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "expression_map_exports",
+          filter: `project_id=eq.${project.id}`,
+        },
+        () => fetchCounts()
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(outputsChannel);
+      supabase.removeChannel(exportsChannel);
     };
   }, [project.id]);
   const handleExtractRecipes = async (model: string) => {
@@ -344,6 +367,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
           recipesCount={recipes.length}
           modelsCount={digitalModels.length}
           outputsCount={outputsCount}
+          exportsCount={exportsCount}
         />
       </div>
 
@@ -400,6 +424,10 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
             models={digitalModels}
             modelRefs={modelRefs}
           />
+        )}
+
+        {currentStep === "expression-maps" && (
+          <ExpressionMapsReviewTab projectId={project.id} />
         )}
       </main>
     </div>

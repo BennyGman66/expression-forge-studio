@@ -160,6 +160,41 @@ export type Database = {
           },
         ]
       }
+      expression_map_exports: {
+        Row: {
+          created_at: string
+          id: string
+          image_urls: Json
+          name: string
+          output_ids: Json
+          project_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          image_urls?: Json
+          name: string
+          output_ids?: Json
+          project_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          image_urls?: Json
+          name?: string
+          output_ids?: Json
+          project_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expression_map_exports_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expression_recipes: {
         Row: {
           created_at: string
