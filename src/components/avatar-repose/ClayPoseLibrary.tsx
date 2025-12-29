@@ -25,7 +25,14 @@ interface ClayPoseItem {
   brand_name: string;
 }
 
-const SLOTS = ["A", "B", "C", "D"] as const;
+// Display order: A (Full Front), B (Cropped Front), D (Detail), C (Full Back)
+const SLOTS = ["A", "B", "D", "C"] as const;
+const SLOT_LABELS: Record<string, string> = {
+  A: "Full Front",
+  B: "Cropped Front",
+  D: "Detail",
+  C: "Full Back",
+};
 const GENDERS = ["women", "men"] as const;
 const PRODUCT_TYPES = ["tops", "trousers"] as const;
 
@@ -201,7 +208,7 @@ export function ClayPoseLibrary() {
                 <div key={slot} className="space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-muted-foreground">
-                      Slot {slot}
+                      {slot}: {SLOT_LABELS[slot]}
                     </span>
                     <Badge variant="outline" className="text-xs">
                       {poses.length}
@@ -265,7 +272,7 @@ export function ClayPoseLibrary() {
                       return (
                         <div key={slot} className="space-y-2">
                           <div className="text-sm font-medium text-muted-foreground text-center">
-                            Slot {slot}
+                            {slot}: {SLOT_LABELS[slot]}
                           </div>
                           <ScrollArea className="h-48 border rounded-lg bg-muted/30">
                             <div className="p-2 space-y-2">
