@@ -12,7 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Download, Trash2, Eye, Pencil, Check, X } from "lucide-react";
+import { Download, Trash2, Eye, Pencil, Check, X, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -27,9 +27,10 @@ interface ExpressionMapExport {
 
 interface ExpressionMapsReviewTabProps {
   projectId: string;
+  onAddMore?: () => void;
 }
 
-export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabProps) {
+export function ExpressionMapsReviewTab({ projectId, onAddMore }: ExpressionMapsReviewTabProps) {
   const [exports, setExports] = useState<ExpressionMapExport[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedExport, setSelectedExport] = useState<ExpressionMapExport | null>(null);
@@ -238,11 +239,19 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h2 className="text-2xl font-serif">Expression Maps</h2>
-        <p className="text-sm text-muted-foreground">
-          Previously locked-in expression selections
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-serif">Expression Maps</h2>
+          <p className="text-sm text-muted-foreground">
+            Previously locked-in expression selections
+          </p>
+        </div>
+        {onAddMore && (
+          <Button onClick={onAddMore} variant="outline">
+            <Plus className="w-4 h-4 mr-2" />
+            Add More
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-4">
