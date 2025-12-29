@@ -153,12 +153,13 @@ export function ClayGenerationPanel() {
     }
   };
 
-  const slots: ImageSlot[] = ["A", "B", "C", "D"];
+  // Display order: A (Full Front), B (Cropped Front), D (Detail), C (Full Back)
+  const slots: ImageSlot[] = ["A", "B", "D", "C"];
   const slotLabels: Record<ImageSlot, string> = {
-    A: "Cropped",
-    B: "Detail",
-    C: "Back",
-    D: "Full Front",
+    A: "Full Front",
+    B: "Cropped Front",
+    D: "Detail",
+    C: "Full Back",
   };
 
   const getImagesForSlot = (slot: string) => {
