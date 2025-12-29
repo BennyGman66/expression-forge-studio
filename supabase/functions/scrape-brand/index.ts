@@ -10,6 +10,7 @@ const corsHeaders = {
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const firecrawlApiKey = Deno.env.get('FIRECRAWL_API_KEY')!;
+const lovableApiKey = Deno.env.get('LOVABLE_API_KEY')!;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -63,6 +64,98 @@ serve(async (req) => {
   }
 });
 
+// AI-powered classification using Lovable AI vision
+async function classifyProductFromImage(imageUrl: string): Promise<{ gender: string | null; productType: string | null }> {
+  try {
+    console.log(`Classifying image: ${imageUrl.substring(0, 80)}...`);
+    
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a fashion product classifier. Analyze the clothing image and determine:
+1. Gender: Is this a men's or women's garment? Look at the fit, style, and typical gender association.
+2. Product Type: Is this primarily a TOP (shirt, t-shirt, jacket, sweater, blouse, coat, hoodie, polo, vest) or TROUSERS (pants, jeans, shorts, skirt, leggings)?
+
+If the image shows a full outfit, determine which is more prominent - the top or the bottom garment.
+If you cannot determine with confidence, respond with null.`
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: imageUrl }
+              },
+              {
+                type: 'text',
+                text: 'Classify this clothing item. Respond with a JSON object: {"gender": "men" or "women" or null, "productType": "tops" or "trousers" or null}'
+              }
+            ]
+          }
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'classify_product',
+              description: 'Classify a clothing product by gender and type',
+              parameters: {
+                type: 'object',
+                properties: {
+                  gender: {
+                    type: 'string',
+                    enum: ['men', 'women'],
+                    description: 'The target gender for this garment'
+                  },
+                  productType: {
+                    type: 'string',
+                    enum: ['tops', 'trousers'],
+                    description: 'Whether this is a top or bottom/trousers'
+                  }
+                },
+                required: []
+              }
+            }
+          }
+        ],
+        tool_choice: { type: 'function', function: { name: 'classify_product' } },
+        max_tokens: 150
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('AI classification failed:', response.status);
+      return { gender: null, productType: null };
+    }
+
+    const data = await response.json();
+    
+    // Extract from tool call
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (toolCall?.function?.arguments) {
+      const args = JSON.parse(toolCall.function.arguments);
+      console.log(`Classification result:`, args);
+      return {
+        gender: args.gender || null,
+        productType: args.productType || null
+      };
+    }
+
+    return { gender: null, productType: null };
+  } catch (err) {
+    console.error('Error classifying image:', err);
+    return { gender: null, productType: null };
+  }
+}
+
 async function runScrapeJob(
   supabase: any,
   jobId: string,
@@ -89,7 +182,6 @@ async function runScrapeJob(
     await addLog('Starting site mapping...');
     
     // Step 1: Map the entire website from root to find all product URLs
-    // Use root domain for better coverage
     const mapResponse = await fetch('https://api.firecrawl.dev/v1/map', {
       method: 'POST',
       headers: {
@@ -97,7 +189,7 @@ async function runScrapeJob(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        url: baseOrigin,  // Map from root for full coverage
+        url: baseOrigin,
         limit: 10000,
         includeSubdomains: false,
       }),
@@ -114,50 +206,23 @@ async function runScrapeJob(
     const allLinks: string[] = mapData.links || [];
     await addLog(`Found ${allLinks.length} total URLs on site`);
     
-    // Log some sample URLs for debugging
     console.log('Sample URLs:', allLinks.slice(0, 20));
 
     // Step 2: Identify product page URLs
-    // Product URLs typically end with a SKU pattern or have product-like paths
     const productUrls = allLinks.filter((url: string) => {
-      // Check for SKU patterns at end of URL (common e-commerce pattern)
-      // Examples: mw0mw17770d03, ww0ww12345abc
       const hasSkuAtEnd = /[a-z]{2}\d[a-z]{2}\d+[a-z0-9]*$/i.test(url);
-      
-      // Check for common product path patterns
       const hasProductPath = /\/(product|item|p)\/[^\/]+$/i.test(url);
-      
-      // Check for slug-sku pattern (product-name-sku123)
       const hasSlugSku = /-[a-z]{2}\d[a-z]{2}\d+[a-z0-9]*$/i.test(url);
-      
-      // Must be on the same domain
       const isSameDomain = url.startsWith(baseOrigin);
       
-      // Exclude patterns that are NOT product pages
       const excludePatterns = [
-        /\/collections\//i,
-        /\/category\//i,
-        /\/c\//i,           // Category shorthand
-        /\/search/i,
-        /\/cart/i,
-        /\/checkout/i,
-        /\/account/i,
-        /\/help/i,
-        /\/faq/i,
-        /\/about/i,
-        /\/contact/i,
-        /\/stores/i,
-        /\/store\//i,
-        /\/size-guide/i,
-        /\/terms/i,
-        /\/privacy/i,
-        /\/returns/i,
-        /\/shipping/i,
-        /\/wishlist/i,
-        /\/login/i,
-        /\/register/i,
-        /\.pdf$/i,
-        /\?/,  // Query params usually indicate filters
+        /\/collections\//i, /\/category\//i, /\/c\//i,
+        /\/search/i, /\/cart/i, /\/checkout/i, /\/account/i,
+        /\/help/i, /\/faq/i, /\/about/i, /\/contact/i,
+        /\/stores/i, /\/store\//i, /\/size-guide/i,
+        /\/terms/i, /\/privacy/i, /\/returns/i, /\/shipping/i,
+        /\/wishlist/i, /\/login/i, /\/register/i,
+        /\.pdf$/i, /\?/,
       ];
       
       const matchesExclude = excludePatterns.some(p => p.test(url));
@@ -168,7 +233,7 @@ async function runScrapeJob(
     await addLog(`Found ${productUrls.length} potential product URLs`);
     console.log('Sample product URLs:', productUrls.slice(0, 10));
 
-    // If no products found with SKU patterns, try a fallback: longer URL paths
+    // Fallback detection if no products found
     let finalProductUrls = productUrls;
     if (productUrls.length === 0) {
       await addLog('No SKU patterns found, trying fallback detection...');
@@ -176,15 +241,12 @@ async function runScrapeJob(
       finalProductUrls = allLinks.filter((url: string) => {
         const isSameDomain = url.startsWith(baseOrigin);
         const pathParts = new URL(url).pathname.split('/').filter(Boolean);
-        
-        // Products typically have a single path segment that's long (product slug)
-        // and NOT matching category patterns
         const isLikelyProduct = pathParts.length === 1 && 
                                 pathParts[0].length > 20 && 
                                 pathParts[0].includes('-');
         
         const excludePatterns = [
-          /^mens?-/i, /^womens?-/i, /^kids?-/i,  // Category prefixes
+          /^mens?-/i, /^womens?-/i, /^kids?-/i,
           /-sale$/i, /-new$/i,
           /^sale/i, /^about/i, /^help/i, /^contact/i,
         ];
@@ -197,7 +259,7 @@ async function runScrapeJob(
       await addLog(`Fallback found ${finalProductUrls.length} potential products`);
     }
 
-    // Separate by gender based on URL path
+    // Separate by gender based on URL path (initial guess)
     const menUrls = finalProductUrls.filter((url: string) => 
       /\/men[\/\-s]|mens-|\/homme/i.test(url)
     );
@@ -208,20 +270,17 @@ async function runScrapeJob(
       !menUrls.includes(url) && !womenUrls.includes(url)
     );
 
-    await addLog(`Categorized: ${menUrls.length} men's, ${womenUrls.length} women's, ${otherUrls.length} unisex/other`);
+    await addLog(`URL-based categorization: ${menUrls.length} men's, ${womenUrls.length} women's, ${otherUrls.length} other`);
 
-    // Balance the selection between genders, with priority based on start URL
+    // Balance the selection
     let selectedUrls: string[] = [];
     const startUrlLower = startUrl.toLowerCase();
     
     if (startUrlLower.includes('/men') || startUrlLower.includes('mens')) {
-      // Prioritize men's products
       selectedUrls = [...menUrls.slice(0, limit), ...otherUrls.slice(0, limit - menUrls.length)].slice(0, limit);
     } else if (startUrlLower.includes('/women') || startUrlLower.includes('womens')) {
-      // Prioritize women's products
       selectedUrls = [...womenUrls.slice(0, limit), ...otherUrls.slice(0, limit - womenUrls.length)].slice(0, limit);
     } else {
-      // Mix both
       const halfLimit = Math.ceil(limit / 2);
       selectedUrls = [
         ...menUrls.slice(0, halfLimit),
@@ -251,32 +310,15 @@ async function runScrapeJob(
       try {
         await addLog(`[${processed + 1}/${selectedUrls.length}] Scraping: ${productUrl.substring(0, 80)}...`);
 
-        // Determine gender from URL
-        let gender = null;
+        // Initial gender guess from URL
+        let urlGender: string | null = null;
         if (/\/men[\/\-s]|mens-|\/homme/i.test(productUrl)) {
-          gender = 'men';
+          urlGender = 'men';
         } else if (/\/women[\/\-s]|womens-|\/femme/i.test(productUrl)) {
-          gender = 'women';
+          urlGender = 'women';
         }
 
-        // Create product record
-        const { data: product, error: productError } = await supabase
-          .from('products')
-          .insert({
-            brand_id: brandId,
-            product_url: productUrl,
-            sku: extractSku(productUrl),
-            gender,
-          })
-          .select()
-          .single();
-
-        if (productError) {
-          console.error('Failed to create product:', productError);
-          continue;
-        }
-
-        // Scrape the product page
+        // Scrape the product page first to get images
         const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
           method: 'POST',
           headers: {
@@ -287,33 +329,70 @@ async function runScrapeJob(
             url: productUrl,
             formats: ['html'],
             onlyMainContent: false,
-            waitFor: 3000, // Wait for images to load
+            waitFor: 3000,
           }),
         });
 
         const scrapeData = await scrapeResponse.json();
 
-        if (scrapeResponse.ok && scrapeData.success) {
-          const html = scrapeData.data?.html || '';
-          
-          // Extract product gallery images
-          const imageUrls = extractProductGalleryImages(html, productUrl);
-          
-          await addLog(`  Found ${imageUrls.length} product images`);
-          
-          // Store up to 4 images (slots A-D)
-          for (let i = 0; i < Math.min(imageUrls.length, 4); i++) {
-            await supabase
-              .from('product_images')
-              .insert({
-                product_id: product.id,
-                slot: slots[i],
-                source_url: imageUrls[i],
-                stored_url: imageUrls[i],
-              });
-          }
-        } else {
+        if (!scrapeResponse.ok || !scrapeData.success) {
           await addLog(`  Failed to scrape product page`);
+          processed++;
+          await supabase.from('scrape_jobs').update({ progress: processed }).eq('id', jobId);
+          continue;
+        }
+
+        const html = scrapeData.data?.html || '';
+        const imageUrls = extractProductGalleryImages(html, productUrl);
+        
+        await addLog(`  Found ${imageUrls.length} product images`);
+
+        if (imageUrls.length === 0) {
+          processed++;
+          await supabase.from('scrape_jobs').update({ progress: processed }).eq('id', jobId);
+          continue;
+        }
+
+        // Use AI to classify from the first image (main product image)
+        await addLog(`  Classifying product with AI vision...`);
+        const classification = await classifyProductFromImage(imageUrls[0]);
+        
+        // Use AI classification if available, fall back to URL-based gender
+        const finalGender = classification.gender || urlGender;
+        const finalProductType = classification.productType;
+        
+        await addLog(`  Classification: gender=${finalGender}, type=${finalProductType}`);
+
+        // Create product record with classification
+        const { data: product, error: productError } = await supabase
+          .from('products')
+          .insert({
+            brand_id: brandId,
+            product_url: productUrl,
+            sku: extractSku(productUrl),
+            gender: finalGender,
+            product_type: finalProductType,
+          })
+          .select()
+          .single();
+
+        if (productError) {
+          console.error('Failed to create product:', productError);
+          processed++;
+          await supabase.from('scrape_jobs').update({ progress: processed }).eq('id', jobId);
+          continue;
+        }
+
+        // Store up to 4 images (slots A-D)
+        for (let i = 0; i < Math.min(imageUrls.length, 4); i++) {
+          await supabase
+            .from('product_images')
+            .insert({
+              product_id: product.id,
+              slot: slots[i],
+              source_url: imageUrls[i],
+              stored_url: imageUrls[i],
+            });
         }
 
         processed++;
@@ -328,12 +407,14 @@ async function runScrapeJob(
       } catch (err) {
         console.error(`Error processing ${productUrl}:`, err);
         await addLog(`  Error: ${err instanceof Error ? err.message : 'Unknown'}`);
+        processed++;
+        await supabase.from('scrape_jobs').update({ progress: processed }).eq('id', jobId);
       }
     }
 
     // Mark job as complete
     await updateJobStatus(supabase, jobId, 'completed');
-    await addLog(`Completed: ${processed} products scraped`);
+    await addLog(`Completed: ${processed} products scraped with AI classification`);
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -350,16 +431,12 @@ async function updateJobStatus(supabase: any, jobId: string, status: string, ext
 }
 
 function extractSku(url: string): string | null {
-  // Try to extract SKU from URL patterns
-  // Pattern: slug-MW0MW17770D03 (Tommy style)
   const tommyMatch = url.match(/[_-]([a-z]{2}\d[a-z]{2}\d+[a-z0-9]*)$/i);
   if (tommyMatch) return tommyMatch[1].toUpperCase();
   
-  // Pattern: /product/SKU or /p/SKU
   const pathMatch = url.match(/\/(?:product|item|p)\/([^\/]+)$/i);
   if (pathMatch) return pathMatch[1].toUpperCase();
   
-  // Generic: last path segment if it looks like a SKU
   const lastSegment = url.split('/').pop() || '';
   if (/^[A-Z0-9-_]{6,}$/i.test(lastSegment)) {
     return lastSegment.toUpperCase();
@@ -379,18 +456,18 @@ function extractProductGalleryImages(html: string, baseUrl: string): string[] {
     baseOrigin = '';
   }
 
-  // Priority 1: Scene7 image URLs (used by many fashion brands)
+  // Priority 1: Scene7 image URLs
   const scene7Regex = /https?:\/\/[^"'\s]+scene7[^"'\s]+\.(jpg|jpeg|png|webp)/gi;
   let match;
   while ((match = scene7Regex.exec(html)) !== null) {
-    const src = match[0].split('?')[0]; // Remove query params to get base image
+    const src = match[0].split('?')[0];
     if (src && !seenUrls.has(src) && !isExcludedImage(src)) {
       seenUrls.add(src);
       images.push(src);
     }
   }
 
-  // Priority 2: Look for high-res product images in data attributes
+  // Priority 2: High-res product images in data attributes
   const dataAttrRegex = /data-(?:zoom|large|full|high|src|lazy|main|image)(?:-image|-src)?=["']([^"']+)["']/gi;
   while ((match = dataAttrRegex.exec(html)) !== null) {
     const src = normalizeImageUrl(match[1], baseOrigin);
@@ -414,7 +491,7 @@ function extractProductGalleryImages(html: string, baseUrl: string): string[] {
               const normalized = normalizeImageUrl(src, baseOrigin);
               if (normalized && !seenUrls.has(normalized) && !isExcludedImage(normalized)) {
                 seenUrls.add(normalized);
-                images.unshift(normalized); // Schema images are high priority
+                images.unshift(normalized);
               }
             }
           }
@@ -459,7 +536,6 @@ function extractProductGalleryImages(html: string, baseUrl: string): string[] {
     const imgTag = match[0];
     const src = normalizeImageUrl(match[1], baseOrigin);
     
-    // Check if this looks like a product image
     const isProductContext = /class=["'][^"']*(product|gallery|pdp|hero|main|carousel|slider)[^"']*["']/i.test(imgTag);
     
     if (src && !seenUrls.has(src) && !isExcludedImage(src) && isProductContext) {
@@ -468,7 +544,6 @@ function extractProductGalleryImages(html: string, baseUrl: string): string[] {
     }
   }
 
-  // Dedupe and return top 10
   return [...new Set(images)].slice(0, 10);
 }
 
@@ -498,5 +573,5 @@ function isExcludedImage(url: string): boolean {
     'thumbnail', 'thumb', '_xs', '_xxs', '_tiny', 'mini',
     '_50', '_100', '_150', 'w_50', 'w_100', 'h_50', 'h_100',
   ];
-  return excludes.some(e => lower.includes(e));
+  return excludes.some(ex => lower.includes(ex));
 }
