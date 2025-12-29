@@ -5,9 +5,10 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ArrowLeft, Download, ChevronDown, ChevronRight, Check, FileText } from "lucide-react";
+import { ArrowLeft, Download, ChevronDown, ChevronRight, Check, FileText, Send } from "lucide-react";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
+import { SendToClientDialog } from "./SendToClientDialog";
 
 const SLOT_LABELS: Record<string, string> = {
   A: "A: Full Front",
@@ -47,7 +48,7 @@ export function PoseReviewPanel({ jobId, onBack }: PoseReviewPanelProps) {
   const [selectedBySlot, setSelectedBySlot] = useState<Record<string, string[]>>({});
   const [expandedLooks, setExpandedLooks] = useState<string[]>([]);
   const [isExporting, setIsExporting] = useState(false);
-
+  const [showSendDialog, setShowSendDialog] = useState(false);
   useEffect(() => {
     fetchGenerations();
   }, [jobId]);
@@ -151,6 +152,22 @@ export function PoseReviewPanel({ jobId, onBack }: PoseReviewPanelProps) {
 
   // Count total selections
   const totalSelections = Object.values(selectedBySlot).flat().length;
+
+  // Get selected images for SendToClientDialog
+  const getSelectedImages = () => {
+    const selected: { generationId: string; slot: string; lookId: string | null }[] = [];
+    Object.entries(selectedBySlot).forEach(([key, genIds]) => {
+      const [lookId, slot] = key.split("_");
+      genIds.forEach((genId) => {
+        selected.push({
+          generationId: genId,
+          slot,
+          lookId: lookId === "unknown" ? null : lookId,
+        });
+      });
+    });
+    return selected;
+  };
 
   // Export to PDF
   const handleExportPDF = async () => {
@@ -293,6 +310,15 @@ export function PoseReviewPanel({ jobId, onBack }: PoseReviewPanelProps) {
             {totalSelections} selected
           </Badge>
           <Button 
+            variant="outline"
+            onClick={() => setShowSendDialog(true)} 
+            disabled={totalSelections === 0}
+            className="gap-2"
+          >
+            <Send className="w-4 h-4" />
+            Send to Client
+          </Button>
+          <Button 
             onClick={handleExportPDF} 
             disabled={isExporting || totalSelections === 0}
             className="gap-2"
@@ -302,6 +328,17 @@ export function PoseReviewPanel({ jobId, onBack }: PoseReviewPanelProps) {
           </Button>
         </div>
       </div>
+
+      {/* Send to Client Dialog */}
+      <SendToClientDialog
+        open={showSendDialog}
+        onOpenChange={setShowSendDialog}
+        selectedImages={getSelectedImages()}
+        onSuccess={() => {
+          setSelectedBySlot({});
+          toast.success("Images sent to client review!");
+        }}
+      />
 
       {/* Instructions */}
       <Card className="p-4 bg-muted/50">
