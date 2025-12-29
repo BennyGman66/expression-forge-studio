@@ -185,7 +185,14 @@ export function PoseGeneratorPanel() {
     return talentImages.find((img) => img.view === selectedView);
   };
 
-  const slots: ImageSlot[] = ["A", "B", "C", "D"];
+  // Display order: A (Full Front), B (Cropped Front), D (Detail), C (Full Back)
+  const slots: ImageSlot[] = ["A", "B", "D", "C"];
+  const SLOT_LABELS: Record<string, string> = {
+    A: "Full Front",
+    B: "Cropped Front",
+    D: "Detail",
+    C: "Full Back",
+  };
   const views: TalentView[] = ["front", "back", "detail", "side"];
 
   // Group generations by pose
@@ -243,7 +250,7 @@ export function PoseGeneratorPanel() {
               <SelectContent>
                 {slots.map((slot) => (
                   <SelectItem key={slot} value={slot}>
-                    {slot}
+                    {slot}: {SLOT_LABELS[slot]}
                   </SelectItem>
                 ))}
               </SelectContent>
