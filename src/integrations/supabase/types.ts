@@ -93,7 +93,7 @@ export type Database = {
           {
             foreignKeyName: "clay_images_product_image_id_fkey"
             columns: ["product_image_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "product_images"
             referencedColumns: ["id"]
           },

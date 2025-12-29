@@ -291,16 +291,16 @@ async function processImages(supabase: any, jobId: string, imageIds: string[], l
         .from("images")
         .getPublicUrl(fileName);
 
-      // Save to clay_images table
-      const { error: insertError } = await supabase
+      // Save to clay_images table using upsert to prevent duplicates
+      const { error: upsertError } = await supabase
         .from("clay_images")
-        .insert({
+        .upsert({
           product_image_id: imageId,
           stored_url: publicUrl,
-        });
+        }, { onConflict: 'product_image_id' });
 
-      if (insertError) {
-        console.error(`Insert error for ${imageId}:`, insertError);
+      if (upsertError) {
+        console.error(`Upsert error for ${imageId}:`, upsertError);
         processed++;
         await updateJobProgress(supabase, jobId, processed, imageIds.length);
         continue;
