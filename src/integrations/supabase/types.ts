@@ -212,7 +212,7 @@ export type Database = {
           generation_job_id: string | null
           id: string
           name: string
-          password_hash: string
+          password_hash: string | null
           project_id: string | null
           status: string
           updated_at: string
@@ -222,7 +222,7 @@ export type Database = {
           generation_job_id?: string | null
           id?: string
           name: string
-          password_hash: string
+          password_hash?: string | null
           project_id?: string | null
           status?: string
           updated_at?: string
@@ -232,7 +232,7 @@ export type Database = {
           generation_job_id?: string | null
           id?: string
           name?: string
-          password_hash?: string
+          password_hash?: string | null
           project_id?: string | null
           status?: string
           updated_at?: string

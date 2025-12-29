@@ -1,11 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Heart, ChevronDown, ChevronRight, Lock, Send } from "lucide-react";
+import { Heart, ArrowLeft, Send, MessageSquare } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -41,30 +39,18 @@ const SLOT_LABELS: Record<string, string> = {
 
 export default function ClientReview() {
   const { reviewId } = useParams<{ reviewId: string }>();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [password, setPassword] = useState("");
-  const [isVerifying, setIsVerifying] = useState(false);
   const [reviewName, setReviewName] = useState("");
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [lookInfoMap, setLookInfoMap] = useState<Record<string, LookInfo>>({});
-  const [expandedLooks, setExpandedLooks] = useState<Set<string>>(new Set());
   const [feedback, setFeedback] = useState<FeedbackState>({});
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
 
-  // Check session storage for existing auth
+  // Fetch review data on mount
   useEffect(() => {
-    const sessionKey = `review_auth_${reviewId}`;
-    const isAuthed = sessionStorage.getItem(sessionKey) === "true";
-    if (isAuthed) {
-      setIsAuthenticated(true);
-    }
-  }, [reviewId]);
-
-  // Fetch review data when authenticated
-  useEffect(() => {
-    if (!isAuthenticated || !reviewId) return;
+    if (!reviewId) return;
 
     const fetchReviewData = async () => {
       setIsLoading(true);
@@ -74,9 +60,17 @@ export default function ClientReview() {
           .from("client_reviews")
           .select("name")
           .eq("id", reviewId)
-          .single();
+          .maybeSingle();
 
         if (reviewError) throw reviewError;
+        if (!reviewData) {
+          toast({
+            title: "Review not found",
+            description: "This review link may be invalid",
+            variant: "destructive",
+          });
+          return;
+        }
         setReviewName(reviewData.name);
 
         // Fetch review items with generation URLs
@@ -121,11 +115,6 @@ export default function ClientReview() {
             };
           });
           setLookInfoMap(lookMap);
-
-          // Expand first look by default
-          if (lookIds.length > 0) {
-            setExpandedLooks(new Set([lookIds[0] as string]));
-          }
         }
 
         // Fetch existing feedback
@@ -163,40 +152,7 @@ export default function ClientReview() {
     };
 
     fetchReviewData();
-  }, [isAuthenticated, reviewId]);
-
-  const handleVerifyPassword = async () => {
-    if (!password.trim()) return;
-
-    setIsVerifying(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("verify-review-password", {
-        body: { reviewId, password },
-      });
-
-      if (error) throw error;
-
-      if (data.valid) {
-        sessionStorage.setItem(`review_auth_${reviewId}`, "true");
-        setIsAuthenticated(true);
-      } else {
-        toast({
-          title: "Invalid password",
-          description: "Please check the password and try again",
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      console.error("Error verifying password:", error);
-      toast({
-        title: "Error",
-        description: "Failed to verify password",
-        variant: "destructive",
-      });
-    } finally {
-      setIsVerifying(false);
-    }
-  };
+  }, [reviewId]);
 
   const toggleFavorite = (itemId: string) => {
     setFeedback((prev) => ({
@@ -272,7 +228,7 @@ export default function ClientReview() {
     }
   };
 
-  // Group items by look and slot
+  // Group items by look
   const groupedByLook = useMemo(() => {
     const result: Record<string, Record<string, ReviewItem[]>> = {};
 
@@ -292,46 +248,44 @@ export default function ClientReview() {
     return result;
   }, [items]);
 
+  const lookIds = Object.keys(groupedByLook);
+
   const getFavoriteCount = () => {
     return Object.values(feedback).filter((fb) => fb.is_favorite).length;
   };
 
-  // Password gate
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <Lock className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <CardTitle>Protected Review</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground text-center">
-              Enter the password to access this review
-            </p>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleVerifyPassword()}
-              />
-            </div>
-            <Button
-              className="w-full"
-              onClick={handleVerifyPassword}
-              disabled={isVerifying || !password.trim()}
-            >
-              {isVerifying ? "Verifying..." : "Access Review"}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const getCommentCountForLook = (lookId: string) => {
+    const slots = groupedByLook[lookId] || {};
+    let count = 0;
+    Object.values(slots).forEach((slotItems) => {
+      slotItems.forEach((item) => {
+        if (feedback[item.id]?.comment.trim()) count++;
+      });
+    });
+    return count;
+  };
+
+  const getFavoriteCountForLook = (lookId: string) => {
+    const slots = groupedByLook[lookId] || {};
+    let count = 0;
+    Object.values(slots).forEach((slotItems) => {
+      slotItems.forEach((item) => {
+        if (feedback[item.id]?.is_favorite) count++;
+      });
+    });
+    return count;
+  };
+
+  const getLookThumbnails = (lookId: string) => {
+    const slots = groupedByLook[lookId] || {};
+    const images: string[] = [];
+    ["A", "B", "C", "D"].forEach((slot) => {
+      if (slots[slot]?.[0]?.stored_url) {
+        images.push(slots[slot][0].stored_url);
+      }
+    });
+    return images.slice(0, 4);
+  };
 
   if (isLoading) {
     return (
@@ -341,14 +295,130 @@ export default function ClientReview() {
     );
   }
 
+  // Detail view for a selected look
+  if (selectedLookId) {
+    const lookInfo = lookInfoMap[selectedLookId];
+    const slotGroups = groupedByLook[selectedLookId] || {};
+
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="border-b border-border bg-card sticky top-0 z-10">
+          <div className="px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedLookId(null)}
+              >
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Looks
+              </Button>
+              <div>
+                <h1 className="text-xl font-medium">
+                  {lookInfo?.name || "Look"}
+                </h1>
+                {lookInfo && (
+                  <p className="text-sm text-muted-foreground">
+                    {lookInfo.talent_name}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-muted-foreground">
+                {getFavoriteCount()} favorite(s) total
+              </span>
+              <Button onClick={handleSubmitFeedback} disabled={isSubmitting}>
+                <Send className="h-4 w-4 mr-2" />
+                {isSubmitting
+                  ? "Submitting..."
+                  : hasSubmitted
+                    ? "Update Feedback"
+                    : "Submit Feedback"}
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        <main className="p-6 space-y-8">
+          {["A", "B", "C", "D"].map((slot) => {
+            const slotItems = slotGroups[slot] || [];
+            if (slotItems.length === 0) return null;
+
+            return (
+              <div key={slot}>
+                <h3 className="text-lg font-medium mb-4">{SLOT_LABELS[slot]}</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {slotItems.map((item) => {
+                    const itemFeedback = feedback[item.id] || {
+                      is_favorite: false,
+                      comment: "",
+                    };
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={cn(
+                          "border rounded-lg overflow-hidden transition-all bg-card",
+                          itemFeedback.is_favorite
+                            ? "border-red-400 ring-1 ring-red-400/30"
+                            : "border-border"
+                        )}
+                      >
+                        <div className="relative aspect-square">
+                          <img
+                            src={item.stored_url}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
+                          <button
+                            onClick={() => toggleFavorite(item.id)}
+                            className={cn(
+                              "absolute top-3 right-3 p-2.5 rounded-full transition-all",
+                              itemFeedback.is_favorite
+                                ? "bg-red-500 text-white"
+                                : "bg-black/50 text-white hover:bg-black/70"
+                            )}
+                          >
+                            <Heart
+                              className={cn(
+                                "h-5 w-5",
+                                itemFeedback.is_favorite && "fill-current"
+                              )}
+                            />
+                          </button>
+                        </div>
+                        <div className="p-3">
+                          <Textarea
+                            placeholder="Add a comment..."
+                            value={itemFeedback.comment}
+                            onChange={(e) =>
+                              updateComment(item.id, e.target.value)
+                            }
+                            className="min-h-[60px] text-sm resize-none"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </main>
+      </div>
+    );
+  }
+
+  // Main tile grid view
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card sticky top-0 z-10">
         <div className="px-6 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl">{reviewName}</h1>
+            <h1 className="text-2xl font-medium">{reviewName}</h1>
             <p className="text-sm text-muted-foreground">
-              Select your favorites and add feedback
+              Click a look to review and select your favorites
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -357,124 +427,94 @@ export default function ClientReview() {
             </span>
             <Button onClick={handleSubmitFeedback} disabled={isSubmitting}>
               <Send className="h-4 w-4 mr-2" />
-              {isSubmitting ? "Submitting..." : hasSubmitted ? "Update Feedback" : "Submit Feedback"}
+              {isSubmitting
+                ? "Submitting..."
+                : hasSubmitted
+                  ? "Update Feedback"
+                  : "Submit Feedback"}
             </Button>
           </div>
         </div>
       </header>
 
       <main className="p-6">
-        {items.length === 0 ? (
+        {lookIds.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            No images found in this review
+            No looks found in this review
           </div>
         ) : (
-          <div className="space-y-4">
-            {Object.entries(groupedByLook).map(([lookId, slotGroups]) => {
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {lookIds.map((lookId) => {
               const lookInfo = lookInfoMap[lookId];
-              const isExpanded = expandedLooks.has(lookId);
+              const thumbnails = getLookThumbnails(lookId);
+              const favoriteCount = getFavoriteCountForLook(lookId);
+              const commentCount = getCommentCountForLook(lookId);
 
               return (
-                <Card key={lookId}>
-                  <CardHeader
-                    className="cursor-pointer"
-                    onClick={() => {
-                      const next = new Set(expandedLooks);
-                      if (isExpanded) {
-                        next.delete(lookId);
-                      } else {
-                        next.add(lookId);
-                      }
-                      setExpandedLooks(next);
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      {isExpanded ? (
-                        <ChevronDown className="h-5 w-5 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                <Card
+                  key={lookId}
+                  className="overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all group"
+                  onClick={() => setSelectedLookId(lookId)}
+                >
+                  {/* Thumbnail grid */}
+                  <div className="aspect-square relative bg-muted">
+                    <div className="grid grid-cols-2 gap-0.5 h-full">
+                      {thumbnails.map((url, idx) => (
+                        <div
+                          key={idx}
+                          className="relative overflow-hidden"
+                        >
+                          <img
+                            src={url}
+                            alt=""
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                        </div>
+                      ))}
+                      {/* Fill empty slots */}
+                      {Array.from({ length: 4 - thumbnails.length }).map(
+                        (_, idx) => (
+                          <div
+                            key={`empty-${idx}`}
+                            className="bg-muted-foreground/10"
+                          />
+                        )
                       )}
-                      <CardTitle className="text-lg">
-                        {lookInfo?.name || `Look`}
-                      </CardTitle>
-                      {lookInfo && (
-                        <span className="text-sm text-muted-foreground">
-                          ({lookInfo.talent_name})
+                    </div>
+                  </div>
+
+                  {/* Info */}
+                  <div className="p-4">
+                    <h3 className="font-medium truncate">
+                      {lookInfo?.name || `Look ${lookId.slice(0, 8)}`}
+                    </h3>
+                    {lookInfo && (
+                      <p className="text-sm text-muted-foreground truncate">
+                        {lookInfo.talent_name}
+                      </p>
+                    )}
+
+                    {/* Status badges */}
+                    <div className="flex items-center gap-3 mt-3">
+                      {favoriteCount > 0 && (
+                        <div className="flex items-center gap-1 text-sm text-red-500">
+                          <Heart className="h-4 w-4 fill-current" />
+                          <span>{favoriteCount}</span>
+                        </div>
+                      )}
+                      {commentCount > 0 && (
+                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <MessageSquare className="h-4 w-4" />
+                          <span>{commentCount}</span>
+                        </div>
+                      )}
+                      {favoriteCount === 0 && commentCount === 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          Pending review
                         </span>
                       )}
                     </div>
-                  </CardHeader>
-
-                  {isExpanded && (
-                    <CardContent className="space-y-8">
-                      {["A", "B", "C", "D"].map((slot) => {
-                        const slotItems = slotGroups[slot] || [];
-                        if (slotItems.length === 0) return null;
-
-                        return (
-                          <div key={slot}>
-                            <h4 className="font-medium mb-4">
-                              {SLOT_LABELS[slot]}
-                            </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                              {slotItems.map((item) => {
-                                const itemFeedback = feedback[item.id] || {
-                                  is_favorite: false,
-                                  comment: "",
-                                };
-
-                                return (
-                                  <div
-                                    key={item.id}
-                                    className={cn(
-                                      "border rounded-lg overflow-hidden transition-all",
-                                      itemFeedback.is_favorite
-                                        ? "border-red-400 ring-1 ring-red-400/30"
-                                        : "border-border"
-                                    )}
-                                  >
-                                    <div className="relative aspect-square">
-                                      <img
-                                        src={item.stored_url}
-                                        alt=""
-                                        className="w-full h-full object-cover"
-                                      />
-                                      <button
-                                        onClick={() => toggleFavorite(item.id)}
-                                        className={cn(
-                                          "absolute top-2 right-2 p-2 rounded-full transition-all",
-                                          itemFeedback.is_favorite
-                                            ? "bg-red-500 text-white"
-                                            : "bg-black/50 text-white hover:bg-black/70"
-                                        )}
-                                      >
-                                        <Heart
-                                          className={cn(
-                                            "h-5 w-5",
-                                            itemFeedback.is_favorite && "fill-current"
-                                          )}
-                                        />
-                                      </button>
-                                    </div>
-                                    <div className="p-3">
-                                      <Textarea
-                                        placeholder="Add a comment..."
-                                        value={itemFeedback.comment}
-                                        onChange={(e) =>
-                                          updateComment(item.id, e.target.value)
-                                        }
-                                        className="min-h-[60px] text-sm"
-                                      />
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </CardContent>
-                  )}
+                  </div>
                 </Card>
               );
             })}
