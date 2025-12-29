@@ -99,6 +99,151 @@ export type Database = {
           },
         ]
       }
+      client_review_feedback: {
+        Row: {
+          comment: string | null
+          created_at: string
+          id: string
+          is_favorite: boolean | null
+          item_id: string | null
+          look_id: string | null
+          review_id: string
+          updated_at: string
+        }
+        Insert: {
+          comment?: string | null
+          created_at?: string
+          id?: string
+          is_favorite?: boolean | null
+          item_id?: string | null
+          look_id?: string | null
+          review_id: string
+          updated_at?: string
+        }
+        Update: {
+          comment?: string | null
+          created_at?: string
+          id?: string
+          is_favorite?: boolean | null
+          item_id?: string | null
+          look_id?: string | null
+          review_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_review_feedback_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "client_review_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_review_feedback_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "talent_looks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_review_feedback_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "client_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      client_review_items: {
+        Row: {
+          created_at: string
+          generation_id: string
+          id: string
+          look_id: string | null
+          position: number
+          review_id: string
+          slot: string
+        }
+        Insert: {
+          created_at?: string
+          generation_id: string
+          id?: string
+          look_id?: string | null
+          position?: number
+          review_id: string
+          slot: string
+        }
+        Update: {
+          created_at?: string
+          generation_id?: string
+          id?: string
+          look_id?: string | null
+          position?: number
+          review_id?: string
+          slot?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_review_items_generation_id_fkey"
+            columns: ["generation_id"]
+            isOneToOne: false
+            referencedRelation: "generations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_review_items_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "talent_looks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_review_items_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "client_reviews"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      client_reviews: {
+        Row: {
+          created_at: string
+          generation_job_id: string | null
+          id: string
+          name: string
+          password_hash: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          generation_job_id?: string | null
+          id?: string
+          name: string
+          password_hash: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          generation_job_id?: string | null
+          id?: string
+          name?: string
+          password_hash?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_reviews_generation_job_id_fkey"
+            columns: ["generation_job_id"]
+            isOneToOne: false
+            referencedRelation: "generation_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       digital_model_refs: {
         Row: {
           created_at: string

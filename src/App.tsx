@@ -6,6 +6,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Hub from "./pages/Hub";
 import ExpressionMap from "./pages/ExpressionMap";
 import AvatarRepose from "./pages/AvatarRepose";
+import External from "./pages/External";
+import ClientReview from "./pages/ClientReview";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -21,6 +23,8 @@ const App = () => (
           <Route path="/expression-map" element={<ExpressionMap />} />
           <Route path="/expression-map/:projectId" element={<ExpressionMap />} />
           <Route path="/avatar-repose" element={<AvatarRepose />} />
+          <Route path="/external" element={<External />} />
+          <Route path="/review/:reviewId" element={<ClientReview />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

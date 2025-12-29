@@ -23,3 +23,9 @@ verify_jwt = false
 
 [functions.scrape-brand]
 verify_jwt = false
+
+[functions.hash-password]
+verify_jwt = false
+
+[functions.verify-review-password]
+verify_jwt = false
