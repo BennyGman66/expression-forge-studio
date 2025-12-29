@@ -284,9 +284,9 @@ export function PoseReviewPanel({ jobId, onBack }: PoseReviewPanelProps) {
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={onBack} className="gap-2">
+      <Button variant="ghost" onClick={onBack} className="gap-2">
           <ArrowLeft className="w-4 h-4" />
-          Back to Generator
+          Back to Jobs List
         </Button>
         <div className="flex items-center gap-3">
           <Badge variant="secondary" className="text-lg">
