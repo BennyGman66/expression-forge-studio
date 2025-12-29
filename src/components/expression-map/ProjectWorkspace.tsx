@@ -39,6 +39,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
     removeModelRef,
     addRecipes,
     updateRecipe,
+    refetch,
   } = useProjectData(project.id);
 
   const masterPrompt = project.master_prompt || "";
@@ -88,7 +89,8 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
       const { data, error } = await supabase.functions.invoke("analyze-expressions", {
         body: {
           imageUrls: brandRefs.map((r) => r.image_url),
-          systemPrompt: RECIPE_EXTRACTION_SYSTEM_PROMPT,
+          customPrompt: RECIPE_EXTRACTION_SYSTEM_PROMPT,
+          projectId: project.id,
         },
       });
 
@@ -99,32 +101,21 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
         return;
       }
 
-      if (data?.recipes && Array.isArray(data.recipes)) {
-        const newRecipes = data.recipes.map((r: any) => ({
-          project_id: project.id,
-          name: r.name || "Unnamed Recipe",
-          recipe_json: {
-            angle: r.angle || "",
-            gaze: r.gaze || "",
-            eyelids: r.eyelids || "",
-            brows: r.brows || "",
-            mouth: r.mouth || "",
-            jaw: r.jaw || "",
-            chin: r.chin || "",
-            asymmetryNotes: r.asymmetryNotes || "",
-            emotionLabel: r.emotionLabel || "",
-            intensity: r.intensity || 0,
-          },
-          delta_line: r.deltaLine || "",
-          full_prompt_text: buildFullPrompt(masterPrompt, r.deltaLine || ""),
-        }));
-
-        await addRecipes(newRecipes);
-        setCurrentStep("recipes");
-        toast.success(`Extracted ${newRecipes.length} recipes`);
-      } else {
-        toast.error("No recipes found in response");
-      }
+      // Now using background processing - recipes will be saved directly to DB
+      toast.success("Analyzing expressions in background. Recipes will appear shortly.");
+      setCurrentStep("recipes");
+      
+      // Poll for new recipes a few times
+      const pollForRecipes = async () => {
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        await refetch();
+        await new Promise(resolve => setTimeout(resolve, 15000));
+        await refetch();
+        await new Promise(resolve => setTimeout(resolve, 20000));
+        await refetch();
+      };
+      pollForRecipes();
+      
     } catch (err) {
       console.error("Extraction error:", err);
       toast.error("Failed to extract recipes");

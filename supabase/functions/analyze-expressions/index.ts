@@ -1,5 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
+declare const EdgeRuntime: {
+  waitUntil: (promise: Promise<unknown>) => void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -51,32 +55,19 @@ IMPORTANT:
 - Maintain editorial restraint - these should be subtle, controlled expressions
 - Each recipe should be distinctly different from others`;
 
-serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+// Background task to analyze images
+async function analyzeImagesTask(imageUrls: string[], customPrompt: string | undefined, projectId: string, supabaseUrl: string, supabaseKey: string) {
+  const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    const { imageUrls, customPrompt } = await req.json();
-
-    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'No image URLs provided' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    console.log(`Starting background analysis for project ${projectId} with ${imageUrls.length} images`);
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) {
       console.error('LOVABLE_API_KEY not configured');
-      return new Response(
-        JSON.stringify({ error: 'AI service not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return;
     }
-
-    console.log(`Analyzing ${imageUrls.length} images for expression extraction`);
 
     // Build message content with images
     const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
@@ -88,8 +79,8 @@ serve(async (req) => {
       }
     ];
 
-    // Add image references (limit to first 15 to avoid token limits)
-    const imagesToAnalyze = imageUrls.slice(0, 15);
+    // Add image references (limit to first 10 to reduce timeout risk)
+    const imagesToAnalyze = imageUrls.slice(0, 10);
     for (const url of imagesToAnalyze) {
       content.push({
         type: "image_url",
@@ -106,38 +97,21 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-pro',
+        model: 'google/gemini-2.5-flash',
         messages: [
           {
             role: 'user',
             content
           }
         ],
-        max_tokens: 8000,
+        max_tokens: 6000,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('AI Gateway error:', response.status, errorText);
-      
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: 'Rate limit exceeded. Please try again in a moment.' }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: 'AI credits exhausted. Please add credits to continue.' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      
-      return new Response(
-        JSON.stringify({ error: 'Failed to analyze images' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return;
     }
 
     const data = await response.json();
@@ -145,10 +119,7 @@ serve(async (req) => {
 
     if (!assistantMessage) {
       console.error('No response from AI');
-      return new Response(
-        JSON.stringify({ error: 'No response from AI' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return;
     }
 
     console.log('AI response received, parsing JSON...');
@@ -160,32 +131,81 @@ serve(async (req) => {
       jsonStr = jsonMatch[1].trim();
     }
 
-    try {
-      const parsed = JSON.parse(jsonStr);
-      
-      if (!parsed.recipes || !Array.isArray(parsed.recipes)) {
-        console.error('Invalid response structure:', parsed);
-        return new Response(
-          JSON.stringify({ error: 'Invalid response structure from AI' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+    const parsed = JSON.parse(jsonStr);
+    
+    if (!parsed.recipes || !Array.isArray(parsed.recipes)) {
+      console.error('Invalid response structure:', parsed);
+      return;
+    }
+
+    console.log(`Successfully extracted ${parsed.recipes.length} recipes, saving to database...`);
+
+    // Save recipes to the database
+    for (const recipe of parsed.recipes) {
+      const { error: insertError } = await supabase
+        .from('expression_recipes')
+        .insert({
+          project_id: projectId,
+          name: recipe.name || 'Unnamed Expression',
+          recipe_json: recipe,
+          delta_line: recipe.deltaLine || null,
+          full_prompt_text: `${recipe.angle}. ${recipe.gaze}. ${recipe.eyelids}. ${recipe.brows}. ${recipe.mouth}. ${recipe.jaw}. ${recipe.chin}. ${recipe.emotionLabel}.`
+        });
+
+      if (insertError) {
+        console.error('Error inserting recipe:', insertError);
+      } else {
+        console.log(`Saved recipe: ${recipe.name}`);
       }
+    }
 
-      console.log(`Successfully extracted ${parsed.recipes.length} recipes`);
+    console.log(`Completed: saved ${parsed.recipes.length} recipes for project ${projectId}`);
 
+  } catch (error) {
+    console.error('Error in background analyze task:', error);
+  }
+}
+
+serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const { imageUrls, customPrompt, projectId } = await req.json();
+
+    if (!imageUrls || !Array.isArray(imageUrls) || imageUrls.length === 0) {
       return new Response(
-        JSON.stringify(parsed),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    } catch (parseError) {
-      console.error('Failed to parse AI response as JSON:', parseError);
-      console.error('Raw response:', assistantMessage.substring(0, 500));
-      
-      return new Response(
-        JSON.stringify({ error: 'Failed to parse AI response', raw: assistantMessage.substring(0, 1000) }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'No image URLs provided' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    if (!projectId) {
+      return new Response(
+        JSON.stringify({ error: 'No project ID provided' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+    console.log(`Starting expression analysis for ${imageUrls.length} images`);
+
+    // Start background task
+    EdgeRuntime.waitUntil(analyzeImagesTask(imageUrls, customPrompt, projectId, supabaseUrl, supabaseKey));
+
+    // Return immediately
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message: `Analyzing ${imageUrls.length} images in background. Recipes will appear shortly.` 
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
   } catch (error) {
     console.error('Error in analyze-expressions:', error);
     return new Response(
