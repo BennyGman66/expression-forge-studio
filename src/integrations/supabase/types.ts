@@ -213,6 +213,7 @@ export type Database = {
           id: string
           name: string
           password_hash: string
+          project_id: string | null
           status: string
           updated_at: string
         }
@@ -222,6 +223,7 @@ export type Database = {
           id?: string
           name: string
           password_hash: string
+          project_id?: string | null
           status?: string
           updated_at?: string
         }
@@ -231,6 +233,7 @@ export type Database = {
           id?: string
           name?: string
           password_hash?: string
+          project_id?: string | null
           status?: string
           updated_at?: string
         }
@@ -240,6 +243,13 @@ export type Database = {
             columns: ["generation_job_id"]
             isOneToOne: false
             referencedRelation: "generation_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_reviews_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "external_projects"
             referencedColumns: ["id"]
           },
         ]
@@ -387,6 +397,53 @@ export type Database = {
             columns: ["source_image_id"]
             isOneToOne: false
             referencedRelation: "brand_refs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      external_clients: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      external_projects: {
+        Row: {
+          client_id: string
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "external_projects_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "external_clients"
             referencedColumns: ["id"]
           },
         ]
