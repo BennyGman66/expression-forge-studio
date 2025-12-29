@@ -66,13 +66,38 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Create a job entry for tracking progress
+    const { data: job, error: jobError } = await supabase
+      .from("jobs")
+      .insert({
+        project_id: brandId, // Using brandId as project_id for clay jobs
+        type: "clay_generation",
+        status: "processing",
+        progress: 0,
+        total: imageIds.length,
+      })
+      .select()
+      .single();
+
+    if (jobError) {
+      console.error("Failed to create job:", jobError);
+      return new Response(
+        JSON.stringify({ error: "Failed to create job" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log(`Created job ${job.id} for ${imageIds.length} images`);
+
     // Process images in background
-    (globalThis as any).EdgeRuntime?.waitUntil?.(processImages(supabase, imageIds, lovableApiKey)) 
-      ?? processImages(supabase, imageIds, lovableApiKey);
+    (globalThis as any).EdgeRuntime?.waitUntil?.(processImages(supabase, job.id, imageIds, lovableApiKey)) 
+      ?? processImages(supabase, job.id, imageIds, lovableApiKey);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
+        jobId: job.id,
+        total: imageIds.length,
         message: `Started clay generation for ${imageIds.length} images` 
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -87,8 +112,9 @@ serve(async (req) => {
   }
 });
 
-async function processImages(supabase: any, imageIds: string[], lovableApiKey: string) {
+async function processImages(supabase: any, jobId: string, imageIds: string[], lovableApiKey: string) {
   console.log(`Processing ${imageIds.length} images for clay generation`);
+  let processed = 0;
 
   for (let i = 0; i < imageIds.length; i++) {
     const imageId = imageIds[i];
@@ -104,6 +130,8 @@ async function processImages(supabase: any, imageIds: string[], lovableApiKey: s
 
       if (fetchError || !productImage) {
         console.error(`Failed to fetch image ${imageId}:`, fetchError);
+        processed++;
+        await updateJobProgress(supabase, jobId, processed, imageIds.length);
         continue;
       }
 
@@ -116,12 +144,16 @@ async function processImages(supabase: any, imageIds: string[], lovableApiKey: s
 
       if (existingClay) {
         console.log(`Clay image already exists for ${imageId}, skipping`);
+        processed++;
+        await updateJobProgress(supabase, jobId, processed, imageIds.length);
         continue;
       }
 
       const imageUrl = productImage.stored_url || productImage.source_url;
       if (!imageUrl) {
         console.error(`No image URL for ${imageId}`);
+        processed++;
+        await updateJobProgress(supabase, jobId, processed, imageIds.length);
         continue;
       }
 
@@ -165,6 +197,8 @@ async function processImages(supabase: any, imageIds: string[], lovableApiKey: s
           i--; // Retry this image
           continue;
         }
+        processed++;
+        await updateJobProgress(supabase, jobId, processed, imageIds.length);
         continue;
       }
 
@@ -173,6 +207,8 @@ async function processImages(supabase: any, imageIds: string[], lovableApiKey: s
 
       if (!generatedImageUrl) {
         console.error(`No image returned for ${imageId}`);
+        processed++;
+        await updateJobProgress(supabase, jobId, processed, imageIds.length);
         continue;
       }
 
@@ -190,6 +226,8 @@ async function processImages(supabase: any, imageIds: string[], lovableApiKey: s
 
       if (uploadError) {
         console.error(`Upload error for ${imageId}:`, uploadError);
+        processed++;
+        await updateJobProgress(supabase, jobId, processed, imageIds.length);
         continue;
       }
 
@@ -208,17 +246,36 @@ async function processImages(supabase: any, imageIds: string[], lovableApiKey: s
 
       if (insertError) {
         console.error(`Insert error for ${imageId}:`, insertError);
+        processed++;
+        await updateJobProgress(supabase, jobId, processed, imageIds.length);
         continue;
       }
 
       console.log(`Successfully generated clay for ${imageId}`);
+      processed++;
+      await updateJobProgress(supabase, jobId, processed, imageIds.length);
 
       // Small delay between requests to avoid rate limiting
       await new Promise((r) => setTimeout(r, 2000));
     } catch (error) {
       console.error(`Error processing ${imageId}:`, error);
+      processed++;
+      await updateJobProgress(supabase, jobId, processed, imageIds.length);
     }
   }
 
+  // Mark job as completed
+  await supabase
+    .from("jobs")
+    .update({ status: "completed", updated_at: new Date().toISOString() })
+    .eq("id", jobId);
+
   console.log("Clay generation complete");
+}
+
+async function updateJobProgress(supabase: any, jobId: string, progress: number, total: number) {
+  await supabase
+    .from("jobs")
+    .update({ progress, total, updated_at: new Date().toISOString() })
+    .eq("id", jobId);
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,9 +29,9 @@ export function ClayGenerationPanel() {
   const [isOrganizing, setIsOrganizing] = useState(false);
   const [organizeJobId, setOrganizeJobId] = useState<string | null>(null);
   const [organizeProgress, setOrganizeProgress] = useState({ current: 0, total: 0 });
+  const [clayJobId, setClayJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
-  const processingIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetchBrands();
@@ -44,32 +44,29 @@ export function ClayGenerationPanel() {
     }
   }, [selectedBrand, selectedGender, selectedProductType]);
 
-  // Subscribe to clay_images inserts for real-time progress
+  // Subscribe to clay job progress
   useEffect(() => {
-    if (!isGenerating) return;
+    if (!clayJobId) return;
 
     const channel = supabase
       .channel("clay-progress")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "clay_images" },
+        { 
+          event: "UPDATE", 
+          schema: "public", 
+          table: "jobs",
+          filter: `id=eq.${clayJobId}`
+        },
         (payload) => {
-          const newClay = payload.new as ClayImage;
+          const job = payload.new as { progress: number; total: number; status: string };
+          setProgress({ current: job.progress || 0, total: job.total || 0 });
           
-          // Check if this clay image is for one of our processing images
-          if (processingIdsRef.current.has(newClay.product_image_id)) {
-            setClayImages((prev) => [...prev, newClay]);
-            setProgress((prev) => {
-              const newCurrent = prev.current + 1;
-              
-              // Check if complete
-              if (newCurrent >= prev.total) {
-                setIsGenerating(false);
-                toast.success("Clay generation complete!");
-              }
-              
-              return { ...prev, current: newCurrent };
-            });
+          if (job.status === "completed") {
+            setIsGenerating(false);
+            setClayJobId(null);
+            toast.success("Clay generation complete!");
+            fetchClayImages();
           }
         }
       )
@@ -78,7 +75,7 @@ export function ClayGenerationPanel() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isGenerating]);
+  }, [clayJobId]);
 
   // Subscribe to organize job progress
   useEffect(() => {
@@ -171,9 +168,6 @@ export function ClayGenerationPanel() {
       return;
     }
 
-    // Store processing IDs for realtime tracking
-    processingIdsRef.current = new Set(imagesToProcess.map((img) => img.id));
-    
     setIsGenerating(true);
     setProgress({ current: 0, total: imagesToProcess.length });
 
@@ -187,7 +181,10 @@ export function ClayGenerationPanel() {
 
       if (error) throw error;
 
-      toast.success(`Started clay generation for ${imagesToProcess.length} images`);
+      if (data?.jobId) {
+        setClayJobId(data.jobId);
+        toast.info(`Generating clay for ${imagesToProcess.length} images...`);
+      }
     } catch (err) {
       console.error("Clay generation error:", err);
       toast.error("Failed to start clay generation");
