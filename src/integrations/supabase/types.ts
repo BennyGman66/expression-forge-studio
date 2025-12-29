@@ -218,11 +218,13 @@ export type Database = {
           created_at: string
           id: string
           logs: Json | null
+          look_id: string | null
           progress: number | null
           random_count: number | null
           slot: string
           status: string
           talent_id: string
+          talent_image_id: string | null
           total: number | null
           updated_at: string
           view: string
@@ -233,11 +235,13 @@ export type Database = {
           created_at?: string
           id?: string
           logs?: Json | null
+          look_id?: string | null
           progress?: number | null
           random_count?: number | null
           slot: string
           status?: string
           talent_id: string
+          talent_image_id?: string | null
           total?: number | null
           updated_at?: string
           view: string
@@ -248,11 +252,13 @@ export type Database = {
           created_at?: string
           id?: string
           logs?: Json | null
+          look_id?: string | null
           progress?: number | null
           random_count?: number | null
           slot?: string
           status?: string
           talent_id?: string
+          talent_image_id?: string | null
           total?: number | null
           updated_at?: string
           view?: string
@@ -266,10 +272,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "generation_jobs_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "talent_looks"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "generation_jobs_talent_id_fkey"
             columns: ["talent_id"]
             isOneToOne: false
             referencedRelation: "talents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generation_jobs_talent_image_id_fkey"
+            columns: ["talent_image_id"]
+            isOneToOne: false
+            referencedRelation: "talent_images"
             referencedColumns: ["id"]
           },
         ]
@@ -280,24 +300,36 @@ export type Database = {
           created_at: string
           generation_job_id: string
           id: string
+          look_id: string | null
           pose_clay_image_id: string
+          slot: string | null
           stored_url: string
+          talent_image_id: string | null
+          view: string | null
         }
         Insert: {
           attempt_index: number
           created_at?: string
           generation_job_id: string
           id?: string
+          look_id?: string | null
           pose_clay_image_id: string
+          slot?: string | null
           stored_url: string
+          talent_image_id?: string | null
+          view?: string | null
         }
         Update: {
           attempt_index?: number
           created_at?: string
           generation_job_id?: string
           id?: string
+          look_id?: string | null
           pose_clay_image_id?: string
+          slot?: string | null
           stored_url?: string
+          talent_image_id?: string | null
+          view?: string | null
         }
         Relationships: [
           {
@@ -308,10 +340,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "generations_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "talent_looks"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "generations_pose_clay_image_id_fkey"
             columns: ["pose_clay_image_id"]
             isOneToOne: false
             referencedRelation: "clay_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generations_talent_image_id_fkey"
+            columns: ["talent_image_id"]
+            isOneToOne: false
+            referencedRelation: "talent_images"
             referencedColumns: ["id"]
           },
         ]
