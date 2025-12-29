@@ -9,6 +9,9 @@ verify_jwt = false
 [functions.generate-images]
 verify_jwt = false
 
+[functions.generate-pose-single]
+verify_jwt = false
+
 [functions.generate-poses]
 verify_jwt = false
 

@@ -30,6 +30,17 @@ interface ClayImageWithMeta {
   };
 }
 
+interface GenerationTask {
+  talentImageUrl: string;
+  talentImageId: string;
+  view: string;
+  slot: string;
+  poseId: string;
+  poseUrl: string;
+  attempt: number;
+  lookId?: string;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -45,7 +56,7 @@ serve(async (req) => {
       randomCount,
       attemptsPerPose,
       bulkMode,
-      model, // Optional: AI model selection
+      model,
       // Legacy single-mode params
       talentImageUrl,
       view,
@@ -64,7 +75,6 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY")!;
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -89,16 +99,7 @@ serve(async (req) => {
     }
 
     // Build generation tasks
-    let tasks: {
-      talentImageUrl: string;
-      talentImageId: string;
-      view: string;
-      slot: string;
-      poseId: string;
-      poseUrl: string;
-      attempt: number;
-      lookId?: string;
-    }[] = [];
+    let tasks: GenerationTask[] = [];
 
     // Extract lookId from first pairing if available (for job tracking)
     const primaryLookId = bulkMode && pairings?.length > 0 ? pairings[0].lookId : null;
@@ -220,7 +221,7 @@ serve(async (req) => {
         status: "running",
         progress: 0,
         total: tasks.length,
-        logs: bulkMode ? { pairings: pairings.length, mode: "bulk" } : null,
+        logs: bulkMode ? { pairings: pairings.length, mode: "bulk", model: selectedModel } : null,
       })
       .select()
       .single();
@@ -230,19 +231,17 @@ serve(async (req) => {
       throw new Error("Failed to create generation job");
     }
 
-    console.log(`Created job ${job.id} with ${tasks.length} total generations`);
+    console.log(`Created job ${job.id} with ${tasks.length} total tasks - returning to client for orchestration`);
 
-    // Process in background - pass the selected model
-    (globalThis as any).EdgeRuntime?.waitUntil?.(
-      processGenerations(supabase, job.id, tasks, lovableApiKey, selectedModel)
-    ) ?? processGenerations(supabase, job.id, tasks, lovableApiKey, selectedModel);
-
+    // Return tasks to client for client-side orchestration (no background processing)
     return new Response(
       JSON.stringify({ 
         success: true, 
         jobId: job.id,
         taskCount: tasks.length,
-        message: `Started generating ${tasks.length} images` 
+        tasks: tasks,
+        model: selectedModel,
+        message: `Ready to generate ${tasks.length} images` 
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
@@ -255,190 +254,3 @@ serve(async (req) => {
     );
   }
 });
-
-interface GenerationTask {
-  talentImageUrl: string;
-  talentImageId: string;
-  view: string;
-  slot: string;
-  poseId: string;
-  poseUrl: string;
-  attempt: number;
-  lookId?: string;
-}
-
-async function processGenerations(
-  supabase: any,
-  jobId: string,
-  tasks: GenerationTask[],
-  lovableApiKey: string,
-  model: string
-) {
-  console.log(`Processing ${tasks.length} generation tasks with model: ${model}`);
-
-  let progress = 0;
-  const total = tasks.length;
-  let consecutiveErrors = 0;
-  const maxConsecutiveErrors = 10;
-
-  for (const task of tasks) {
-    progress++;
-    console.log(`[${progress}/${total}] View: ${task.view}, Slot: ${task.slot}, Pose: ${task.poseId}, Attempt: ${task.attempt + 1}`);
-
-    try {
-      // Update job progress
-      await supabase
-        .from("generation_jobs")
-        .update({ progress, updated_at: new Date().toISOString() })
-        .eq("id", jobId);
-
-      // Generate image using Lovable AI with improved prompt
-      const prompt = `Put the woman from IMAGE 1 (Talent Reference) in the exact pose shown in IMAGE 2 (Pose Reference).
-
-CRITICAL INSTRUCTIONS:
-- Keep the face, skin tone, hair, and physical features consistent with IMAGE 1
-- Keep the outfit and clothing from IMAGE 1 exactly as shown
-- Copy the exact body pose, stance, arm positions, and leg positions from IMAGE 2
-- Use professional studio lighting similar to IMAGE 1
-- Background should be clean white or light grey studio backdrop
-- Maintain photorealistic e-commerce quality
-- Match the camera angle and framing from IMAGE 2
-
-Generate a high-quality fashion photograph combining the talent's appearance and outfit from IMAGE 1 with the pose from IMAGE 2.`;
-
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${lovableApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: prompt },
-                { type: "text", text: "IMAGE 1 - TALENT REFERENCE (copy this person's appearance and outfit):" },
-                { type: "image_url", image_url: { url: task.talentImageUrl } },
-                { type: "text", text: "IMAGE 2 - POSE REFERENCE (copy this exact pose):" },
-                { type: "image_url", image_url: { url: task.poseUrl } },
-              ],
-            },
-          ],
-          modalities: ["image", "text"],
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`AI API error:`, response.status, errorText);
-        
-        if (response.status === 429) {
-          console.log("Rate limited, waiting 30 seconds...");
-          await new Promise((r) => setTimeout(r, 30000));
-          // Don't increment progress, will retry on next iteration concept
-          consecutiveErrors++;
-        } else {
-          consecutiveErrors++;
-        }
-
-        if (consecutiveErrors >= maxConsecutiveErrors) {
-          console.error(`Too many consecutive errors (${consecutiveErrors}), aborting job`);
-          await supabase
-            .from("generation_jobs")
-            .update({ 
-              status: "failed", 
-              updated_at: new Date().toISOString(),
-              logs: { error: "Too many consecutive errors" }
-            })
-            .eq("id", jobId);
-          return;
-        }
-        continue;
-      }
-
-      // Reset error counter on success
-      consecutiveErrors = 0;
-
-      const data = await response.json();
-      const generatedImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-
-      if (!generatedImageUrl) {
-        console.error("No image returned from AI");
-        continue;
-      }
-
-      // Upload to storage
-      const base64Data = generatedImageUrl.replace(/^data:image\/\w+;base64,/, "");
-      const binaryData = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-      
-      const fileName = `generations/${jobId}/${task.view}_${task.slot}_${task.poseId}_${task.attempt}_${Date.now()}.png`;
-      const { error: uploadError } = await supabase.storage
-        .from("images")
-        .upload(fileName, binaryData, {
-          contentType: "image/png",
-          upsert: true,
-        });
-
-      if (uploadError) {
-        console.error(`Upload error:`, uploadError);
-        continue;
-      }
-
-      const { data: { publicUrl } } = supabase.storage
-        .from("images")
-        .getPublicUrl(fileName);
-
-      // Save to generations table with look and view info for review panel
-      const { error: insertError } = await supabase
-        .from("generations")
-        .insert({
-          generation_job_id: jobId,
-          pose_clay_image_id: task.poseId,
-          attempt_index: task.attempt,
-          stored_url: publicUrl,
-          look_id: task.lookId,
-          view: task.view,
-          slot: task.slot,
-        });
-
-      if (insertError) {
-        console.error(`Insert error:`, insertError);
-        continue;
-      }
-
-      console.log(`Successfully generated ${fileName}`);
-
-      // Small delay between requests to avoid rate limiting
-      await new Promise((r) => setTimeout(r, 2000));
-    } catch (error) {
-      console.error(`Error processing task:`, error);
-      consecutiveErrors++;
-      
-      if (consecutiveErrors >= maxConsecutiveErrors) {
-        console.error(`Too many consecutive errors, aborting job`);
-        await supabase
-          .from("generation_jobs")
-          .update({ 
-            status: "failed", 
-            updated_at: new Date().toISOString() 
-          })
-          .eq("id", jobId);
-        return;
-      }
-    }
-  }
-
-  // Mark job as completed
-  await supabase
-    .from("generation_jobs")
-    .update({ 
-      status: "completed", 
-      progress: total,
-      updated_at: new Date().toISOString() 
-    })
-    .eq("id", jobId);
-
-  console.log(`Job ${jobId} completed`);
-}
