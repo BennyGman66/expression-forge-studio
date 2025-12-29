@@ -211,19 +211,25 @@ export function PoseGeneratorPanel() {
   }, [talents, allTalentLooks, allTalentImages]);
 
   // Get clay images filtered by gender and product type
+  // Slots A, B, C are universal (ignore product type), only D filters by product type
   const getClayImagesBySlotForProductType = useCallback((productType: 'tops' | 'bottoms' | null) => {
     const result: Record<ImageSlot, ClayImageWithMeta[]> = { A: [], B: [], C: [], D: [] };
     const productTypeFilter = productType === 'tops' ? 'tops' : productType === 'bottoms' ? 'trousers' : null;
     
+    // Slots that ignore product type filtering (use all poses)
+    const universalSlots: ImageSlot[] = ['A', 'B', 'C'];
+    
     allClayImages.forEach(clay => {
       const slot = clay.product_images?.slot as ImageSlot;
       if (slot && result[slot]) {
-        // Gender filter
+        // Gender filter (applies to all slots)
         if (selectedGender !== "all" && clay.product_images?.products?.gender !== selectedGender) {
           return;
         }
-        // Product type filter
-        if (productTypeFilter && clay.product_images?.products?.product_type !== productTypeFilter) {
+        // Product type filter: only apply to slot D (Detail)
+        const isUniversalSlot = universalSlots.includes(slot);
+        if (!isUniversalSlot && productTypeFilter && 
+            clay.product_images?.products?.product_type !== productTypeFilter) {
           return;
         }
         result[slot].push(clay);
