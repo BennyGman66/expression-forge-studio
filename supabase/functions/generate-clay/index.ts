@@ -6,44 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const CLAY_PROMPT = `Convert this photo into a pose-only stylised 3D clay reference model.
-
-Material & surface:
-- Uniform grey matte clay material
-- No fabric texture, no seams, no folds, no stitching
-- No hair strands, no hairstyle detail
-- No facial features (no eyes, nose, mouth, ears)
-- No fingernail, jewelry, or accessory detail
-
-Geometry & anatomy:
-- Preserve exact body pose, limb angles, weight distribution, and balance
-- Maintain overall proportions and silhouette only
-- Simplify anatomy into smooth sculpted forms
-- Arms, legs, torso, and head should be clearly readable as volumes, not detailed anatomy
-- Fingers may be merged or simplified into a single block shape
-
-Head & identity neutralization:
-- Head should be a smooth, featureless form
-- No face, no hair volume, no gender markers
-- No identifiable human features
-
-Clothing abstraction:
-- Remove all clothing detail
-- Represent clothing only as very subtle volume separation if needed to distinguish top vs bottom
-- No collars, buttons, pockets, hems, or footwear detail
-- Shoes should be simplified into smooth block forms
-
-Lighting & environment:
-- Neutral studio lighting
-- Soft, even illumination
-- No shadows that reveal surface detail
-- Plain neutral background, no texture
-
-Output intent:
-- The result should function as a pose reference only
-- The model should look like a generic clay mannequin
-- No indication of the person's identity, hairstyle, clothing style, or facial structure
-- The image should communicate pose and posture clearly, nothing else`;
+const CLAY_PROMPT = `Convert this photo into a stylised 3D clay model render. Grey matte material, subtle polygonal mesh shading, simplified anatomy, smooth sculpted surfaces. Neutral studio lighting, no background texture. Replicate the exact pose and body orientation from the reference image. Maintain the proportions and overall silhouette exactly as in the original photo.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
