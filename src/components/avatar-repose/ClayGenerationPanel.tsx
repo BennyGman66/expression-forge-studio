@@ -170,12 +170,14 @@ export function ClayGenerationPanel() {
 
       if (error) throw error;
 
-      if (data.updated > 0) {
-        toast.success(`AVA organized ${data.updated} of ${data.total} images`);
-        // Refresh the product images to show new slots
-        await fetchProductImages();
+      if (data.total > 0) {
+        toast.success(`AVA is organizing ${data.total} images in the background. Refresh in a moment to see results.`);
+        // Start polling for updates
+        setTimeout(() => fetchProductImages(), 5000);
+        setTimeout(() => fetchProductImages(), 15000);
+        setTimeout(() => fetchProductImages(), 30000);
       } else {
-        toast.info("All images are already in their correct slots!");
+        toast.info("No images to organize!");
       }
     } catch (err) {
       console.error("Organize error:", err);
