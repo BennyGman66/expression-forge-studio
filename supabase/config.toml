@@ -18,5 +18,8 @@ verify_jwt = false
 [functions.organize-images]
 verify_jwt = false
 
+[functions.organize-clay-poses]
+verify_jwt = false
+
 [functions.scrape-brand]
 verify_jwt = false
