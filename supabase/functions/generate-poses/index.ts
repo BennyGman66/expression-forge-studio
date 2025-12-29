@@ -116,9 +116,9 @@ serve(async (req) => {
           // Start with all clay images
           let slotClayImages = [...allClayImagesForBrand];
           
-          // Only apply product type filtering for B (Cropped Front) and D (Detail) slots
-          // A (Full Front) and C (Full Back) use ALL available poses regardless of product type
-          const shouldFilterByProductType = (pairingSlot === 'B' || pairingSlot === 'D');
+          // Only apply product type filtering for D (Detail) slot
+          // A (Full Front), B (Cropped Front), and C (Full Back) use ALL available poses regardless of product type
+          const shouldFilterByProductType = (pairingSlot === 'D');
           if (shouldFilterByProductType && pairing.productType) {
             const productTypeFilter = pairing.productType === 'tops' ? 'tops' : 'trousers';
             slotClayImages = slotClayImages.filter(
@@ -126,7 +126,7 @@ serve(async (req) => {
             );
             console.log(`[BULK] Slot ${pairingSlot}: After product type filter (${productTypeFilter}): ${slotClayImages.length} clay images`);
           } else {
-            console.log(`[BULK] Slot ${pairingSlot}: Using ALL poses (no product type filter for universal slots A/C)`);
+            console.log(`[BULK] Slot ${pairingSlot}: Using ALL poses (no product type filter for universal slots A/B/C)`);
           }
 
           // Get clay images for this slot
