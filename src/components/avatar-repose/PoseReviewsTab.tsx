@@ -80,7 +80,7 @@ export function PoseReviewsTab() {
       updated_at: job.updated_at,
       brand_name: job.brands?.name || "Unknown Brand",
       talent_name: job.talents?.name || "Unknown Talent",
-      look_name: job.talent_looks?.name || null,
+      look_name: job.talent_looks?.name || 'Default Look',
       look_product_type: job.talent_looks?.product_type || null,
       generation_count: countMap[job.id] || 0,
     }));
