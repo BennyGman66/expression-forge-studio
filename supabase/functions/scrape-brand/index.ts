@@ -104,12 +104,17 @@ async function classifyProductFromImage(imageUrl: string, urlProductType: 'tops'
   try {
     console.log(`Classifying image: ${imageUrl.substring(0, 80)}...`);
     
+    // Create abort controller with 30 second timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${lovableApiKey}`,
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
         messages: [
@@ -170,6 +175,8 @@ If you cannot determine with confidence, respond with null.`
         max_tokens: 150
       }),
     });
+    
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       console.error('AI classification failed:', response.status);
@@ -197,7 +204,11 @@ If you cannot determine with confidence, respond with null.`
 
     return { gender: null, productType: urlProductType };
   } catch (err) {
-    console.error('Error classifying image:', err);
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.error('AI classification timed out after 30 seconds');
+    } else {
+      console.error('Error classifying image:', err);
+    }
     return { gender: null, productType: urlProductType };
   }
 }
