@@ -433,6 +433,7 @@ export function PoseGeneratorPanel() {
     return msgs;
   }, [smartPairingMode, selectedTalentLooks, allTalentImages, selectedBrand, allClayImages, getClayImagesBySlotForProductType]);
 
+  // Client-side orchestrated generation
   const handleGenerate = async () => {
     if (!selectedBrand) {
       toast.error("Please select a brand");
@@ -464,10 +465,11 @@ export function PoseGeneratorPanel() {
         talentName: p.talentName,
       }));
 
+      // Step 1: Get tasks from generate-poses (no longer processes images)
       const { data, error } = await supabase.functions.invoke("generate-poses", {
         body: {
           brandId: selectedBrand,
-          talentId: selectedTalentLooks[0].talentId, // Primary talent for job record
+          talentId: selectedTalentLooks[0].talentId,
           pairings: apiPairings,
           gender: selectedGender,
           randomCount,
@@ -478,27 +480,88 @@ export function PoseGeneratorPanel() {
       });
 
       if (error) throw error;
-
-      toast.success(`Started generating ${totalOutputs} images`);
-      
-      if (data?.jobId) {
-        const interval = setInterval(async () => {
-          await fetchGenerations(data.jobId);
-          const { data: job } = await supabase
-            .from("generation_jobs")
-            .select("*")
-            .eq("id", data.jobId)
-            .single();
-
-          if (job && (job.status === "completed" || job.status === "failed")) {
-            clearInterval(interval);
-            setIsGenerating(false);
-            if (job.status === "completed") {
-              toast.success("Generation completed! Click 'Review & Select' to choose favorites.");
-            }
-          }
-        }, 2000);
+      if (!data?.tasks || !data?.jobId) {
+        throw new Error("Invalid response from generate-poses");
       }
+
+      const { jobId, tasks, model } = data;
+      const totalTasks = tasks.length;
+
+      toast.success(`Starting generation of ${totalTasks} images`);
+
+      // Step 2: Process each task one by one (client-side orchestration)
+      let completed = 0;
+      let rateLimitRetries = 0;
+      const maxRateLimitRetries = 5;
+
+      for (let i = 0; i < tasks.length; i++) {
+        const task = tasks[i];
+
+        // Check if job was stopped
+        const { data: jobCheck } = await supabase
+          .from("generation_jobs")
+          .select("status")
+          .eq("id", jobId)
+          .single();
+
+        if (jobCheck?.status === "stopped" || jobCheck?.status === "cancelled") {
+          toast.info("Generation stopped");
+          break;
+        }
+
+        // Call generate-pose-single for this task
+        const { data: result, error: taskError } = await supabase.functions.invoke("generate-pose-single", {
+          body: { jobId, task, model },
+        });
+
+        if (taskError) {
+          console.error(`Task ${i + 1} error:`, taskError);
+          continue;
+        }
+
+        if (result?.rateLimited) {
+          rateLimitRetries++;
+          if (rateLimitRetries >= maxRateLimitRetries) {
+            toast.error("Too many rate limit errors. Pausing generation.");
+            break;
+          }
+          toast.warning(`Rate limited. Waiting 30 seconds... (${rateLimitRetries}/${maxRateLimitRetries})`);
+          await new Promise(r => setTimeout(r, 30000));
+          i--; // Retry this task
+          continue;
+        }
+
+        if (result?.success) {
+          completed++;
+          rateLimitRetries = 0; // Reset on success
+          
+          // Update job progress
+          await supabase
+            .from("generation_jobs")
+            .update({ progress: completed, updated_at: new Date().toISOString() })
+            .eq("id", jobId);
+        }
+
+        // Small delay between requests
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      // Mark job as completed
+      await supabase
+        .from("generation_jobs")
+        .update({ 
+          status: "completed", 
+          progress: completed,
+          updated_at: new Date().toISOString() 
+        })
+        .eq("id", jobId);
+
+      setIsGenerating(false);
+      toast.success(`Generation completed! ${completed}/${totalTasks} images generated.`);
+      
+      // Refresh generations for review
+      await fetchGenerations(jobId);
+      
     } catch (err) {
       console.error("Generation error:", err);
       toast.error("Failed to start generation");
