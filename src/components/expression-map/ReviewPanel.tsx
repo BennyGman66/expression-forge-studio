@@ -98,14 +98,76 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
     setShowExport(true);
   };
 
-  const handleDownloadGrid = () => {
-    // Create a canvas to render the grid
+  const handleDownloadGrid = async () => {
     const favoriteOutputs = outputs.filter((o) => favorites.has(o.id));
-    
-    // For now, just copy the URLs
-    const urls = favoriteOutputs.map((o) => o.image_url).join("\n");
-    navigator.clipboard.writeText(urls);
-    toast.success(`Copied ${favoriteOutputs.length} image URLs to clipboard`);
+    if (favoriteOutputs.length === 0) return;
+
+    const cols = 5;
+    const cellSize = 400;
+    const gap = 8;
+    const rows = Math.ceil(favoriteOutputs.length / cols);
+    const canvasWidth = cols * cellSize + (cols - 1) * gap;
+    const canvasHeight = rows * cellSize + (rows - 1) * gap;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Fill background
+    ctx.fillStyle = '#e8e6e1';
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    // Load and draw images
+    const loadImage = (url: string): Promise<HTMLImageElement> => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = url;
+      });
+    };
+
+    toast.info('Generating PNG...');
+
+    try {
+      for (let i = 0; i < favoriteOutputs.length; i++) {
+        const output = favoriteOutputs[i];
+        if (!output.image_url) continue;
+        
+        const img = await loadImage(output.image_url);
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = col * (cellSize + gap);
+        const y = row * (cellSize + gap);
+        
+        // Draw image covering the cell (object-cover equivalent)
+        const scale = Math.max(cellSize / img.width, cellSize / img.height);
+        const scaledWidth = img.width * scale;
+        const scaledHeight = img.height * scale;
+        const offsetX = (cellSize - scaledWidth) / 2;
+        const offsetY = (cellSize - scaledHeight) / 2;
+        
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, y, cellSize, cellSize);
+        ctx.clip();
+        ctx.drawImage(img, x + offsetX, y + offsetY, scaledWidth, scaledHeight);
+        ctx.restore();
+      }
+
+      // Download
+      const link = document.createElement('a');
+      link.download = `expression-grid-${Date.now()}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      toast.success('Grid exported!');
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error('Failed to export grid');
+    }
   };
 
   const selectedModel = models.find((m) => m.id === selectedModelId);
@@ -136,7 +198,7 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
 
         <div 
           ref={exportRef}
-          className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1"
+          className="grid grid-cols-5 gap-2 p-4"
           style={{ backgroundColor: '#e8e6e1' }}
         >
           {favoriteOutputs.map((output) => (
