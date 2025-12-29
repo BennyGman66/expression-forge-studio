@@ -2,6 +2,16 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Download, Trash2, Eye, Pencil, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -25,6 +35,7 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
   const [selectedExport, setSelectedExport] = useState<ExpressionMapExport | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<ExpressionMapExport | null>(null);
 
   useEffect(() => {
     fetchExports();
@@ -53,19 +64,22 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
     setLoading(false);
   };
 
-  const handleDelete = async (id: string) => {
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    
     const { error } = await supabase
       .from("expression_map_exports")
       .delete()
-      .eq("id", id);
+      .eq("id", deleteTarget.id);
 
     if (error) {
       toast.error("Failed to delete");
     } else {
       toast.success("Expression map deleted");
-      setExports((prev) => prev.filter((e) => e.id !== id));
-      if (selectedExport?.id === id) setSelectedExport(null);
+      setExports((prev) => prev.filter((e) => e.id !== deleteTarget.id));
+      if (selectedExport?.id === deleteTarget.id) setSelectedExport(null);
     }
+    setDeleteTarget(null);
   };
 
   const startEditing = (exp: ExpressionMapExport) => {
@@ -312,7 +326,7 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => handleDelete(exp.id)}
+                onClick={() => setDeleteTarget(exp)}
               >
                 <Trash2 className="w-4 h-4 text-destructive" />
               </Button>
@@ -320,6 +334,23 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
           </div>
         ))}
       </div>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Expression Map?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete "{deleteTarget?.name}". This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
