@@ -56,6 +56,7 @@ export interface TalentLook {
   id: string;
   talent_id: string;
   name: string;
+  product_type: 'tops' | 'bottoms' | null;
   created_at: string;
 }
 
