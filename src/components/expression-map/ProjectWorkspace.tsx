@@ -488,7 +488,10 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
         )}
 
         {currentStep === "expression-maps" && (
-          <ExpressionMapsReviewTab projectId={project.id} />
+          <ExpressionMapsReviewTab 
+            projectId={project.id} 
+            onAddMore={() => setCurrentStep("review")}
+          />
         )}
       </main>
     </div>
