@@ -8,6 +8,31 @@ const corsHeaders = {
 
 const CLAY_PROMPT = `Convert this photo into a stylised 3D clay model render. Grey matte material, subtle polygonal mesh shading, simplified anatomy, smooth sculpted surfaces. Neutral studio lighting, no background texture. Replicate the exact pose and body orientation from the reference image. Maintain the proportions and overall silhouette exactly as in the original photo.`;
 
+const REINFORCED_CLAY_PROMPT = `CRITICAL: Convert this photo into a COMPLETELY GREY 3D clay model render. 
+
+MANDATORY REQUIREMENTS:
+- The ENTIRE image must be in shades of GREY ONLY - no colors whatsoever
+- Grey matte clay material throughout
+- NO skin tones, NO colored clothing, NO colored backgrounds
+- Everything must look like a grey clay/plaster sculpture
+- Subtle polygonal mesh shading
+- Simplified anatomy with smooth sculpted surfaces
+- Neutral studio lighting on plain grey/white background
+
+The final image should look like a monochrome grey clay sculpture - absolutely NO colors from the original photo should remain. Replicate the exact pose and body orientation only.`;
+
+const VALIDATION_PROMPT = `Analyze this image and determine if it is a proper grey clay model render.
+
+A VALID grey clay render must:
+- Be entirely in shades of grey (monochrome)
+- Look like a 3D clay or plaster sculpture
+- Have NO colored clothing, skin tones, or colored elements
+- Have a neutral grey/white background
+
+Respond with ONLY "VALID" or "INVALID" followed by a brief reason.
+Example: "VALID - Image is a monochrome grey clay sculpture"
+Example: "INVALID - Image contains colored clothing and skin tones"`;
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -76,9 +101,86 @@ serve(async (req) => {
   }
 });
 
+async function validateClayImage(imageUrl: string, lovableApiKey: string): Promise<boolean> {
+  try {
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${lovableApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: VALIDATION_PROMPT },
+              { type: "image_url", image_url: { url: imageUrl } },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Validation API error:", response.status);
+      return true; // Assume valid if validation fails
+    }
+
+    const data = await response.json();
+    const result = data.choices?.[0]?.message?.content || "";
+    console.log(`Validation result: ${result}`);
+    
+    return result.toUpperCase().startsWith("VALID");
+  } catch (error) {
+    console.error("Validation error:", error);
+    return true; // Assume valid if validation fails
+  }
+}
+
+async function generateClayImage(imageUrl: string, lovableApiKey: string, model: string, useReinforced: boolean): Promise<string | null> {
+  const prompt = useReinforced ? REINFORCED_CLAY_PROMPT : CLAY_PROMPT;
+  
+  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${lovableApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: imageUrl } },
+          ],
+        },
+      ],
+      modalities: ["image", "text"],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`AI API error:`, response.status, errorText);
+    
+    if (response.status === 429) {
+      throw new Error("RATE_LIMITED");
+    }
+    return null;
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.images?.[0]?.image_url?.url || null;
+}
+
 async function processImages(supabase: any, jobId: string, imageIds: string[], lovableApiKey: string, model: string) {
   console.log(`Processing ${imageIds.length} images for clay generation with model ${model}`);
   let processed = 0;
+  const MAX_RETRIES = 2;
 
   for (let i = 0; i < imageIds.length; i++) {
     const imageId = imageIds[i];
@@ -121,62 +223,51 @@ async function processImages(supabase: any, jobId: string, imageIds: string[], l
         continue;
       }
 
-      // Generate clay image using Lovable AI (Nano banana model)
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${lovableApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: CLAY_PROMPT,
-                },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: imageUrl,
-                  },
-                },
-              ],
-            },
-          ],
-          modalities: ["image", "text"],
-        }),
-      });
+      let generatedImageUrl: string | null = null;
+      let isValid = false;
+      let attempts = 0;
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`AI API error for ${imageId}:`, response.status, errorText);
+      // Try to generate valid clay image with retries
+      while (!isValid && attempts < MAX_RETRIES) {
+        attempts++;
+        const useReinforced = attempts > 1;
         
-        if (response.status === 429) {
-          console.log("Rate limited, waiting 30 seconds...");
-          await new Promise((r) => setTimeout(r, 30000));
-          i--; // Retry this image
-          continue;
-        }
-        processed++;
-        await updateJobProgress(supabase, jobId, processed, imageIds.length);
-        continue;
-      }
+        console.log(`[${imageId}] Generation attempt ${attempts}/${MAX_RETRIES} (reinforced: ${useReinforced})`);
+        
+        try {
+          generatedImageUrl = await generateClayImage(imageUrl, lovableApiKey, model, useReinforced);
+          
+          if (!generatedImageUrl) {
+            console.error(`[${imageId}] No image returned on attempt ${attempts}`);
+            continue;
+          }
 
-      const data = await response.json();
-      const generatedImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+          // Validate the generated image
+          console.log(`[${imageId}] Validating generated image...`);
+          isValid = await validateClayImage(generatedImageUrl, lovableApiKey);
+          
+          if (!isValid) {
+            console.log(`[${imageId}] Validation failed, will retry with reinforced prompt`);
+          }
+        } catch (error: any) {
+          if (error.message === "RATE_LIMITED") {
+            console.log("Rate limited, waiting 30 seconds...");
+            await new Promise((r) => setTimeout(r, 30000));
+            attempts--; // Don't count rate limit as an attempt
+          } else {
+            throw error;
+          }
+        }
+      }
 
       if (!generatedImageUrl) {
-        console.error(`No image returned for ${imageId}`);
+        console.error(`[${imageId}] Failed to generate clay image after ${MAX_RETRIES} attempts`);
         processed++;
         await updateJobProgress(supabase, jobId, processed, imageIds.length);
         continue;
       }
 
-      // Upload to Supabase storage
+      // Upload to Supabase storage (even if validation failed, save what we have)
       const base64Data = generatedImageUrl.replace(/^data:image\/\w+;base64,/, "");
       const binaryData = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
       
@@ -215,7 +306,7 @@ async function processImages(supabase: any, jobId: string, imageIds: string[], l
         continue;
       }
 
-      console.log(`Successfully generated clay for ${imageId}`);
+      console.log(`[${imageId}] Successfully generated clay (valid: ${isValid})`);
       processed++;
       await updateJobProgress(supabase, jobId, processed, imageIds.length);
 
