@@ -68,19 +68,27 @@ serve(async (req) => {
 
     console.log(`[${task.view}/${task.slot}] Generating with pose ${task.poseId}, attempt ${task.attempt + 1}`);
 
-    // Generate image using Lovable AI
-    const prompt = `Put the woman from IMAGE 1 (Talent Reference) in the exact pose shown in IMAGE 2 (Pose Reference).
+    // Generate image using Lovable AI with proven prompt
+    const prompt = `Use the provided greyscale reference image as a strict pose, camera, and framing template.
 
-CRITICAL INSTRUCTIONS:
-- Keep the face, skin tone, hair, and physical features consistent with IMAGE 1
-- Keep the outfit and clothing from IMAGE 1 exactly as shown
-- Copy the exact body pose, stance, arm positions, and leg positions from IMAGE 2
-- Use professional studio lighting similar to IMAGE 1
-- Background should be clean white or light grey studio backdrop
-- Maintain photorealistic e-commerce quality
-- Match the camera angle and framing from IMAGE 2
+Repose the subject in the input photo to exactly match the reference in:
+- body pose and limb positioning
+- head tilt and shoulder angle
+- weight distribution and stance
+- camera height, focal distance, and perspective
+- image crop and framing
 
-Generate a high-quality fashion photograph combining the talent's appearance and outfit from IMAGE 1 with the pose from IMAGE 2.`;
+The output must be cropped to match the reference image exactly.
+
+If the reference image does not show the full body, do not include the full body in the output.
+
+Do not zoom out, extend the frame, or reveal additional body parts beyond what is visible in the reference.
+
+Do not alter the subject's identity, facial features, hairstyle, body proportions, clothing, colours, logos, fabric textures, or materials.
+
+Do not stylise or reinterpret the image.
+
+The final image should look like the original photo, naturally repositioned and cropped identically to the reference image.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -95,9 +103,9 @@ Generate a high-quality fashion photograph combining the talent's appearance and
             role: "user",
             content: [
               { type: "text", text: prompt },
-              { type: "text", text: "IMAGE 1 - TALENT REFERENCE (copy this person's appearance and outfit):" },
+              { type: "text", text: "INPUT PHOTO (subject to repose):" },
               { type: "image_url", image_url: { url: task.talentImageUrl } },
-              { type: "text", text: "IMAGE 2 - POSE REFERENCE (copy this exact pose):" },
+              { type: "text", text: "GREYSCALE REFERENCE (pose, camera, and framing template):" },
               { type: "image_url", image_url: { url: task.poseUrl } },
             ],
           },
