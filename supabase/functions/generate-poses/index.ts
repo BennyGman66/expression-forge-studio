@@ -108,25 +108,33 @@ serve(async (req) => {
       console.log(`Bulk mode: processing ${pairings.length} pairings`);
 
       for (const pairing of pairings as Pairing[]) {
-        // Filter clay images for this pairing based on product type
-        let pairingClayImages = [...allClayImages];
-        
-        if (pairing.productType) {
-          const productTypeFilter = pairing.productType === 'tops' ? 'tops' : 'trousers';
-          pairingClayImages = pairingClayImages.filter(
-            (c) => c.product_images.products.product_type === productTypeFilter
-          );
-          console.log(`Pairing has productType=${pairing.productType}, filtered to ${pairingClayImages.length} clay images`);
-        }
+        // Store brand clay images for this pairing (no product type filter at pairing level)
+        let allClayImagesForBrand = [...allClayImages];
 
         for (const pairingSlot of pairing.slots) {
+          // Start with all clay images
+          let slotClayImages = [...allClayImagesForBrand];
+          
+          // Only apply product type filtering for B (Cropped Front) and D (Detail) slots
+          // A (Full Front) and C (Full Back) use ALL available poses regardless of product type
+          const shouldFilterByProductType = (pairingSlot === 'B' || pairingSlot === 'D');
+          if (shouldFilterByProductType && pairing.productType) {
+            const productTypeFilter = pairing.productType === 'tops' ? 'tops' : 'trousers';
+            slotClayImages = slotClayImages.filter(
+              (c) => c.product_images.products.product_type === productTypeFilter
+            );
+            console.log(`[BULK] Slot ${pairingSlot}: After product type filter (${productTypeFilter}): ${slotClayImages.length} clay images`);
+          } else {
+            console.log(`[BULK] Slot ${pairingSlot}: Using ALL poses (no product type filter for universal slots A/C)`);
+          }
+
           // Get clay images for this slot
-          const slotPoses = pairingClayImages.filter(
+          const slotPoses = slotClayImages.filter(
             (c) => c.product_images.slot === pairingSlot
           );
 
           if (slotPoses.length === 0) {
-            console.log(`No poses for slot ${pairingSlot} with productType=${pairing.productType}, skipping`);
+            console.log(`No poses for slot ${pairingSlot}, skipping`);
             continue;
           }
 
