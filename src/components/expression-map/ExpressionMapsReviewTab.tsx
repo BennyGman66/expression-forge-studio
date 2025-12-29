@@ -30,6 +30,18 @@ interface ExpressionMapsReviewTabProps {
   onAddMore?: () => void;
 }
 
+// Calculate optimal columns for a balanced grid layout
+const getOptimalColumns = (count: number): number => {
+  if (count <= 0) return 1;
+  const sqrt = Math.sqrt(count);
+  if (Number.isInteger(sqrt)) return sqrt; // Perfect square (4, 9, 16, 25, etc.)
+  // For non-squares, find the most balanced layout
+  for (let cols = Math.ceil(sqrt); cols >= 4; cols--) {
+    if (count % cols === 0) return cols;
+  }
+  return 5; // Fallback to 5 columns
+};
+
 export function ExpressionMapsReviewTab({ projectId, onAddMore }: ExpressionMapsReviewTabProps) {
   const [exports, setExports] = useState<ExpressionMapExport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +49,11 @@ export function ExpressionMapsReviewTab({ projectId, onAddMore }: ExpressionMaps
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ExpressionMapExport | null>(null);
+  
+  // Edit mode state for modifying images in a locked-in map
+  const [isEditingImages, setIsEditingImages] = useState(false);
+  const [editedImageUrls, setEditedImageUrls] = useState<string[]>([]);
+  const [editedOutputIds, setEditedOutputIds] = useState<string[]>([]);
 
   useEffect(() => {
     fetchExports();
@@ -120,11 +137,68 @@ export function ExpressionMapsReviewTab({ projectId, onAddMore }: ExpressionMaps
     setEditName("");
   };
 
+  // Start editing images in the selected export
+  const startEditingImages = () => {
+    if (!selectedExport) return;
+    setEditedImageUrls([...selectedExport.image_urls]);
+    setEditedOutputIds([...selectedExport.output_ids]);
+    setIsEditingImages(true);
+  };
+
+  // Cancel image editing
+  const cancelEditingImages = () => {
+    setIsEditingImages(false);
+    setEditedImageUrls([]);
+    setEditedOutputIds([]);
+  };
+
+  // Remove an image at a specific index
+  const removeImageAtIndex = (index: number) => {
+    setEditedImageUrls((prev) => prev.filter((_, i) => i !== index));
+    setEditedOutputIds((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Save edited images to the database
+  const saveEditedImages = async () => {
+    if (!selectedExport) return;
+    
+    if (editedImageUrls.length === 0) {
+      toast.error("Cannot save an empty expression map");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("expression_map_exports")
+      .update({
+        image_urls: editedImageUrls,
+        output_ids: editedOutputIds,
+      })
+      .eq("id", selectedExport.id);
+
+    if (error) {
+      toast.error("Failed to save changes");
+    } else {
+      toast.success("Changes saved");
+      const updatedExport = {
+        ...selectedExport,
+        image_urls: editedImageUrls,
+        output_ids: editedOutputIds,
+      };
+      setSelectedExport(updatedExport);
+      setExports((prev) =>
+        prev.map((e) => (e.id === selectedExport.id ? updatedExport : e))
+      );
+      setIsEditingImages(false);
+      setEditedImageUrls([]);
+      setEditedOutputIds([]);
+    }
+  };
+
   const handleDownload = async (exp: ExpressionMapExport) => {
     const imageUrls = exp.image_urls;
     if (imageUrls.length === 0) return;
 
-    const cols = 5;
+    const cols = getOptimalColumns(imageUrls.length);
     const cellSize = 400;
     const gap = 8;
     const rows = Math.ceil(imageUrls.length / cols);
@@ -187,34 +261,67 @@ export function ExpressionMapsReviewTab({ projectId, onAddMore }: ExpressionMaps
   };
 
   if (selectedExport) {
+    const displayUrls = isEditingImages ? editedImageUrls : selectedExport.image_urls;
+    const cols = getOptimalColumns(displayUrls.length);
+    
     return (
       <div className="space-y-6 animate-fade-in">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-serif">{selectedExport.name}</h2>
             <p className="text-sm text-muted-foreground">
-              {selectedExport.image_urls.length} expressions • Saved{" "}
+              {displayUrls.length} expressions • Saved{" "}
               {format(new Date(selectedExport.created_at), "MMM d, yyyy")}
+              {isEditingImages && " • Editing"}
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setSelectedExport(null)}>
-              Back
-            </Button>
-            <Button onClick={() => handleDownload(selectedExport)}>
-              <Download className="w-4 h-4 mr-2" />
-              Download PNG
-            </Button>
+            {isEditingImages ? (
+              <>
+                <Button variant="outline" onClick={cancelEditingImages}>
+                  Cancel
+                </Button>
+                <Button onClick={saveEditedImages}>
+                  <Check className="w-4 h-4 mr-2" />
+                  Save Changes
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setSelectedExport(null)}>
+                  Back
+                </Button>
+                <Button variant="outline" onClick={startEditingImages}>
+                  <Pencil className="w-4 h-4 mr-2" />
+                  Edit
+                </Button>
+                <Button onClick={() => handleDownload(selectedExport)}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Download PNG
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
         <div
-          className="grid grid-cols-5 gap-2 p-4"
-          style={{ backgroundColor: "#e8e6e1" }}
+          className="grid gap-2 p-4"
+          style={{ 
+            backgroundColor: "#e8e6e1",
+            gridTemplateColumns: `repeat(${cols}, 1fr)`
+          }}
         >
-          {selectedExport.image_urls.map((url, i) => (
-            <div key={i} className="aspect-square overflow-hidden">
+          {displayUrls.map((url, i) => (
+            <div key={i} className="aspect-square overflow-hidden relative group">
               <img src={url} alt="" className="w-full h-full object-cover" />
+              {isEditingImages && (
+                <button
+                  onClick={() => removeImageAtIndex(i)}
+                  className="absolute top-2 right-2 bg-destructive text-destructive-foreground rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
           ))}
         </div>
