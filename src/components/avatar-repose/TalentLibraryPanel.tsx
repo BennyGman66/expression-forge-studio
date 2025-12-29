@@ -400,19 +400,24 @@ export function TalentLibraryPanel() {
                               <Palette className="w-4 h-4 text-muted-foreground" />
                               <span className="font-medium text-sm">{look.name}</span>
                               <Select
-                                value={look.product_type || 'tops'}
+                                value={look.product_type || ''}
                                 onValueChange={(value: 'tops' | 'bottoms') => 
                                   handleUpdateLookProductType(look.id, talent.id, value)
                                 }
                               >
-                                <SelectTrigger className="h-6 w-24 text-xs">
-                                  <SelectValue />
+                                <SelectTrigger className={`h-6 w-28 text-xs ${!look.product_type ? 'border-amber-500' : ''}`}>
+                                  <SelectValue placeholder="Select type" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="tops">Tops</SelectItem>
                                   <SelectItem value="bottoms">Bottoms</SelectItem>
                                 </SelectContent>
                               </Select>
+                              {!look.product_type && (
+                                <Badge variant="outline" className="border-amber-500 text-amber-600 text-xs h-6">
+                                  ⚠️ Set type
+                                </Badge>
+                              )}
                             </div>
                             <Button
                               variant="ghost"
