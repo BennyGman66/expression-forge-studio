@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft, CheckCircle2, Sparkles } from "lucide-react";
+import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft, CheckCircle2, Sparkles, CheckSquare, Square, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +27,7 @@ export function ClayGenerationPanel() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isOrganizing, setIsOrganizing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const processingIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -252,6 +253,91 @@ export function ClayGenerationPanel() {
     }
   };
 
+  // Selection handlers
+  const toggleImageSelection = (imageId: string) => {
+    setSelectedImages((prev) => {
+      const next = new Set(prev);
+      if (next.has(imageId)) {
+        next.delete(imageId);
+      } else {
+        next.add(imageId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllInSlot = (slot: string) => {
+    const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
+    const slotImages = getImagesForSlot(slot).filter((img) => !existingClayIds.has(img.id));
+    setSelectedImages((prev) => {
+      const next = new Set(prev);
+      slotImages.forEach((img) => next.add(img.id));
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedImages(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedImages.size === 0) return;
+    
+    const imageIds = Array.from(selectedImages);
+    
+    try {
+      // Delete clay images first
+      await supabase
+        .from("clay_images")
+        .delete()
+        .in("product_image_id", imageIds);
+
+      // Then delete product images
+      const { error } = await supabase
+        .from("product_images")
+        .delete()
+        .in("id", imageIds);
+
+      if (error) throw error;
+
+      // Update local state
+      setProductImages((prev) => prev.filter((img) => !selectedImages.has(img.id)));
+      setClayImages((prev) => prev.filter((c) => !selectedImages.has(c.product_image_id)));
+      toast.success(`Deleted ${imageIds.length} images`);
+      clearSelection();
+    } catch (err) {
+      console.error("Bulk delete error:", err);
+      toast.error("Failed to delete images");
+    }
+  };
+
+  const handleBulkMove = async (newSlot: string) => {
+    if (selectedImages.size === 0) return;
+    
+    const imageIds = Array.from(selectedImages);
+    
+    try {
+      const { error } = await supabase
+        .from("product_images")
+        .update({ slot: newSlot })
+        .in("id", imageIds);
+
+      if (error) throw error;
+
+      // Update local state
+      setProductImages((prev) =>
+        prev.map((img) =>
+          selectedImages.has(img.id) ? { ...img, slot: newSlot } : img
+        )
+      );
+      toast.success(`Moved ${imageIds.length} images to ${slotLabels[newSlot as ImageSlot]}`);
+      clearSelection();
+    } catch (err) {
+      console.error("Bulk move error:", err);
+      toast.error("Failed to move images");
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* AVA Organise Button */}
@@ -365,6 +451,44 @@ export function ClayGenerationPanel() {
         )}
       </Card>
 
+      {/* Bulk Actions Toolbar */}
+      {selectedImages.size > 0 && (
+        <Card className="p-3 sticky top-0 z-10 bg-background/95 backdrop-blur border-primary/50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary" className="text-sm">
+                {selectedImages.size} selected
+              </Badge>
+              <Button variant="ghost" size="sm" onClick={clearSelection}>
+                <X className="w-4 h-4 mr-1" />
+                Clear
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <ArrowRightLeft className="w-4 h-4 mr-2" />
+                    Move to...
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  {slots.map((s) => (
+                    <DropdownMenuItem key={s} onClick={() => handleBulkMove(s)}>
+                      {s}: {slotLabels[s]}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Image Gallery by Slot - Shows only images without clay versions */}
       {selectedBrand && (
         <div className="space-y-6">
@@ -375,9 +499,23 @@ export function ClayGenerationPanel() {
             );
             if (!selectedSlots.has(slot) || slotImages.length === 0) return null;
 
+            const allSlotSelected = slotImages.every((img) => selectedImages.has(img.id));
+
             return (
               <div key={slot}>
                 <div className="flex items-center gap-2 mb-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2"
+                    onClick={() => selectAllInSlot(slot)}
+                  >
+                    {allSlotSelected ? (
+                      <CheckSquare className="w-4 h-4 text-primary" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                  </Button>
                   <Badge variant="outline">{slot}</Badge>
                   <span className="text-sm font-medium">{slotLabels[slot]}</span>
                   <span className="text-sm text-muted-foreground">
@@ -386,54 +524,75 @@ export function ClayGenerationPanel() {
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                  {slotImages.slice(0, 12).map((img) => (
-                    <div key={img.id} className="space-y-2 group relative">
-                      <div className="aspect-[3/4] rounded-lg overflow-hidden bg-muted border relative">
-                        {img.stored_url ? (
-                          <img
-                            src={img.stored_url}
-                            alt="Product"
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <ImageIcon className="w-8 h-8 text-muted-foreground" />
+                  {slotImages.map((img) => {
+                    const isSelected = selectedImages.has(img.id);
+                    return (
+                      <div key={img.id} className="space-y-2 group relative">
+                        <div 
+                          className={`aspect-[3/4] rounded-lg overflow-hidden bg-muted border relative cursor-pointer transition-all ${
+                            isSelected ? 'ring-2 ring-primary ring-offset-2' : ''
+                          }`}
+                          onClick={() => toggleImageSelection(img.id)}
+                        >
+                          {img.stored_url ? (
+                            <img
+                              src={img.stored_url}
+                              alt="Product"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <ImageIcon className="w-8 h-8 text-muted-foreground" />
+                            </div>
+                          )}
+                          {/* Selection indicator */}
+                          <div className={`absolute top-2 left-2 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+                              isSelected ? 'bg-primary text-primary-foreground' : 'bg-background/80 border'
+                            }`}>
+                              {isSelected && <CheckCircle2 className="w-4 h-4" />}
+                            </div>
                           </div>
-                        )}
-                        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="secondary"
-                                size="icon"
-                                className="h-7 w-7"
-                              >
-                                <ArrowRightLeft className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent>
-                              {slots.filter((s) => s !== img.slot).map((s) => (
-                                <DropdownMenuItem
-                                  key={s}
-                                  onClick={() => handleMoveToSlot(img.id, s)}
+                          {/* Action buttons */}
+                          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="secondary"
+                                  size="icon"
+                                  className="h-7 w-7"
+                                  onClick={(e) => e.stopPropagation()}
                                 >
-                                  Move to {s} ({slotLabels[s]})
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          <Button
-                            variant="destructive"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => handleDeleteImage(img.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                                  <ArrowRightLeft className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent>
+                                {slots.filter((s) => s !== img.slot).map((s) => (
+                                  <DropdownMenuItem
+                                    key={s}
+                                    onClick={() => handleMoveToSlot(img.id, s)}
+                                  >
+                                    Move to {s} ({slotLabels[s]})
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <Button
+                              variant="destructive"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteImage(img.id);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );
