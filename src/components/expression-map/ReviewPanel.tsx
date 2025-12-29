@@ -136,10 +136,11 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
 
         <div 
           ref={exportRef}
-          className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 bg-card p-4 rounded-lg border"
+          className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1"
+          style={{ backgroundColor: '#e8e6e1' }}
         >
           {favoriteOutputs.map((output) => (
-            <div key={output.id} className="aspect-square rounded-lg overflow-hidden bg-muted">
+            <div key={output.id} className="aspect-square overflow-hidden">
               <img
                 src={output.image_url!}
                 alt=""
