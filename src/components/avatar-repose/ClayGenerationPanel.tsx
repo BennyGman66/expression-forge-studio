@@ -27,6 +27,8 @@ export function ClayGenerationPanel() {
   const [clayImages, setClayImages] = useState<ClayImage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isOrganizing, setIsOrganizing] = useState(false);
+  const [organizeJobId, setOrganizeJobId] = useState<string | null>(null);
+  const [organizeProgress, setOrganizeProgress] = useState({ current: 0, total: 0 });
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const processingIdsRef = useRef<Set<string>>(new Set());
@@ -77,6 +79,39 @@ export function ClayGenerationPanel() {
       supabase.removeChannel(channel);
     };
   }, [isGenerating]);
+
+  // Subscribe to organize job progress
+  useEffect(() => {
+    if (!organizeJobId) return;
+
+    const channel = supabase
+      .channel("organize-progress")
+      .on(
+        "postgres_changes",
+        { 
+          event: "UPDATE", 
+          schema: "public", 
+          table: "jobs",
+          filter: `id=eq.${organizeJobId}`
+        },
+        (payload) => {
+          const job = payload.new as { progress: number; total: number; status: string };
+          setOrganizeProgress({ current: job.progress || 0, total: job.total || 0 });
+          
+          if (job.status === "completed") {
+            setIsOrganizing(false);
+            setOrganizeJobId(null);
+            toast.success("AVA finished organizing your images!");
+            fetchProductImages();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [organizeJobId]);
 
   const fetchBrands = async () => {
     const { data } = await supabase
@@ -167,7 +202,7 @@ export function ClayGenerationPanel() {
     }
 
     setIsOrganizing(true);
-    toast.info("AVA is analyzing and organizing your images...");
+    setOrganizeProgress({ current: 0, total: 0 });
 
     try {
       const { data, error } = await supabase.functions.invoke("organize-images", {
@@ -177,18 +212,16 @@ export function ClayGenerationPanel() {
       if (error) throw error;
 
       if (data.total > 0) {
-        toast.success(`AVA is organizing ${data.total} images in the background. Refresh in a moment to see results.`);
-        // Start polling for updates
-        setTimeout(() => fetchProductImages(), 5000);
-        setTimeout(() => fetchProductImages(), 15000);
-        setTimeout(() => fetchProductImages(), 30000);
+        setOrganizeJobId(data.jobId);
+        setOrganizeProgress({ current: 0, total: data.total });
+        toast.info(`AVA is analyzing ${data.total} images...`);
       } else {
         toast.info("No images to organize!");
+        setIsOrganizing(false);
       }
     } catch (err) {
       console.error("Organize error:", err);
       toast.error("Failed to organize images");
-    } finally {
       setIsOrganizing(false);
     }
   };
@@ -345,24 +378,38 @@ export function ClayGenerationPanel() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* AVA Organise Button */}
-      <Button
-        onClick={handleOrganizeImages}
-        disabled={isOrganizing || !selectedBrand}
-        className="w-full h-12 text-base font-semibold bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 hover:from-violet-600 hover:via-fuchsia-600 hover:to-pink-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 border-0"
-      >
-        {isOrganizing ? (
-          <>
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />
-            AVA is organizing...
-          </>
-        ) : (
-          <>
-            <Sparkles className="w-5 h-5 mr-2" />
-            ✨ AVA Organise
-          </>
+      {/* AVA Organise Button with Progress */}
+      <div className="space-y-2">
+        <Button
+          onClick={handleOrganizeImages}
+          disabled={isOrganizing || !selectedBrand}
+          className="w-full h-12 text-base font-semibold bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 hover:from-violet-600 hover:via-fuchsia-600 hover:to-pink-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 border-0"
+        >
+          {isOrganizing ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin mr-2" />
+              AVA is organizing... {organizeProgress.total > 0 && `(${organizeProgress.current}/${organizeProgress.total})`}
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-5 h-5 mr-2" />
+              ✨ AVA Organise
+            </>
+          )}
+        </Button>
+        
+        {isOrganizing && organizeProgress.total > 0 && (
+          <div className="space-y-1">
+            <Progress 
+              value={(organizeProgress.current / Math.max(organizeProgress.total, 1)) * 100} 
+              className="h-2 bg-violet-100"
+            />
+            <p className="text-xs text-muted-foreground text-center">
+              Analyzing image {organizeProgress.current} of {organizeProgress.total}
+            </p>
+          </div>
         )}
-      </Button>
+      </div>
 
       {/* Controls */}
       <Card className="p-6">

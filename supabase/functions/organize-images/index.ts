@@ -34,6 +34,10 @@ C - FULL BACK: A full body shot showing the entire person from head to toe, but 
 
 Respond with ONLY the single letter (A, B, C, or D) that best matches this image. Nothing else.`;
 
+  // Create abort controller with 30 second timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
   try {
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -41,6 +45,7 @@ Respond with ONLY the single letter (A, B, C, or D) that best matches this image
         "Authorization": `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
@@ -55,6 +60,8 @@ Respond with ONLY the single letter (A, B, C, or D) that best matches this image
         max_tokens: 10,
       }),
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -79,17 +86,23 @@ Respond with ONLY the single letter (A, B, C, or D) that best matches this image
     console.log(`Invalid classification response: "${classification}", defaulting to A`);
     return "A";
   } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('AI classification timed out after 30 seconds');
+      throw new Error('Classification timeout');
+    }
     console.error(`Error classifying image: ${error}`);
     throw error;
   }
 }
 
-async function processOrganization(brandId: string, images: ImageToClassify[]) {
+async function processOrganization(brandId: string, jobId: string, images: ImageToClassify[]) {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   
-  console.log(`Background: Starting organization of ${images.length} images`);
+  console.log(`Background: Starting organization of ${images.length} images for job ${jobId}`);
 
   let updated = 0;
+  let processed = 0;
 
   for (const image of images) {
     try {
@@ -111,12 +124,44 @@ async function processOrganization(brandId: string, images: ImageToClassify[]) {
         console.log(`Image ${image.id}: already in correct slot ${image.slot}`);
       }
 
+      processed++;
+      
+      // Update job progress
+      await supabase
+        .from("jobs")
+        .update({ 
+          progress: processed,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", jobId);
+
       // Small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 300));
     } catch (error) {
       console.error(`Failed to classify image ${image.id}:`, error);
+      processed++;
+      
+      // Still update progress even on error
+      await supabase
+        .from("jobs")
+        .update({ 
+          progress: processed,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", jobId);
     }
   }
+
+  // Mark job as complete
+  await supabase
+    .from("jobs")
+    .update({ 
+      status: "completed",
+      progress: processed,
+      result: { updated, total: images.length },
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", jobId);
 
   console.log(`Background: Organization complete. Updated ${updated} of ${images.length} images`);
 }
@@ -169,15 +214,34 @@ serve(async (req) => {
       slot: img.slot,
     }));
 
-    console.log(`Starting background organization of ${imagesToProcess.length} images`);
+    // Create a job entry to track progress
+    const { data: job, error: jobError } = await supabase
+      .from("jobs")
+      .insert({
+        project_id: brandId, // Using brandId as project_id for now
+        type: "organize",
+        status: "running",
+        progress: 0,
+        total: imagesToProcess.length,
+      })
+      .select()
+      .single();
+
+    if (jobError) {
+      console.error("Error creating job:", jobError);
+      throw jobError;
+    }
+
+    console.log(`Created organize job ${job.id} for ${imagesToProcess.length} images`);
 
     // Start background processing
-    EdgeRuntime.waitUntil(processOrganization(brandId, imagesToProcess));
+    EdgeRuntime.waitUntil(processOrganization(brandId, job.id, imagesToProcess));
 
-    // Return immediately
+    // Return immediately with job info
     return new Response(
       JSON.stringify({ 
         message: "Organization started",
+        jobId: job.id,
         total: imagesToProcess.length,
         status: "processing"
       }),
