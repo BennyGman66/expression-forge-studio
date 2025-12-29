@@ -24,8 +24,8 @@ import type {
   TalentView,
 } from "@/types/avatar-repose";
 
-const RANDOM_COUNTS = [3, 5, 10, 20];
-const ATTEMPTS_OPTIONS = [1, 3, 5];
+const RANDOM_COUNTS = [1, 2, 3, 4];
+const ATTEMPTS_OPTIONS = [1, 2, 3, 4];
 
 const AI_MODELS = [
   { id: "google/gemini-2.5-flash-image-preview", name: "Gemini 2.5 Flash", description: "Fast, balanced quality" },
@@ -106,7 +106,7 @@ export function PoseGeneratorPanel() {
   const [selectedSlots, setSelectedSlots] = useState<ImageSlot[]>([]);
   const [selectedViews, setSelectedViews] = useState<TalentView[]>([]);
   
-  const [randomCount, setRandomCount] = useState(5);
+  const [randomCount, setRandomCount] = useState(3);
   const [attemptsPerPose, setAttemptsPerPose] = useState(3);
   const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].id);
   const [isGenerating, setIsGenerating] = useState(false);
