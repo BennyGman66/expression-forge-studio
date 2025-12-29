@@ -129,6 +129,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
     modelIds: string[];
     recipeIds: string[];
     variations: number;
+    aiModel: string;
   }) => {
     setIsGenerating(true);
 
@@ -214,6 +215,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
           action: "create-job",
           projectId: project.id,
           total: prompts.length,
+          aiModel: payload.aiModel,
         },
       });
 
@@ -246,6 +248,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
                   promptIndex: i,
                   prompt: prompts[i],
                   total: prompts.length,
+                  aiModel: payload.aiModel,
                 },
               });
 
