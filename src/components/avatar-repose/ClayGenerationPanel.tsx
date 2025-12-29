@@ -72,7 +72,6 @@ export function ClayGenerationPanel() {
             setIsGenerating(false);
             setClayJobId(null);
             toast.success("Clay generation complete!");
-            fetchClayImages();
           }
         }
       )
@@ -82,6 +81,35 @@ export function ClayGenerationPanel() {
       supabase.removeChannel(channel);
     };
   }, [clayJobId]);
+
+  // Subscribe to new clay images in real-time
+  useEffect(() => {
+    if (!selectedBrand) return;
+
+    const channel = supabase
+      .channel("clay-images-realtime")
+      .on(
+        "postgres_changes",
+        { 
+          event: "INSERT", 
+          schema: "public", 
+          table: "clay_images"
+        },
+        (payload) => {
+          const newClay = payload.new as ClayImage;
+          // Add the new clay image to state if not already present
+          setClayImages((prev) => {
+            if (prev.some((c) => c.id === newClay.id)) return prev;
+            return [...prev, newClay];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedBrand]);
 
   // Subscribe to organize job progress
   useEffect(() => {
