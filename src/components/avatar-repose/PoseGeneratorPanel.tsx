@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -9,7 +9,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Sparkles, Download, RefreshCw, Image as ImageIcon, AlertTriangle, FileJson } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Loader2, Sparkles, Download, RefreshCw, Image as ImageIcon, AlertTriangle, FileJson, Zap, Info } from "lucide-react";
 import { toast } from "sonner";
 import type {
   Brand,
@@ -39,14 +40,6 @@ const VIEW_CONFIG: { view: TalentView; label: string }[] = [
   { view: "side", label: "Side" },
 ];
 
-// Preset configurations
-const PRESETS: { name: string; views: TalentView[]; slots: ImageSlot[] }[] = [
-  { name: "Front → A+B", views: ["front"], slots: ["A", "B"] },
-  { name: "Back → C", views: ["back"], slots: ["C"] },
-  { name: "Detail → D", views: ["detail"], slots: ["D"] },
-  { name: "All Valid", views: ["front", "back", "detail", "side"], slots: ["A", "B", "C", "D"] },
-];
-
 interface ClayImageWithMeta extends ClayImage {
   product_images?: {
     slot: string;
@@ -66,11 +59,33 @@ interface TalentLook {
   created_at: string;
 }
 
+interface SelectedTalentLook {
+  talentId: string;
+  talentName: string;
+  talentGender: string | null;
+  lookId: string;
+  lookName: string;
+  productType: 'tops' | 'bottoms' | null;
+  availableViews: TalentView[];
+}
+
+interface SmartPairing {
+  talentLookKey: string;
+  talentName: string;
+  lookName: string;
+  productType: 'tops' | 'bottoms' | null;
+  view: TalentView;
+  talentImageId: string;
+  talentImageUrl: string;
+  slots: ImageSlot[];
+  slotPoseCounts: { slot: ImageSlot; count: number }[];
+}
+
 export function PoseGeneratorPanel() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [talents, setTalents] = useState<Talent[]>([]);
-  const [talentLooks, setTalentLooks] = useState<TalentLook[]>([]);
-  const [talentImages, setTalentImages] = useState<TalentImage[]>([]);
+  const [allTalentLooks, setAllTalentLooks] = useState<TalentLook[]>([]);
+  const [allTalentImages, setAllTalentImages] = useState<TalentImage[]>([]);
   const [allClayImages, setAllClayImages] = useState<ClayImageWithMeta[]>([]);
   const [generations, setGenerations] = useState<Generation[]>([]);
   const [currentJob, setCurrentJob] = useState<GenerationJob | null>(null);
@@ -78,111 +93,18 @@ export function PoseGeneratorPanel() {
   // Form state
   const [selectedBrand, setSelectedBrand] = useState("");
   const [selectedGender, setSelectedGender] = useState("all");
+  const [selectedTalentLooks, setSelectedTalentLooks] = useState<SelectedTalentLook[]>([]);
+  const [smartPairingMode, setSmartPairingMode] = useState(true);
+  
+  // Manual mode state (when smart pairing is off)
   const [selectedSlots, setSelectedSlots] = useState<ImageSlot[]>([]);
-  const [selectedTalent, setSelectedTalent] = useState("");
-  const [selectedLookId, setSelectedLookId] = useState("");
   const [selectedViews, setSelectedViews] = useState<TalentView[]>([]);
+  
   const [randomCount, setRandomCount] = useState(5);
   const [attemptsPerPose, setAttemptsPerPose] = useState(3);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Get selected look
-  const selectedLook = talentLooks.find(l => l.id === selectedLookId);
-
-  // Compute available views for selected talent
-  const availableViews = useMemo(() => {
-    return VIEW_CONFIG.map(vc => ({
-      ...vc,
-      available: talentImages.some(img => img.view === vc.view),
-      imageCount: talentImages.filter(img => img.view === vc.view).length,
-    }));
-  }, [talentImages]);
-
-  // Compute clay image counts per slot (filtered by look's product_type)
-  const clayImagesBySlot = useMemo(() => {
-    const result: Record<ImageSlot, ClayImageWithMeta[]> = { A: [], B: [], C: [], D: [] };
-    
-    // Map look product_type to product's product_type
-    const lookProductType = selectedLook?.product_type;
-    const productTypeFilter = lookProductType === 'tops' ? 'tops' : lookProductType === 'bottoms' ? 'trousers' : null;
-    
-    allClayImages.forEach(clay => {
-      const slot = clay.product_images?.slot as ImageSlot;
-      if (slot && result[slot]) {
-        // Gender filter
-        if (selectedGender !== "all" && clay.product_images?.products?.gender !== selectedGender) {
-          return;
-        }
-        // Product type filter based on look
-        if (productTypeFilter && clay.product_images?.products?.product_type !== productTypeFilter) {
-          return;
-        }
-        result[slot].push(clay);
-      }
-    });
-    
-    return result;
-  }, [allClayImages, selectedGender, selectedLook]);
-
-  // Compute pairing breakdown
-  const pairingBreakdown = useMemo(() => {
-    const breakdown: {
-      view: TalentView;
-      viewLabel: string;
-      refCount: number;
-      slots: { slot: ImageSlot; poseCount: number }[];
-    }[] = [];
-
-    selectedViews.forEach(view => {
-      const refCount = talentImages.filter(img => img.view === view).length;
-      if (refCount === 0) return;
-
-      const slots = selectedSlots.map(slot => ({
-        slot,
-        poseCount: Math.min(randomCount, clayImagesBySlot[slot].length),
-      })).filter(s => s.poseCount > 0);
-
-      if (slots.length > 0) {
-        breakdown.push({
-          view,
-          viewLabel: VIEW_CONFIG.find(v => v.view === view)?.label || view,
-          refCount,
-          slots,
-        });
-      }
-    });
-
-    return breakdown;
-  }, [selectedViews, selectedSlots, talentImages, randomCount, clayImagesBySlot]);
-
-  // Compute total outputs
-  const totalOutputs = useMemo(() => {
-    let total = 0;
-    pairingBreakdown.forEach(item => {
-      item.slots.forEach(slot => {
-        total += item.refCount * slot.poseCount * attemptsPerPose;
-      });
-    });
-    return total;
-  }, [pairingBreakdown, attemptsPerPose]);
-
-  // Warnings for missing views
-  const warnings = useMemo(() => {
-    const msgs: string[] = [];
-    selectedViews.forEach(view => {
-      const refCount = talentImages.filter(img => img.view === view).length;
-      if (refCount === 0) {
-        msgs.push(`No ${view} images for selected talent - will be skipped`);
-      }
-    });
-    selectedSlots.forEach(slot => {
-      if (clayImagesBySlot[slot].length === 0) {
-        msgs.push(`No poses available for slot ${slot} - will be skipped`);
-      }
-    });
-    return msgs;
-  }, [selectedViews, selectedSlots, talentImages, clayImagesBySlot]);
-
+  // Load all looks and images for all talents
   useEffect(() => {
     fetchData();
 
@@ -211,18 +133,10 @@ export function PoseGeneratorPanel() {
   }, [selectedBrand]);
 
   useEffect(() => {
-    if (selectedTalent) {
-      fetchTalentLooks();
-      setSelectedLookId("");
-      setTalentImages([]);
+    if (talents.length > 0) {
+      fetchAllTalentData();
     }
-  }, [selectedTalent]);
-
-  useEffect(() => {
-    if (selectedLookId) {
-      fetchTalentImages();
-    }
-  }, [selectedLookId]);
+  }, [talents]);
 
   const fetchData = async () => {
     const [brandsRes, talentsRes] = await Promise.all([
@@ -232,6 +146,16 @@ export function PoseGeneratorPanel() {
 
     if (brandsRes.data) setBrands(brandsRes.data);
     if (talentsRes.data) setTalents(talentsRes.data);
+  };
+
+  const fetchAllTalentData = async () => {
+    const [looksRes, imagesRes] = await Promise.all([
+      supabase.from("talent_looks").select("*").order("created_at", { ascending: true }),
+      supabase.from("talent_images").select("*"),
+    ]);
+
+    if (looksRes.data) setAllTalentLooks(looksRes.data as TalentLook[]);
+    if (imagesRes.data) setAllTalentImages(imagesRes.data);
   };
 
   const fetchClayImages = async () => {
@@ -245,31 +169,6 @@ export function PoseGeneratorPanel() {
     }
   };
 
-  const fetchTalentLooks = async () => {
-    const { data } = await supabase
-      .from("talent_looks")
-      .select("*")
-      .eq("talent_id", selectedTalent)
-      .order("created_at", { ascending: true });
-
-    if (data) {
-      setTalentLooks(data as TalentLook[]);
-      // Auto-select first look
-      if (data.length > 0) {
-        setSelectedLookId(data[0].id);
-      }
-    }
-  };
-
-  const fetchTalentImages = async () => {
-    const { data } = await supabase
-      .from("talent_images")
-      .select("*")
-      .eq("look_id", selectedLookId);
-
-    if (data) setTalentImages(data);
-  };
-
   const fetchGenerations = async (jobId: string) => {
     const { data } = await supabase
       .from("generations")
@@ -280,38 +179,222 @@ export function PoseGeneratorPanel() {
     if (data) setGenerations(data as unknown as Generation[]);
   };
 
-  const toggleSlot = (slot: ImageSlot) => {
-    setSelectedSlots(prev => 
-      prev.includes(slot) ? prev.filter(s => s !== slot) : [...prev, slot]
-    );
+  // Build talent + look combinations with available views
+  const talentLookOptions = useMemo(() => {
+    return talents.flatMap(talent => {
+      const looks = allTalentLooks.filter(l => l.talent_id === talent.id);
+      return looks.map(look => {
+        const lookImages = allTalentImages.filter(img => img.look_id === look.id);
+        const availableViews = VIEW_CONFIG
+          .filter(vc => lookImages.some(img => img.view === vc.view))
+          .map(vc => vc.view);
+        
+        return {
+          talentId: talent.id,
+          talentName: talent.name,
+          talentGender: talent.gender,
+          lookId: look.id,
+          lookName: look.name,
+          productType: look.product_type,
+          availableViews,
+        } as SelectedTalentLook;
+      });
+    });
+  }, [talents, allTalentLooks, allTalentImages]);
+
+  // Get clay images filtered by gender and product type
+  const getClayImagesBySlotForProductType = useCallback((productType: 'tops' | 'bottoms' | null) => {
+    const result: Record<ImageSlot, ClayImageWithMeta[]> = { A: [], B: [], C: [], D: [] };
+    const productTypeFilter = productType === 'tops' ? 'tops' : productType === 'bottoms' ? 'trousers' : null;
+    
+    allClayImages.forEach(clay => {
+      const slot = clay.product_images?.slot as ImageSlot;
+      if (slot && result[slot]) {
+        // Gender filter
+        if (selectedGender !== "all" && clay.product_images?.products?.gender !== selectedGender) {
+          return;
+        }
+        // Product type filter
+        if (productTypeFilter && clay.product_images?.products?.product_type !== productTypeFilter) {
+          return;
+        }
+        result[slot].push(clay);
+      }
+    });
+    
+    return result;
+  }, [allClayImages, selectedGender]);
+
+  // Toggle talent+look selection
+  const toggleTalentLook = (option: SelectedTalentLook) => {
+    const key = `${option.talentId}_${option.lookId}`;
+    setSelectedTalentLooks(prev => {
+      const exists = prev.some(s => `${s.talentId}_${s.lookId}` === key);
+      if (exists) {
+        return prev.filter(s => `${s.talentId}_${s.lookId}` !== key);
+      }
+      return [...prev, option];
+    });
   };
 
-  const toggleView = (view: TalentView) => {
-    setSelectedViews(prev => 
-      prev.includes(view) ? prev.filter(v => v !== view) : [...prev, view]
-    );
-  };
+  // Compute smart pairings based on rules
+  const smartPairings = useMemo((): SmartPairing[] => {
+    if (!smartPairingMode || selectedTalentLooks.length === 0) return [];
 
-  const applyPreset = (preset: typeof PRESETS[0]) => {
-    const validViews = preset.views.filter(v => 
-      talentImages.some(img => img.view === v)
-    );
-    const validSlots = preset.slots.filter(s => 
-      clayImagesBySlot[s].length > 0
-    );
-    setSelectedViews(validViews);
-    setSelectedSlots(validSlots);
-    toast.success(`Applied "${preset.name}" preset`);
-  };
+    const pairings: SmartPairing[] = [];
+
+    for (const tl of selectedTalentLooks) {
+      const lookImages = allTalentImages.filter(img => img.look_id === tl.lookId);
+      const hasFront = lookImages.some(img => img.view === 'front');
+      const hasDetail = lookImages.some(img => img.view === 'detail');
+      const hasBack = lookImages.some(img => img.view === 'back');
+      
+      const clayBySlot = getClayImagesBySlotForProductType(tl.productType);
+      const key = `${tl.talentId}_${tl.lookId}`;
+
+      // FRONT → A + B
+      if (hasFront) {
+        const frontImages = lookImages.filter(img => img.view === 'front');
+        frontImages.forEach(img => {
+          const slots: ImageSlot[] = ['A', 'B'].filter(s => clayBySlot[s as ImageSlot].length > 0) as ImageSlot[];
+          if (slots.length > 0) {
+            pairings.push({
+              talentLookKey: key,
+              talentName: tl.talentName,
+              lookName: tl.lookName,
+              productType: tl.productType,
+              view: 'front',
+              talentImageId: img.id,
+              talentImageUrl: img.stored_url,
+              slots,
+              slotPoseCounts: slots.map(s => ({ slot: s, count: Math.min(randomCount, clayBySlot[s].length) })),
+            });
+          }
+        });
+      }
+
+      // DETAIL → D (if exists) OR FRONT → D (fallback)
+      if (hasDetail) {
+        const detailImages = lookImages.filter(img => img.view === 'detail');
+        detailImages.forEach(img => {
+          if (clayBySlot.D.length > 0) {
+            pairings.push({
+              talentLookKey: key,
+              talentName: tl.talentName,
+              lookName: tl.lookName,
+              productType: tl.productType,
+              view: 'detail',
+              talentImageId: img.id,
+              talentImageUrl: img.stored_url,
+              slots: ['D'],
+              slotPoseCounts: [{ slot: 'D', count: Math.min(randomCount, clayBySlot.D.length) }],
+            });
+          }
+        });
+      } else if (hasFront) {
+        // Fallback: use FRONT for D
+        const frontImages = lookImages.filter(img => img.view === 'front');
+        frontImages.forEach(img => {
+          if (clayBySlot.D.length > 0) {
+            pairings.push({
+              talentLookKey: key,
+              talentName: tl.talentName,
+              lookName: tl.lookName,
+              productType: tl.productType,
+              view: 'front',
+              talentImageId: img.id,
+              talentImageUrl: img.stored_url,
+              slots: ['D'],
+              slotPoseCounts: [{ slot: 'D', count: Math.min(randomCount, clayBySlot.D.length) }],
+            });
+          }
+        });
+      }
+
+      // BACK → C
+      if (hasBack) {
+        const backImages = lookImages.filter(img => img.view === 'back');
+        backImages.forEach(img => {
+          if (clayBySlot.C.length > 0) {
+            pairings.push({
+              talentLookKey: key,
+              talentName: tl.talentName,
+              lookName: tl.lookName,
+              productType: tl.productType,
+              view: 'back',
+              talentImageId: img.id,
+              talentImageUrl: img.stored_url,
+              slots: ['C'],
+              slotPoseCounts: [{ slot: 'C', count: Math.min(randomCount, clayBySlot.C.length) }],
+            });
+          }
+        });
+      }
+    }
+
+    return pairings;
+  }, [smartPairingMode, selectedTalentLooks, allTalentImages, getClayImagesBySlotForProductType, randomCount]);
+
+  // Group pairings by talent+look for display
+  const pairingsByTalentLook = useMemo(() => {
+    const grouped: Record<string, { talentName: string; lookName: string; productType: string | null; pairings: SmartPairing[]; subtotal: number }> = {};
+    
+    for (const p of smartPairings) {
+      if (!grouped[p.talentLookKey]) {
+        grouped[p.talentLookKey] = {
+          talentName: p.talentName,
+          lookName: p.lookName,
+          productType: p.productType,
+          pairings: [],
+          subtotal: 0,
+        };
+      }
+      grouped[p.talentLookKey].pairings.push(p);
+      p.slotPoseCounts.forEach(spc => {
+        grouped[p.talentLookKey].subtotal += spc.count * attemptsPerPose;
+      });
+    }
+    
+    return grouped;
+  }, [smartPairings, attemptsPerPose]);
+
+  // Total outputs
+  const totalOutputs = useMemo(() => {
+    if (smartPairingMode) {
+      return Object.values(pairingsByTalentLook).reduce((sum, g) => sum + g.subtotal, 0);
+    }
+    // Manual mode calculation would go here
+    return 0;
+  }, [smartPairingMode, pairingsByTalentLook]);
+
+  // Warnings
+  const warnings = useMemo(() => {
+    const msgs: string[] = [];
+    if (smartPairingMode) {
+      selectedTalentLooks.forEach(tl => {
+        const lookImages = allTalentImages.filter(img => img.look_id === tl.lookId);
+        if (lookImages.length === 0) {
+          msgs.push(`${tl.talentName} - ${tl.lookName}: No images uploaded`);
+        } else {
+          const hasFront = lookImages.some(img => img.view === 'front');
+          const hasBack = lookImages.some(img => img.view === 'back');
+          if (!hasFront && !hasBack) {
+            msgs.push(`${tl.talentName} - ${tl.lookName}: No front or back shots`);
+          }
+        }
+      });
+    }
+    return msgs;
+  }, [smartPairingMode, selectedTalentLooks, allTalentImages]);
 
   const handleGenerate = async () => {
-    if (!selectedBrand || !selectedTalent) {
-      toast.error("Please select a brand and talent");
+    if (!selectedBrand) {
+      toast.error("Please select a brand");
       return;
     }
 
-    if (selectedViews.length === 0 || selectedSlots.length === 0) {
-      toast.error("Please select at least one view and one slot");
+    if (selectedTalentLooks.length === 0) {
+      toast.error("Please select at least one talent + look");
       return;
     }
 
@@ -323,31 +406,20 @@ export function PoseGeneratorPanel() {
     setIsGenerating(true);
 
     try {
-      // Build pairings array
-      const pairings: {
-        view: TalentView;
-        talentImageUrl: string;
-        talentImageId: string;
-        slots: ImageSlot[];
-      }[] = [];
-
-      selectedViews.forEach(view => {
-        const viewImages = talentImages.filter(img => img.view === view);
-        viewImages.forEach(img => {
-          pairings.push({
-            view,
-            talentImageUrl: img.stored_url,
-            talentImageId: img.id,
-            slots: selectedSlots.filter(slot => clayImagesBySlot[slot].length > 0),
-          });
-        });
-      });
+      // Build pairings for API
+      const apiPairings = smartPairings.map(p => ({
+        view: p.view,
+        talentImageUrl: p.talentImageUrl,
+        talentImageId: p.talentImageId,
+        slots: p.slots,
+        productType: p.productType,
+      }));
 
       const { data, error } = await supabase.functions.invoke("generate-poses", {
         body: {
           brandId: selectedBrand,
-          talentId: selectedTalent,
-          pairings,
+          talentId: selectedTalentLooks[0].talentId, // Primary talent for job record
+          pairings: apiPairings,
           gender: selectedGender,
           randomCount,
           attemptsPerPose,
@@ -397,11 +469,10 @@ export function PoseGeneratorPanel() {
       generatedAt: new Date().toISOString(),
       settings: {
         brand: brands.find(b => b.id === selectedBrand)?.name,
-        talent: talents.find(t => t.id === selectedTalent)?.name,
-        views: selectedViews,
-        slots: selectedSlots,
+        talents: selectedTalentLooks.map(tl => `${tl.talentName} - ${tl.lookName}`),
         randomCount,
         attemptsPerPose,
+        smartPairingMode,
       },
       totalOutputs: generations.length,
       generations: generations.map(gen => ({
@@ -437,8 +508,8 @@ export function PoseGeneratorPanel() {
       <Card className="p-6">
         <h3 className="text-lg font-medium mb-4">Generate Pose Transfers</h3>
         
-        {/* Row 1: Brand, Gender, Talent, Look */}
-        <div className="grid md:grid-cols-4 gap-4 mb-6">
+        {/* Row 1: Brand, Gender */}
+        <div className="grid md:grid-cols-3 gap-4 mb-6">
           <div className="space-y-2">
             <Label>Brand</Label>
             <Select value={selectedBrand} onValueChange={setSelectedBrand}>
@@ -470,136 +541,107 @@ export function PoseGeneratorPanel() {
           </div>
 
           <div className="space-y-2">
-            <Label>Talent</Label>
-            <Select value={selectedTalent} onValueChange={setSelectedTalent}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select talent" />
-              </SelectTrigger>
-              <SelectContent>
-                {talents.map((talent) => (
-                  <SelectItem key={talent.id} value={talent.id}>
-                    {talent.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Look</Label>
-            <Select 
-              value={selectedLookId} 
-              onValueChange={setSelectedLookId}
-              disabled={!selectedTalent || talentLooks.length === 0}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={talentLooks.length === 0 ? "No looks" : "Select look"} />
-              </SelectTrigger>
-              <SelectContent>
-                {talentLooks.map((look) => (
-                  <SelectItem key={look.id} value={look.id}>
-                    {look.name} {look.product_type && <span className="text-muted-foreground">({look.product_type})</span>}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedLook?.product_type && (
-              <p className="text-xs text-muted-foreground">
-                Filtering poses to: <Badge variant="secondary" className="text-xs">{selectedLook.product_type}</Badge>
-              </p>
-            )}
+            <Label>Pairing Mode</Label>
+            <div className="flex items-center gap-3 h-10">
+              <Switch
+                checked={smartPairingMode}
+                onCheckedChange={setSmartPairingMode}
+              />
+              <span className="text-sm flex items-center gap-1.5">
+                <Zap className="w-4 h-4 text-primary" />
+                Smart Auto-Pairing
+              </span>
+            </div>
           </div>
         </div>
 
         <Separator className="my-4" />
 
-        {/* Row 2: Multi-select Views and Slots */}
-        <div className="grid md:grid-cols-2 gap-6 mb-6">
-          {/* Talent Views */}
-          <div className="space-y-3">
-            <Label>Talent Views (multi-select)</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {availableViews.map(({ view, label, available, imageCount }) => (
-                <div
-                  key={view}
-                  className={`flex items-center gap-2 p-2 rounded-lg border transition-colors ${
-                    !available ? "opacity-50 cursor-not-allowed bg-muted" : 
-                    selectedViews.includes(view) ? "bg-primary/10 border-primary" : "hover:bg-muted"
-                  }`}
-                >
-                  <Checkbox
-                    id={`view-${view}`}
-                    checked={selectedViews.includes(view)}
-                    onCheckedChange={() => available && toggleView(view)}
-                    disabled={!available}
-                  />
-                  <label
-                    htmlFor={`view-${view}`}
-                    className={`flex-1 text-sm cursor-pointer ${!available && "cursor-not-allowed"}`}
-                  >
-                    {label}
-                    {available && (
-                      <span className="text-muted-foreground ml-1">({imageCount})</span>
-                    )}
-                    {!available && (
-                      <span className="text-muted-foreground ml-1">(none)</span>
-                    )}
-                  </label>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Pose Slot Families */}
-          <div className="space-y-3">
-            <Label>Pose Slot Families (multi-select)</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {SLOT_CONFIG.map(({ slot, label }) => {
-                const count = clayImagesBySlot[slot].length;
-                const available = count > 0;
+        {/* Talent + Look Selection */}
+        <div className="mb-6">
+          <Label className="mb-3 block">Select Talents & Looks (multi-select)</Label>
+          <ScrollArea className="h-64 border rounded-lg p-3">
+            <div className="space-y-2">
+              {talentLookOptions.map((option) => {
+                const key = `${option.talentId}_${option.lookId}`;
+                const isSelected = selectedTalentLooks.some(s => `${s.talentId}_${s.lookId}` === key);
+                const hasViews = option.availableViews.length > 0;
+                
                 return (
                   <div
-                    key={slot}
-                    className={`flex items-center gap-2 p-2 rounded-lg border transition-colors ${
-                      !available ? "opacity-50 cursor-not-allowed bg-muted" : 
-                      selectedSlots.includes(slot) ? "bg-primary/10 border-primary" : "hover:bg-muted"
+                    key={key}
+                    className={`flex items-center gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+                      !hasViews ? "opacity-50 bg-muted" :
+                      isSelected ? "bg-primary/10 border-primary" : "hover:bg-muted"
                     }`}
+                    onClick={() => hasViews && toggleTalentLook(option)}
                   >
                     <Checkbox
-                      id={`slot-${slot}`}
-                      checked={selectedSlots.includes(slot)}
-                      onCheckedChange={() => available && toggleSlot(slot)}
-                      disabled={!available}
+                      checked={isSelected}
+                      disabled={!hasViews}
+                      onCheckedChange={() => hasViews && toggleTalentLook(option)}
                     />
-                    <label
-                      htmlFor={`slot-${slot}`}
-                      className={`flex-1 text-sm cursor-pointer ${!available && "cursor-not-allowed"}`}
-                    >
-                      {label}
-                      <span className="text-muted-foreground ml-1">({count})</span>
-                    </label>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{option.talentName}</span>
+                        <span className="text-muted-foreground">-</span>
+                        <span>{option.lookName}</span>
+                        {option.productType && (
+                          <Badge variant="secondary" className="text-xs">
+                            {option.productType}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex gap-1.5 mt-1">
+                        {VIEW_CONFIG.map(vc => {
+                          const hasView = option.availableViews.includes(vc.view);
+                          return (
+                            <Badge
+                              key={vc.view}
+                              variant={hasView ? "outline" : "secondary"}
+                              className={`text-xs ${!hasView && "opacity-40"}`}
+                            >
+                              {hasView ? "✓" : "✗"} {vc.label}
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
+              {talentLookOptions.length === 0 && (
+                <div className="text-center text-muted-foreground py-8">
+                  No talents or looks found. Add them in the Talent Library.
+                </div>
+              )}
             </div>
-          </div>
+          </ScrollArea>
+          {selectedTalentLooks.length > 0 && (
+            <p className="text-sm text-muted-foreground mt-2">
+              {selectedTalentLooks.length} talent-look{selectedTalentLooks.length > 1 ? 's' : ''} selected
+            </p>
+          )}
         </div>
 
-        {/* Pairing Presets */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          <Label className="w-full mb-1">Pairing Presets</Label>
-          {PRESETS.map(preset => (
-            <Button
-              key={preset.name}
-              variant="outline"
-              size="sm"
-              onClick={() => applyPreset(preset)}
-              disabled={!selectedTalent || !selectedBrand}
-            >
-              {preset.name}
-            </Button>
-          ))}
-        </div>
+        {/* Smart Pairing Rules Info */}
+        {smartPairingMode && (
+          <Card className="p-4 bg-muted/50 mb-4">
+            <div className="flex items-start gap-2">
+              <Info className="w-4 h-4 text-muted-foreground mt-0.5" />
+              <div className="text-sm">
+                <p className="font-medium mb-1">Smart Pairing Rules</p>
+                <ul className="text-muted-foreground space-y-0.5">
+                  <li>• <strong>FRONT</strong> → A (Full Front) + B (Cropped Front)</li>
+                  <li>• <strong>FRONT</strong> → D (Detail) — <em>only if no DETAIL shot exists</em></li>
+                  <li>• <strong>DETAIL</strong> → D (Detail) — <em>overrides FRONT for D</em></li>
+                  <li>• <strong>BACK</strong> → C (Full Back)</li>
+                  <li>• Clay poses filtered by look's product type (tops/bottoms)</li>
+                </ul>
+              </div>
+            </div>
+          </Card>
+        )}
 
         <Separator className="my-4" />
 
@@ -655,21 +697,40 @@ export function PoseGeneratorPanel() {
           </div>
         )}
 
-        {/* Pairing Preview */}
-        {pairingBreakdown.length > 0 && (
+        {/* Pairing Preview (Smart Mode) */}
+        {smartPairingMode && Object.keys(pairingsByTalentLook).length > 0 && (
           <Card className="p-4 bg-muted/50 mb-4">
-            <p className="text-sm font-medium mb-2">Pairing Preview</p>
-            <div className="space-y-1 text-sm">
-              {pairingBreakdown.map(item => (
-                <div key={item.view} className="flex items-center gap-2">
-                  <Badge variant="outline">{item.viewLabel}</Badge>
-                  <span className="text-muted-foreground">
-                    {item.refCount} ref{item.refCount > 1 ? 's' : ''} × Slots ({item.slots.map(s => s.slot).join(', ')}) × {item.slots[0]?.poseCount || 0} poses × {attemptsPerPose} attempts
-                  </span>
+            <p className="text-sm font-medium mb-3">Pairing Preview</p>
+            <div className="space-y-4">
+              {Object.entries(pairingsByTalentLook).map(([key, group]) => (
+                <div key={key} className="border-b pb-3 last:border-b-0 last:pb-0">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="font-medium">{group.talentName}</span>
+                    <span className="text-muted-foreground">-</span>
+                    <span>{group.lookName}</span>
+                    {group.productType && (
+                      <Badge variant="secondary" className="text-xs">{group.productType}</Badge>
+                    )}
+                  </div>
+                  <div className="space-y-1 text-sm text-muted-foreground ml-2">
+                    {group.pairings.map((p, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">{p.view.toUpperCase()}</Badge>
+                        <span>→</span>
+                        <span>{p.slots.join(' + ')}</span>
+                        <span className="text-xs">
+                          ({p.slotPoseCounts.map(spc => `${spc.count} poses`).join(', ')}) × {attemptsPerPose} attempts
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-right text-sm mt-1">
+                    Subtotal: <strong>{group.subtotal}</strong> outputs
+                  </div>
                 </div>
               ))}
             </div>
-            <Separator className="my-2" />
+            <Separator className="my-3" />
             <div className="flex items-center justify-between">
               <span className="font-medium">Total Outputs:</span>
               <Badge variant="secondary" className="text-lg">{totalOutputs}</Badge>
@@ -713,40 +774,55 @@ export function PoseGeneratorPanel() {
 
       {/* Preview Panels */}
       <div className="grid md:grid-cols-2 gap-4">
-        {/* Selected Talent Images */}
+        {/* Selected Talent Images Preview */}
         <Card className="p-4">
           <p className="text-sm font-medium mb-2">
-            Talent References ({talentImages.length})
+            Selected Talent References ({selectedTalentLooks.length} looks)
           </p>
-          <div className="grid grid-cols-4 gap-2">
-            {talentImages.map((img) => (
-              <div
-                key={img.id}
-                className={`aspect-[3/4] rounded-lg overflow-hidden relative ${
-                  selectedViews.includes(img.view as TalentView) 
-                    ? "ring-2 ring-primary" 
-                    : "opacity-50"
-                }`}
-              >
-                <img
-                  src={img.stored_url}
-                  alt={img.view}
-                  className="w-full h-full object-cover"
-                />
-                <Badge 
-                  className="absolute bottom-1 left-1 text-xs"
-                  variant={selectedViews.includes(img.view as TalentView) ? "default" : "outline"}
-                >
-                  {img.view}
-                </Badge>
-              </div>
-            ))}
-            {talentImages.length === 0 && (
-              <div className="col-span-4 h-32 flex items-center justify-center text-muted-foreground">
-                <ImageIcon className="w-8 h-8" />
-              </div>
-            )}
-          </div>
+          <ScrollArea className="h-64">
+            <div className="space-y-4">
+              {selectedTalentLooks.map(tl => {
+                const lookImages = allTalentImages.filter(img => img.look_id === tl.lookId);
+                return (
+                  <div key={`${tl.talentId}_${tl.lookId}`} className="border-b pb-3 last:border-b-0">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-sm font-medium">{tl.talentName}</span>
+                      <span className="text-muted-foreground">-</span>
+                      <span className="text-sm">{tl.lookName}</span>
+                      {tl.productType && (
+                        <Badge variant="secondary" className="text-xs">{tl.productType}</Badge>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {lookImages.map((img) => (
+                        <div
+                          key={img.id}
+                          className="aspect-[3/4] rounded-lg overflow-hidden relative ring-2 ring-primary"
+                        >
+                          <img
+                            src={img.stored_url}
+                            alt={img.view}
+                            className="w-full h-full object-cover"
+                          />
+                          <Badge 
+                            className="absolute bottom-1 left-1 text-xs"
+                            variant="default"
+                          >
+                            {img.view}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {selectedTalentLooks.length === 0 && (
+                <div className="h-32 flex items-center justify-center text-muted-foreground">
+                  <ImageIcon className="w-8 h-8" />
+                </div>
+              )}
+            </div>
+          </ScrollArea>
         </Card>
 
         {/* Available Clay Poses by Slot */}
@@ -757,12 +833,18 @@ export function PoseGeneratorPanel() {
           <ScrollArea className="h-64">
             <div className="space-y-3">
               {SLOT_CONFIG.map(({ slot, label }) => {
-                const poses = clayImagesBySlot[slot];
-                const isSelected = selectedSlots.includes(slot);
+                // Show poses without product type filter for overview
+                const poses = allClayImages.filter(c => {
+                  const s = c.product_images?.slot as ImageSlot;
+                  if (s !== slot) return false;
+                  if (selectedGender !== "all" && c.product_images?.products?.gender !== selectedGender) return false;
+                  return true;
+                });
+                
                 return (
                   <div 
                     key={slot}
-                    className={`p-2 rounded-lg border ${isSelected ? "border-primary bg-primary/5" : "border-border"}`}
+                    className="p-2 rounded-lg border border-border"
                   >
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-medium">{label}</span>

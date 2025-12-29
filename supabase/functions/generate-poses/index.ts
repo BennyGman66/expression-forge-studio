@@ -11,6 +11,7 @@ interface Pairing {
   talentImageUrl: string;
   talentImageId: string;
   slots: string[];
+  productType?: 'tops' | 'bottoms' | null;
 }
 
 interface ClayImageWithMeta {
@@ -21,6 +22,7 @@ interface ClayImageWithMeta {
     products: {
       brand_id: string;
       gender: string;
+      product_type: string;
     };
   };
 }
@@ -59,10 +61,10 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch all clay images for this brand
+    // Fetch all clay images for this brand with product_type
     const { data: clayImagesData, error: clayError } = await supabase
       .from("clay_images")
-      .select("*, product_images!inner(slot, products!inner(brand_id, gender))")
+      .select("*, product_images!inner(slot, products!inner(brand_id, gender, product_type))")
       .eq("product_images.products.brand_id", brandId);
 
     if (clayError) {
@@ -72,7 +74,7 @@ serve(async (req) => {
 
     let allClayImages = (clayImagesData || []) as ClayImageWithMeta[];
     
-    // Filter by gender if specified
+    // Filter by gender if specified (applies to all)
     if (gender && gender !== "all") {
       allClayImages = allClayImages.filter(
         (c) => c.product_images.products.gender === gender
@@ -91,18 +93,29 @@ serve(async (req) => {
     }[] = [];
 
     if (bulkMode && pairings && pairings.length > 0) {
-      // Bulk mode: process all pairings
+      // Bulk mode: process all pairings with per-pairing product type filtering
       console.log(`Bulk mode: processing ${pairings.length} pairings`);
 
       for (const pairing of pairings as Pairing[]) {
+        // Filter clay images for this pairing based on product type
+        let pairingClayImages = [...allClayImages];
+        
+        if (pairing.productType) {
+          const productTypeFilter = pairing.productType === 'tops' ? 'tops' : 'trousers';
+          pairingClayImages = pairingClayImages.filter(
+            (c) => c.product_images.products.product_type === productTypeFilter
+          );
+          console.log(`Pairing has productType=${pairing.productType}, filtered to ${pairingClayImages.length} clay images`);
+        }
+
         for (const pairingSlot of pairing.slots) {
           // Get clay images for this slot
-          const slotPoses = allClayImages.filter(
+          const slotPoses = pairingClayImages.filter(
             (c) => c.product_images.slot === pairingSlot
           );
 
           if (slotPoses.length === 0) {
-            console.log(`No poses for slot ${pairingSlot}, skipping`);
+            console.log(`No poses for slot ${pairingSlot} with productType=${pairing.productType}, skipping`);
             continue;
           }
 
