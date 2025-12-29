@@ -32,6 +32,12 @@ export function ClayGenerationPanel() {
   const [clayJobId, setClayJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [selectedModel, setSelectedModel] = useState("google/gemini-2.5-flash-image-preview");
+
+  const imageModels = [
+    { value: "google/gemini-2.5-flash-image-preview", label: "Gemini 2.5 Flash (Image)" },
+    { value: "google/gemini-3-pro-image-preview", label: "Gemini 3 Pro (Image)" },
+  ];
 
   useEffect(() => {
     fetchBrands();
@@ -176,6 +182,7 @@ export function ClayGenerationPanel() {
         body: {
           brandId: selectedBrand,
           imageIds: imagesToProcess.map((img) => img.id),
+          model: selectedModel,
         },
       });
 
@@ -452,6 +459,22 @@ export function ClayGenerationPanel() {
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="tops">Tops</SelectItem>
                 <SelectItem value="trousers">Trousers</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>AI Model</Label>
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {imageModels.map((model) => (
+                  <SelectItem key={model.value} value={model.value}>
+                    {model.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

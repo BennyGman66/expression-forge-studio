@@ -14,7 +14,8 @@ serve(async (req) => {
   }
 
   try {
-    const { brandId, imageIds } = await req.json();
+    const { brandId, imageIds, model } = await req.json();
+    const selectedModel = model || "google/gemini-2.5-flash-image-preview";
 
     if (!brandId || !imageIds || imageIds.length === 0) {
       return new Response(
@@ -50,11 +51,11 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Created job ${job.id} for ${imageIds.length} images`);
+    console.log(`Created job ${job.id} for ${imageIds.length} images using model ${selectedModel}`);
 
     // Process images in background
-    (globalThis as any).EdgeRuntime?.waitUntil?.(processImages(supabase, job.id, imageIds, lovableApiKey)) 
-      ?? processImages(supabase, job.id, imageIds, lovableApiKey);
+    (globalThis as any).EdgeRuntime?.waitUntil?.(processImages(supabase, job.id, imageIds, lovableApiKey, selectedModel)) 
+      ?? processImages(supabase, job.id, imageIds, lovableApiKey, selectedModel);
 
     return new Response(
       JSON.stringify({ 
@@ -75,8 +76,8 @@ serve(async (req) => {
   }
 });
 
-async function processImages(supabase: any, jobId: string, imageIds: string[], lovableApiKey: string) {
-  console.log(`Processing ${imageIds.length} images for clay generation`);
+async function processImages(supabase: any, jobId: string, imageIds: string[], lovableApiKey: string, model: string) {
+  console.log(`Processing ${imageIds.length} images for clay generation with model ${model}`);
   let processed = 0;
 
   for (let i = 0; i < imageIds.length; i++) {
@@ -128,7 +129,7 @@ async function processImages(supabase: any, jobId: string, imageIds: string[], l
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash-image-preview",
+          model: model,
           messages: [
             {
               role: "user",
