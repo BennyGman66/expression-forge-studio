@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Loader2, CheckCircle, XCircle, Image as ImageIcon, X, SkipForward, Square } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, Image as ImageIcon, X, Square, AlertTriangle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { Json } from "@/integrations/supabase/types";
@@ -15,6 +15,7 @@ interface Job {
   logs: Json;
   result: Json;
   created_at: string;
+  updated_at: string;
 }
 
 interface Output {
@@ -30,33 +31,15 @@ interface GenerationProgressProps {
   onClose?: () => void;
 }
 
+const STALL_THRESHOLD_MS = 90000; // 90 seconds without progress = stalled
+
 export function GenerationProgress({ projectId, onClose }: GenerationProgressProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [outputs, setOutputs] = useState<Output[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [isSkipping, setIsSkipping] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
-
-  const handleSkipCurrent = async () => {
-    const activeJob = jobs.find((j) => j.status === "running");
-    if (!activeJob) return;
-    
-    setIsSkipping(true);
-    try {
-      await supabase
-        .from("jobs")
-        .update({ 
-          result: { ...(activeJob.result as object || {}), skip_current: true },
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", activeJob.id);
-      toast.success("Skipping current image...");
-    } catch (err) {
-      toast.error("Failed to skip");
-    } finally {
-      setIsSkipping(false);
-    }
-  };
+  const [isStalled, setIsStalled] = useState(false);
+  const lastProgressRef = useRef<{ progress: number; time: number } | null>(null);
 
   const handleStopGeneration = async () => {
     const activeJob = jobs.find((j) => j.status === "running");
@@ -77,11 +60,33 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
         })
         .eq("id", activeJob.id);
       toast.success("Generation stopped. Already generated images are kept.");
+      setIsStalled(false);
     } catch (err) {
       toast.error("Failed to stop generation");
     } finally {
       setIsStopping(false);
     }
+  };
+
+  const handleMarkStalled = async () => {
+    const activeJob = jobs.find((j) => j.status === "running");
+    if (!activeJob) return;
+    
+    await supabase
+      .from("jobs")
+      .update({ 
+        status: "stalled",
+        result: { 
+          generated: activeJob.progress || 0, 
+          total: activeJob.total || 0,
+          stalled: true 
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", activeJob.id);
+    
+    toast.info("Job marked as stalled. Click 'Generate Images' to resume.");
+    setIsStalled(false);
   };
 
   // Fetch initial data and subscribe to updates
@@ -170,6 +175,48 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
     };
   }, [projectId]);
 
+  // Stall detection
+  useEffect(() => {
+    const activeJob = jobs.find((j) => j.status === "running");
+    if (!activeJob) {
+      lastProgressRef.current = null;
+      setIsStalled(false);
+      return;
+    }
+
+    const currentProgress = activeJob.progress || 0;
+    const now = Date.now();
+
+    if (!lastProgressRef.current) {
+      lastProgressRef.current = { progress: currentProgress, time: now };
+    } else if (currentProgress !== lastProgressRef.current.progress) {
+      // Progress changed, reset timer
+      lastProgressRef.current = { progress: currentProgress, time: now };
+      setIsStalled(false);
+    } else {
+      // Check if stalled
+      const elapsed = now - lastProgressRef.current.time;
+      if (elapsed > STALL_THRESHOLD_MS) {
+        setIsStalled(true);
+      }
+    }
+  }, [jobs]);
+
+  // Timer to check for stalls every 10 seconds
+  useEffect(() => {
+    const stallCheckInterval = setInterval(() => {
+      const activeJob = jobs.find((j) => j.status === "running");
+      if (activeJob && lastProgressRef.current) {
+        const elapsed = Date.now() - lastProgressRef.current.time;
+        if (elapsed > STALL_THRESHOLD_MS) {
+          setIsStalled(true);
+        }
+      }
+    }, 10000);
+
+    return () => clearInterval(stallCheckInterval);
+  }, [jobs]);
+
   const activeJob = jobs.find((j) => j.status === "running");
   const completedOutputs = outputs.filter((o) => o.status === "completed" && o.image_url);
 
@@ -177,13 +224,25 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
     <div className="space-y-6">
       {/* Active Job Progress */}
       {activeJob && (
-        <div className="p-4 rounded-lg border border-primary/50 bg-primary/5 animate-pulse-glow">
+        <div className={cn(
+          "p-4 rounded-lg border",
+          isStalled 
+            ? "border-amber-500/50 bg-amber-500/10" 
+            : "border-primary/50 bg-primary/5 animate-pulse-glow"
+        )}>
           <div className="flex items-center gap-3 mb-3">
-            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            {isStalled ? (
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+            ) : (
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            )}
             <div className="flex-1">
-              <p className="font-medium">Generating images...</p>
+              <p className="font-medium">
+                {isStalled ? "Generation appears stuck" : "Generating images..."}
+              </p>
               <p className="text-sm text-muted-foreground">
                 {activeJob.progress || 0} / {activeJob.total || 0} complete
+                {isStalled && " • No progress for 90+ seconds"}
               </p>
             </div>
             {onClose && (
@@ -204,29 +263,53 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
             </div>
           )}
           
-          {/* Skip and Stop Controls */}
-          <div className="mt-4 flex gap-2">
-            <Button 
-              variant="secondary" 
-              size="sm" 
-              onClick={handleSkipCurrent}
-              disabled={isSkipping}
-              className="flex-1 gap-2"
-            >
-              <SkipForward className="w-3.5 h-3.5" />
-              {isSkipping ? "Skipping..." : "Skip Current"}
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleStopGeneration}
-              disabled={isStopping}
-              className="flex-1 gap-2 border-muted-foreground/30 text-muted-foreground hover:text-foreground hover:bg-secondary"
-            >
-              <Square className="w-3.5 h-3.5" />
-              {isStopping ? "Stopping..." : "Stop & Keep"}
-            </Button>
-          </div>
+          {/* Stalled Warning and Actions */}
+          {isStalled && (
+            <div className="mt-4 p-3 rounded-md bg-amber-500/20 border border-amber-500/30">
+              <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
+                The generation seems to have stopped responding. You can mark it as stalled and restart, 
+                or wait a bit longer.
+              </p>
+              <div className="flex gap-2">
+                <Button 
+                  variant="default" 
+                  size="sm" 
+                  onClick={handleMarkStalled}
+                  className="flex-1 gap-2 bg-amber-600 hover:bg-amber-700"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Mark Stalled & Restart
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    lastProgressRef.current = { progress: activeJob.progress || 0, time: Date.now() };
+                    setIsStalled(false);
+                  }}
+                  className="gap-2"
+                >
+                  Wait Longer
+                </Button>
+              </div>
+            </div>
+          )}
+          
+          {/* Stop Control - only show when not stalled */}
+          {!isStalled && (
+            <div className="mt-4">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleStopGeneration}
+                disabled={isStopping}
+                className="w-full gap-2 border-muted-foreground/30 text-muted-foreground hover:text-foreground hover:bg-secondary"
+              >
+                <Square className="w-3.5 h-3.5" />
+                {isStopping ? "Stopping..." : "Stop & Keep Generated"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -256,6 +339,17 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
                   </span>
                 )}
               </>
+            ) : jobs[0].status === "stalled" ? (
+              <>
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <span className="font-medium">Generation stalled</span>
+                {jobs[0].result && typeof jobs[0].result === 'object' && 'generated' in jobs[0].result && (
+                  <span className="text-muted-foreground">
+                    ({(jobs[0].result as { generated: number; total: number }).generated}/
+                    {(jobs[0].result as { generated: number; total: number }).total} images generated)
+                  </span>
+                )}
+              </>
             ) : jobs[0].status === "failed" ? (
               <>
                 <XCircle className="w-4 h-4 text-destructive" />
@@ -263,7 +357,7 @@ export function GenerationProgress({ projectId, onClose }: GenerationProgressPro
               </>
             ) : null}
           </div>
-          {jobs[0].status === "stopped" && jobs[0].result && typeof jobs[0].result === 'object' && 'total' in jobs[0].result && (
+          {(jobs[0].status === "stopped" || jobs[0].status === "stalled") && jobs[0].result && typeof jobs[0].result === 'object' && 'total' in jobs[0].result && (
             <p className="text-xs text-muted-foreground mt-2">
               Click "Generate Images" to resume — existing images will be skipped automatically.
             </p>
