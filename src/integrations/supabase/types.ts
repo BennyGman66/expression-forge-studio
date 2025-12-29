@@ -587,6 +587,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          look_id: string | null
           stored_url: string
           talent_id: string
           view: string
@@ -594,6 +595,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          look_id?: string | null
           stored_url: string
           talent_id: string
           view: string
@@ -601,13 +603,50 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          look_id?: string | null
           stored_url?: string
           talent_id?: string
           view?: string
         }
         Relationships: [
           {
+            foreignKeyName: "talent_images_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "talent_looks"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "talent_images_talent_id_fkey"
+            columns: ["talent_id"]
+            isOneToOne: false
+            referencedRelation: "talents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      talent_looks: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          talent_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          talent_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          talent_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_looks_talent_id_fkey"
             columns: ["talent_id"]
             isOneToOne: false
             referencedRelation: "talents"

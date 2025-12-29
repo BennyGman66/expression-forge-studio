@@ -5,9 +5,18 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2, Upload, User, Image as ImageIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Plus, Trash2, Upload, User, ChevronDown, Palette } from "lucide-react";
 import { toast } from "sonner";
 import type { Talent, TalentImage, TalentView } from "@/types/avatar-repose";
+
+interface TalentLook {
+  id: string;
+  talent_id: string;
+  name: string;
+  created_at: string;
+}
 
 const VIEWS: TalentView[] = ["front", "back", "detail", "side"];
 const VIEW_LABELS: Record<TalentView, string> = {
@@ -19,10 +28,13 @@ const VIEW_LABELS: Record<TalentView, string> = {
 
 export function TalentLibraryPanel() {
   const [talents, setTalents] = useState<Talent[]>([]);
-  const [talentImages, setTalentImages] = useState<Record<string, TalentImage[]>>({});
+  const [talentLooks, setTalentLooks] = useState<Record<string, TalentLook[]>>({});
+  const [lookImages, setLookImages] = useState<Record<string, TalentImage[]>>({});
   const [newTalentName, setNewTalentName] = useState("");
   const [newTalentGender, setNewTalentGender] = useState<string>("");
   const [isCreating, setIsCreating] = useState(false);
+  const [newLookNames, setNewLookNames] = useState<Record<string, string>>({});
+  const [expandedTalents, setExpandedTalents] = useState<Set<string>>(new Set());
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
@@ -37,16 +49,35 @@ export function TalentLibraryPanel() {
 
     if (talentsData) {
       setTalents(talentsData);
+      // Auto-expand all talents
+      setExpandedTalents(new Set(talentsData.map(t => t.id)));
 
-      // Fetch images for each talent
+      // Fetch looks for each talent
       for (const talent of talentsData) {
+        await fetchLooksForTalent(talent.id);
+      }
+    }
+  };
+
+  const fetchLooksForTalent = async (talentId: string) => {
+    const { data: looksData } = await supabase
+      .from("talent_looks")
+      .select("*")
+      .eq("talent_id", talentId)
+      .order("created_at", { ascending: true });
+
+    if (looksData) {
+      setTalentLooks((prev) => ({ ...prev, [talentId]: looksData }));
+
+      // Fetch images for each look
+      for (const look of looksData) {
         const { data: imagesData } = await supabase
           .from("talent_images")
           .select("*")
-          .eq("talent_id", talent.id);
+          .eq("look_id", look.id);
 
         if (imagesData) {
-          setTalentImages((prev) => ({ ...prev, [talent.id]: imagesData }));
+          setLookImages((prev) => ({ ...prev, [look.id]: imagesData }));
         }
       }
     }
@@ -58,20 +89,28 @@ export function TalentLibraryPanel() {
       return;
     }
 
-    if (talents.length >= 4) {
-      toast.error("Maximum 4 talents allowed");
+    if (talents.length >= 10) {
+      toast.error("Maximum 10 talents allowed");
       return;
     }
 
     setIsCreating(true);
 
     try {
-      const { error } = await supabase.from("talents").insert({
+      const { data: talent, error } = await supabase.from("talents").insert({
         name: newTalentName,
         gender: newTalentGender || null,
-      });
+      }).select().single();
 
       if (error) throw error;
+
+      // Auto-create a default "Look 1" for new talents
+      if (talent) {
+        await supabase.from("talent_looks").insert({
+          talent_id: talent.id,
+          name: "Look 1",
+        });
+      }
 
       toast.success("Talent created");
       setNewTalentName("");
@@ -94,10 +133,40 @@ export function TalentLibraryPanel() {
     }
   };
 
-  const handleUploadImage = async (talentId: string, view: TalentView, file: File) => {
+  const handleAddLook = async (talentId: string) => {
+    const lookName = newLookNames[talentId]?.trim();
+    if (!lookName) {
+      toast.error("Please enter a look name");
+      return;
+    }
+
     try {
-      // Upload to storage
-      const fileName = `talents/${talentId}/${view}-${Date.now()}.${file.name.split(".").pop()}`;
+      await supabase.from("talent_looks").insert({
+        talent_id: talentId,
+        name: lookName,
+      });
+
+      setNewLookNames((prev) => ({ ...prev, [talentId]: "" }));
+      toast.success("Look added");
+      fetchLooksForTalent(talentId);
+    } catch (err) {
+      toast.error("Failed to add look");
+    }
+  };
+
+  const handleDeleteLook = async (lookId: string, talentId: string) => {
+    try {
+      await supabase.from("talent_looks").delete().eq("id", lookId);
+      toast.success("Look deleted");
+      fetchLooksForTalent(talentId);
+    } catch (err) {
+      toast.error("Failed to delete look");
+    }
+  };
+
+  const handleUploadImage = async (lookId: string, talentId: string, view: TalentView, file: File) => {
+    try {
+      const fileName = `talents/${talentId}/looks/${lookId}/${view}-${Date.now()}.${file.name.split(".").pop()}`;
       const { error: uploadError } = await supabase.storage
         .from("images")
         .upload(fileName, file, { upsert: true });
@@ -108,36 +177,47 @@ export function TalentLibraryPanel() {
         .from("images")
         .getPublicUrl(fileName);
 
-      // Check if image for this view already exists
-      const existingImages = talentImages[talentId] || [];
+      // Check if image for this view already exists for this look
+      const existingImages = lookImages[lookId] || [];
       const existing = existingImages.find((img) => img.view === view);
 
       if (existing) {
-        // Update existing
         await supabase
           .from("talent_images")
           .update({ stored_url: publicUrl })
           .eq("id", existing.id);
       } else {
-        // Insert new
         await supabase.from("talent_images").insert({
           talent_id: talentId,
+          look_id: lookId,
           view,
           stored_url: publicUrl,
         });
       }
 
       toast.success(`${VIEW_LABELS[view]} image uploaded`);
-      fetchTalents();
+      fetchLooksForTalent(talentId);
     } catch (err) {
       console.error("Upload error:", err);
       toast.error("Failed to upload image");
     }
   };
 
-  const getImageForView = (talentId: string, view: TalentView) => {
-    const images = talentImages[talentId] || [];
+  const getImageForView = (lookId: string, view: TalentView) => {
+    const images = lookImages[lookId] || [];
     return images.find((img) => img.view === view);
+  };
+
+  const toggleExpanded = (talentId: string) => {
+    setExpandedTalents((prev) => {
+      const next = new Set(prev);
+      if (next.has(talentId)) {
+        next.delete(talentId);
+      } else {
+        next.add(talentId);
+      }
+      return next;
+    });
   };
 
   return (
@@ -170,7 +250,7 @@ export function TalentLibraryPanel() {
           <div className="flex items-end">
             <Button
               onClick={handleCreateTalent}
-              disabled={isCreating || talents.length >= 4}
+              disabled={isCreating || talents.length >= 10}
               className="w-full"
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -178,91 +258,158 @@ export function TalentLibraryPanel() {
             </Button>
           </div>
         </div>
-        {talents.length >= 4 && (
-          <p className="text-sm text-muted-foreground mt-2">
-            Maximum 4 talents reached
-          </p>
-        )}
       </Card>
 
       {/* Talent List */}
-      <div className="grid md:grid-cols-2 gap-6">
-        {talents.map((talent) => (
-          <Card key={talent.id} className="p-4">
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <User className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <h4 className="font-medium">{talent.name}</h4>
-                  {talent.gender && (
-                    <p className="text-xs text-muted-foreground capitalize">
-                      {talent.gender}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleDeleteTalent(talent.id)}
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
+      <div className="space-y-4">
+        {talents.map((talent) => {
+          const looks = talentLooks[talent.id] || [];
+          const isExpanded = expandedTalents.has(talent.id);
 
-            {/* Image slots */}
-            <div className="grid grid-cols-4 gap-2">
-              {VIEWS.map((view) => {
-                const image = getImageForView(talent.id, view);
-                const inputId = `${talent.id}-${view}`;
+          return (
+            <Card key={talent.id} className="overflow-hidden">
+              <Collapsible open={isExpanded} onOpenChange={() => toggleExpanded(talent.id)}>
+                <CollapsibleTrigger asChild>
+                  <div className="p-4 flex items-center justify-between cursor-pointer hover:bg-muted/50 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <User className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <h4 className="font-medium">{talent.name}</h4>
+                        <div className="flex items-center gap-2">
+                          {talent.gender && (
+                            <span className="text-xs text-muted-foreground capitalize">
+                              {talent.gender}
+                            </span>
+                          )}
+                          <Badge variant="secondary" className="text-xs">
+                            {looks.length} look{looks.length !== 1 ? 's' : ''}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteTalent(talent.id);
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                      <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    </div>
+                  </div>
+                </CollapsibleTrigger>
 
-                return (
-                  <div key={view} className="space-y-1">
-                    <p className="text-xs text-muted-foreground text-center">
-                      {VIEW_LABELS[view]}
-                    </p>
-                    <div
-                      className="aspect-[3/4] rounded-lg border-2 border-dashed border-border bg-muted/50 overflow-hidden cursor-pointer hover:border-primary/50 transition-colors"
-                      onClick={() => fileInputRefs.current[inputId]?.click()}
-                    >
-                      {image ? (
-                        <img
-                          src={image.stored_url}
-                          alt={`${talent.name} ${view}`}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
-                          <Upload className="w-4 h-4 mb-1" />
-                          <span className="text-[10px]">Upload</span>
+                <CollapsibleContent>
+                  <div className="px-4 pb-4 space-y-4 border-t pt-4">
+                    {/* Add new look */}
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={newLookNames[talent.id] || ""}
+                        onChange={(e) =>
+                          setNewLookNames((prev) => ({ ...prev, [talent.id]: e.target.value }))
+                        }
+                        placeholder="New look name (e.g. Summer, Casual)"
+                        className="flex-1"
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleAddLook(talent.id)}
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        Add Look
+                      </Button>
+                    </div>
+
+                    {/* Looks grid */}
+                    <div className="space-y-4">
+                      {looks.map((look) => (
+                        <div key={look.id} className="border rounded-lg p-3 bg-muted/30">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <Palette className="w-4 h-4 text-muted-foreground" />
+                              <span className="font-medium text-sm">{look.name}</span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteLook(look.id, talent.id)}
+                              className="h-7 w-7 p-0"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+
+                          {/* Image slots for this look */}
+                          <div className="grid grid-cols-4 gap-2">
+                            {VIEWS.map((view) => {
+                              const image = getImageForView(look.id, view);
+                              const inputId = `${look.id}-${view}`;
+
+                              return (
+                                <div key={view} className="space-y-1">
+                                  <p className="text-xs text-muted-foreground text-center">
+                                    {VIEW_LABELS[view]}
+                                  </p>
+                                  <div
+                                    className="aspect-[3/4] rounded-lg border-2 border-dashed border-border bg-background overflow-hidden cursor-pointer hover:border-primary/50 transition-colors"
+                                    onClick={() => fileInputRefs.current[inputId]?.click()}
+                                  >
+                                    {image ? (
+                                      <img
+                                        src={image.stored_url}
+                                        alt={`${talent.name} ${look.name} ${view}`}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    ) : (
+                                      <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
+                                        <Upload className="w-4 h-4 mb-1" />
+                                        <span className="text-[10px]">Upload</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    ref={(el) => (fileInputRefs.current[inputId] = el)}
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) handleUploadImage(look.id, talent.id, view, file);
+                                    }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+
+                      {looks.length === 0 && (
+                        <div className="text-center py-4 text-muted-foreground text-sm">
+                          No looks added yet. Add a look above to upload reference images.
                         </div>
                       )}
                     </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      ref={(el) => (fileInputRefs.current[inputId] = el)}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleUploadImage(talent.id, view, file);
-                      }}
-                    />
                   </div>
-                );
-              })}
-            </div>
-          </Card>
-        ))}
+                </CollapsibleContent>
+              </Collapsible>
+            </Card>
+          );
+        })}
       </div>
 
       {talents.length === 0 && (
         <Card className="p-8 text-center text-muted-foreground">
           <User className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>No digital talents added yet</p>
-          <p className="text-sm">Create up to 4 talents with reference images</p>
+          <p className="text-sm">Create talents and add multiple looks with reference images</p>
         </Card>
       )}
     </div>
