@@ -52,11 +52,19 @@ export interface Talent {
   created_at: string;
 }
 
+export interface TalentLook {
+  id: string;
+  talent_id: string;
+  name: string;
+  created_at: string;
+}
+
 export type TalentView = 'front' | 'back' | 'detail' | 'side';
 
 export interface TalentImage {
   id: string;
   talent_id: string;
+  look_id: string | null;
   view: string;
   stored_url: string;
   created_at: string;
