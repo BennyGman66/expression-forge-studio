@@ -75,6 +75,8 @@ export interface GenerationJob {
   id: string;
   brand_id: string;
   talent_id: string;
+  look_id: string | null;
+  talent_image_id: string | null;
   view: string;
   slot: string;
   random_count: number;
@@ -93,5 +95,9 @@ export interface Generation {
   pose_clay_image_id: string;
   attempt_index: number;
   stored_url: string;
+  look_id: string | null;
+  talent_image_id: string | null;
+  view: string | null;
+  slot: string | null;
   created_at: string;
 }

@@ -10,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Sparkles, Download, RefreshCw, Image as ImageIcon, AlertTriangle, FileJson, Zap, Info } from "lucide-react";
+import { Loader2, Sparkles, Download, RefreshCw, Image as ImageIcon, AlertTriangle, FileJson, Zap, Info, ClipboardCheck } from "lucide-react";
 import { toast } from "sonner";
+import { PoseReviewPanel } from "./PoseReviewPanel";
 import type {
   Brand,
   Talent,
@@ -103,6 +104,7 @@ export function PoseGeneratorPanel() {
   const [randomCount, setRandomCount] = useState(5);
   const [attemptsPerPose, setAttemptsPerPose] = useState(3);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [reviewJobId, setReviewJobId] = useState<string | null>(null);
 
   // Load all looks and images for all talents
   useEffect(() => {
@@ -444,13 +446,16 @@ export function PoseGeneratorPanel() {
     setIsGenerating(true);
 
     try {
-      // Build pairings for API
+      // Build pairings for API - include lookId for tracking
       const apiPairings = smartPairings.map(p => ({
         view: p.view,
         talentImageUrl: p.talentImageUrl,
         talentImageId: p.talentImageId,
         slots: p.slots,
         productType: p.productType,
+        lookId: p.talentLookKey.split("_")[1], // Extract lookId from key
+        lookName: p.lookName,
+        talentName: p.talentName,
       }));
 
       const { data, error } = await supabase.functions.invoke("generate-poses", {
@@ -481,6 +486,9 @@ export function PoseGeneratorPanel() {
           if (job && (job.status === "completed" || job.status === "failed")) {
             clearInterval(interval);
             setIsGenerating(false);
+            if (job.status === "completed") {
+              toast.success("Generation completed! Click 'Review & Select' to choose favorites.");
+            }
           }
         }, 2000);
       }
@@ -540,11 +548,33 @@ export function PoseGeneratorPanel() {
     return acc;
   }, {} as Record<string, Generation[]>);
 
+  // If in review mode, show the review panel
+  if (reviewJobId) {
+    return (
+      <PoseReviewPanel 
+        jobId={reviewJobId} 
+        onBack={() => setReviewJobId(null)} 
+      />
+    );
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Controls */}
       <Card className="p-6">
-        <h3 className="text-lg font-medium mb-4">Generate Pose Transfers</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-medium">Generate Pose Transfers</h3>
+          {currentJob && currentJob.status === "completed" && (
+            <Button 
+              variant="outline" 
+              onClick={() => setReviewJobId(currentJob.id)}
+              className="gap-2"
+            >
+              <ClipboardCheck className="w-4 h-4" />
+              Review & Select
+            </Button>
+          )}
+        </div>
         
         {/* Row 1: Brand, Gender */}
         <div className="grid md:grid-cols-3 gap-4 mb-6">

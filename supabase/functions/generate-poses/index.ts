@@ -12,6 +12,9 @@ interface Pairing {
   talentImageId: string;
   slots: string[];
   productType?: 'tops' | 'bottoms' | null;
+  lookId?: string;
+  lookName?: string;
+  talentName?: string;
 }
 
 interface ClayImageWithMeta {
@@ -90,7 +93,11 @@ serve(async (req) => {
       poseId: string;
       poseUrl: string;
       attempt: number;
+      lookId?: string;
     }[] = [];
+
+    // Extract lookId from first pairing if available (for job tracking)
+    const primaryLookId = bulkMode && pairings?.length > 0 ? pairings[0].lookId : null;
 
     if (bulkMode && pairings && pairings.length > 0) {
       // Bulk mode: process all pairings with per-pairing product type filtering
@@ -134,6 +141,7 @@ serve(async (req) => {
                 poseId: pose.id,
                 poseUrl: pose.stored_url,
                 attempt,
+                lookId: pairing.lookId,
               });
             }
           }
@@ -192,6 +200,7 @@ serve(async (req) => {
       .insert({
         brand_id: brandId,
         talent_id: talentId,
+        look_id: primaryLookId,
         view: bulkMode ? "bulk" : view,
         slot: bulkMode ? "bulk" : slot,
         random_count: randomCount,
@@ -243,6 +252,7 @@ interface GenerationTask {
   poseId: string;
   poseUrl: string;
   attempt: number;
+  lookId?: string;
 }
 
 async function processGenerations(
@@ -367,7 +377,7 @@ Generate a high-quality fashion photograph combining the talent's appearance wit
         .from("images")
         .getPublicUrl(fileName);
 
-      // Save to generations table
+      // Save to generations table with look and view info for review panel
       const { error: insertError } = await supabase
         .from("generations")
         .insert({
@@ -375,6 +385,9 @@ Generate a high-quality fashion photograph combining the talent's appearance wit
           pose_clay_image_id: task.poseId,
           attempt_index: task.attempt,
           stored_url: publicUrl,
+          look_id: task.lookId,
+          view: task.view,
+          slot: task.slot,
         });
 
       if (insertError) {
