@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft, CheckCircle2 } from "lucide-react";
+import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft, CheckCircle2, Sparkles } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +25,7 @@ export function ClayGenerationPanel() {
   const [productImages, setProductImages] = useState<ProductImage[]>([]);
   const [clayImages, setClayImages] = useState<ClayImage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isOrganizing, setIsOrganizing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const processingIdsRef = useRef<Set<string>>(new Set());
 
@@ -153,6 +154,37 @@ export function ClayGenerationPanel() {
     }
   };
 
+  const handleOrganizeImages = async () => {
+    if (!selectedBrand) {
+      toast.error("Please select a brand first");
+      return;
+    }
+
+    setIsOrganizing(true);
+    toast.info("AVA is analyzing and organizing your images...");
+
+    try {
+      const { data, error } = await supabase.functions.invoke("organize-images", {
+        body: { brandId: selectedBrand },
+      });
+
+      if (error) throw error;
+
+      if (data.updated > 0) {
+        toast.success(`AVA organized ${data.updated} of ${data.total} images`);
+        // Refresh the product images to show new slots
+        await fetchProductImages();
+      } else {
+        toast.info("All images are already in their correct slots!");
+      }
+    } catch (err) {
+      console.error("Organize error:", err);
+      toast.error("Failed to organize images");
+    } finally {
+      setIsOrganizing(false);
+    }
+  };
+
   // Display order: A (Full Front), B (Cropped Front), D (Detail), C (Full Back)
   const slots: ImageSlot[] = ["A", "B", "D", "C"];
   const slotLabels: Record<ImageSlot, string> = {
@@ -220,6 +252,25 @@ export function ClayGenerationPanel() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* AVA Organise Button */}
+      <Button
+        onClick={handleOrganizeImages}
+        disabled={isOrganizing || !selectedBrand}
+        className="w-full h-12 text-base font-semibold bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 hover:from-violet-600 hover:via-fuchsia-600 hover:to-pink-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 border-0"
+      >
+        {isOrganizing ? (
+          <>
+            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            AVA is organizing...
+          </>
+        ) : (
+          <>
+            <Sparkles className="w-5 h-5 mr-2" />
+            ✨ AVA Organise
+          </>
+        )}
+      </Button>
+
       {/* Controls */}
       <Card className="p-6">
         <h3 className="text-lg font-medium mb-4">Generate Clay Models</h3>

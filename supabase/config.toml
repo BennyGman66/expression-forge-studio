@@ -12,5 +12,8 @@ verify_jwt = false
 [functions.generate-poses]
 verify_jwt = false
 
+[functions.organize-images]
+verify_jwt = false
+
 [functions.scrape-brand]
 verify_jwt = false
