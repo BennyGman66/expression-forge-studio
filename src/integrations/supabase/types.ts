@@ -399,11 +399,12 @@ export type Database = {
       }
       jobs: {
         Row: {
+          brand_id: string | null
           created_at: string
           id: string
           logs: Json | null
           progress: number | null
-          project_id: string
+          project_id: string | null
           result: Json | null
           status: string
           total: number | null
@@ -411,11 +412,12 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          brand_id?: string | null
           created_at?: string
           id?: string
           logs?: Json | null
           progress?: number | null
-          project_id: string
+          project_id?: string | null
           result?: Json | null
           status?: string
           total?: number | null
@@ -423,11 +425,12 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          brand_id?: string | null
           created_at?: string
           id?: string
           logs?: Json | null
           progress?: number | null
-          project_id?: string
+          project_id?: string | null
           result?: Json | null
           status?: string
           total?: number | null
@@ -435,6 +438,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "jobs_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "jobs_project_id_fkey"
             columns: ["project_id"]

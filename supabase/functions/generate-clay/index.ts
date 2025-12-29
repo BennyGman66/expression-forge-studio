@@ -34,7 +34,7 @@ serve(async (req) => {
     const { data: job, error: jobError } = await supabase
       .from("jobs")
       .insert({
-        project_id: brandId, // Using brandId as project_id for clay jobs
+        brand_id: brandId,
         type: "clay_generation",
         status: "processing",
         progress: 0,
