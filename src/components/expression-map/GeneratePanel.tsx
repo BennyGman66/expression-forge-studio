@@ -3,12 +3,18 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Play, Copy, FileJson, FileSpreadsheet, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DigitalModel, ExpressionRecipe, DigitalModelRef } from "@/types";
 import { buildFullPrompt } from "@/lib/constants";
 import { toast } from "sonner";
 import { GenerationProgress } from "@/components/steps/GenerationProgress";
+
+const IMAGE_MODELS = [
+  { id: "google/gemini-3-pro-image-preview", name: "Gemini 3 Pro Image", description: "Best quality" },
+  { id: "google/gemini-2.5-flash-image-preview", name: "Gemini 2.5 Flash Image", description: "Fast, good quality" },
+];
 
 interface GeneratePanelProps {
   models: DigitalModel[];
@@ -20,6 +26,7 @@ interface GeneratePanelProps {
     modelIds: string[];
     recipeIds: string[];
     variations: number;
+    aiModel: string;
   }) => void;
   isGenerating: boolean;
 }
@@ -37,6 +44,7 @@ export function GeneratePanel({
   const [selectedRecipes, setSelectedRecipes] = useState<Set<string>>(new Set());
   const [variations, setVariations] = useState(1);
   const [copied, setCopied] = useState(false);
+  const [selectedAiModel, setSelectedAiModel] = useState("google/gemini-3-pro-image-preview");
 
   const toggleModel = (id: string) => {
     const next = new Set(selectedModels);
@@ -275,21 +283,46 @@ export function GeneratePanel({
         </div>
       </div>
 
-      {/* Variations Slider */}
-      <div className="panel">
-        <div className="p-4">
-          <div className="flex items-center justify-between mb-3">
-            <Label>Variations per recipe</Label>
-            <span className="text-sm font-mono bg-secondary px-2 py-1 rounded">{variations}</span>
+      {/* AI Model & Variations */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="panel">
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <Label>AI Model</Label>
+            </div>
+            <Select value={selectedAiModel} onValueChange={setSelectedAiModel}>
+              <SelectTrigger className="w-full bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-background border z-50">
+                {IMAGE_MODELS.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    <div className="flex flex-col">
+                      <span>{model.name}</span>
+                      <span className="text-xs text-muted-foreground">{model.description}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <Slider
-            value={[variations]}
-            onValueChange={([v]) => setVariations(v)}
-            min={1}
-            max={20}
-            step={1}
-            className="w-full"
-          />
+        </div>
+
+        <div className="panel">
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <Label>Variations per recipe</Label>
+              <span className="text-sm font-mono bg-secondary px-2 py-1 rounded">{variations}</span>
+            </div>
+            <Slider
+              value={[variations]}
+              onValueChange={([v]) => setVariations(v)}
+              min={1}
+              max={20}
+              step={1}
+              className="w-full"
+            />
+          </div>
         </div>
       </div>
 
@@ -326,6 +359,7 @@ export function GeneratePanel({
                 modelIds: Array.from(selectedModels),
                 recipeIds: Array.from(selectedRecipes),
                 variations,
+                aiModel: selectedAiModel,
               })
             }
           >

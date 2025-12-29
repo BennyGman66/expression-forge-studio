@@ -19,11 +19,13 @@ interface GenerationRequest {
     modelRefUrl: string;
   };
   total: number;
+  aiModel?: string;
 }
 
 interface CreateJobRequest {
   projectId: string;
   total: number;
+  aiModel?: string;
 }
 
 serve(async (req) => {
@@ -80,7 +82,7 @@ serve(async (req) => {
     }
 
     // Otherwise this is a single image generation request
-    const { projectId, jobId, promptIndex, prompt, total }: GenerationRequest = body;
+    const { projectId, jobId, promptIndex, prompt, total, aiModel }: GenerationRequest = body;
 
     if (!projectId || !prompt || !jobId) {
       return new Response(
@@ -143,7 +145,11 @@ serve(async (req) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-      // Call Gemini 3 Pro Image for generation
+      // Use the selected AI model or default to Gemini 3 Pro Image
+      const selectedModel = aiModel || "google/gemini-3-pro-image-preview";
+      console.log(`Using AI model: ${selectedModel}`);
+
+      // Call the image generation model
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -151,7 +157,7 @@ serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-3-pro-image-preview",
+          model: selectedModel,
           messages: [
             {
               role: "user",
