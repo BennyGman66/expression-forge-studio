@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
 import { WorkflowTabs, type WorkflowStep } from "@/components/expression-map/WorkflowTabs";
 import { BrandRefsPanel } from "@/components/expression-map/BrandRefsPanel";
@@ -13,6 +14,8 @@ import { toast } from "sonner";
 import { RECIPE_EXTRACTION_SYSTEM_PROMPT, buildFullPrompt } from "@/lib/constants";
 import type { Project } from "@/types";
 
+const VALID_STEPS: WorkflowStep[] = ["brand-refs", "recipes", "talent", "generate", "review", "expression-maps"];
+
 interface ProjectWorkspaceProps {
   project: Project;
   onBack: () => void;
@@ -20,7 +23,14 @@ interface ProjectWorkspaceProps {
 }
 
 export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspaceProps) {
-  const [currentStep, setCurrentStep] = useState<WorkflowStep>("brand-refs");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const stepFromUrl = searchParams.get("step") as WorkflowStep;
+  const currentStep = VALID_STEPS.includes(stepFromUrl) ? stepFromUrl : "brand-refs";
+  
+  const handleStepChange = (step: WorkflowStep) => {
+    setSearchParams({ step });
+  };
+
   const [isExtracting, setIsExtracting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [outputsCount, setOutputsCount] = useState(0);
@@ -127,7 +137,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
 
       // Now using background processing - recipes will be saved directly to DB
       toast.success("Analyzing expressions in background. Recipes will appear shortly.");
-      setCurrentStep("recipes");
+      handleStepChange("recipes");
       
       // Poll for new recipes a few times
       const pollForRecipes = async () => {
@@ -420,7 +430,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
       <div className="border-b border-border bg-card px-6 py-3">
         <WorkflowTabs
           currentStep={currentStep}
-          onStepChange={setCurrentStep}
+          onStepChange={handleStepChange}
           brandRefsCount={brandRefs.length}
           recipesCount={recipes.length}
           modelsCount={digitalModels.length}
@@ -490,7 +500,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
         {currentStep === "expression-maps" && (
           <ExpressionMapsReviewTab 
             projectId={project.id} 
-            onAddMore={() => setCurrentStep("review")}
+            onAddMore={() => handleStepChange("review")}
           />
         )}
       </main>

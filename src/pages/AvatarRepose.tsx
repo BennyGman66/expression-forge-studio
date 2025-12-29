@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrandIngestPanel } from "@/components/avatar-repose/BrandIngestPanel";
@@ -9,8 +9,16 @@ import { ClayPoseLibrary } from "@/components/avatar-repose/ClayPoseLibrary";
 import { PoseReviewsTab } from "@/components/avatar-repose/PoseReviewsTab";
 import { Globe, Palette, Users, Sparkles, Library, ClipboardList } from "lucide-react";
 
+const VALID_TABS = ["ingest", "clay", "library", "talent", "generate", "reviews"];
+
 export default function AvatarRepose() {
-  const [activeTab, setActiveTab] = useState("ingest");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  const activeTab = VALID_TABS.includes(tabFromUrl || "") ? tabFromUrl! : "ingest";
+
+  const handleTabChange = (tab: string) => {
+    setSearchParams({ tab });
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -25,7 +33,7 @@ export default function AvatarRepose() {
             </p>
           </div>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
             <TabsList className="bg-secondary/50 p-1">
               <TabsTrigger value="ingest" className="gap-2">
                 <Globe className="w-4 h-4" />
