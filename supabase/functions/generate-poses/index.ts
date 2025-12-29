@@ -45,11 +45,15 @@ serve(async (req) => {
       randomCount,
       attemptsPerPose,
       bulkMode,
+      model, // Optional: AI model selection
       // Legacy single-mode params
       talentImageUrl,
       view,
       slot,
     } = body;
+
+    // Default to Flash model if not specified
+    const selectedModel = model || "google/gemini-2.5-flash-image-preview";
 
     if (!brandId || !talentId) {
       return new Response(
@@ -220,10 +224,10 @@ serve(async (req) => {
 
     console.log(`Created job ${job.id} with ${tasks.length} total generations`);
 
-    // Process in background
+    // Process in background - pass the selected model
     (globalThis as any).EdgeRuntime?.waitUntil?.(
-      processGenerations(supabase, job.id, tasks, lovableApiKey)
-    ) ?? processGenerations(supabase, job.id, tasks, lovableApiKey);
+      processGenerations(supabase, job.id, tasks, lovableApiKey, selectedModel)
+    ) ?? processGenerations(supabase, job.id, tasks, lovableApiKey, selectedModel);
 
     return new Response(
       JSON.stringify({ 
@@ -259,9 +263,10 @@ async function processGenerations(
   supabase: any,
   jobId: string,
   tasks: GenerationTask[],
-  lovableApiKey: string
+  lovableApiKey: string,
+  model: string
 ) {
-  console.log(`Processing ${tasks.length} generation tasks`);
+  console.log(`Processing ${tasks.length} generation tasks with model: ${model}`);
 
   let progress = 0;
   const total = tasks.length;
@@ -279,19 +284,19 @@ async function processGenerations(
         .update({ progress, updated_at: new Date().toISOString() })
         .eq("id", jobId);
 
-      // Generate image using Lovable AI
-      const prompt = `You are a professional fashion photography AI. Your task is to transfer the exact pose and body position from the clay model reference onto the digital talent.
+      // Generate image using Lovable AI with improved prompt
+      const prompt = `Put the woman from IMAGE 1 (Talent Reference) in the exact pose shown in IMAGE 2 (Pose Reference).
 
-CRITICAL REQUIREMENTS:
-1. The output person MUST match the talent reference image exactly - same face, skin tone, hair, and physical features
-2. The body pose MUST match the clay model reference exactly - same stance, arm positions, leg positions, and body angle
-3. Create a clean, professional fashion photography look with neutral studio lighting
-4. The background should be clean white or light grey studio backdrop
-5. Maintain photorealistic quality suitable for e-commerce
-6. Do not add any clothing - the model should appear as in the talent reference
-7. Match the camera angle and framing of the clay model
+CRITICAL INSTRUCTIONS:
+- Keep the face, skin tone, hair, and physical features consistent with IMAGE 1
+- Keep the outfit and clothing from IMAGE 1 exactly as shown
+- Copy the exact body pose, stance, arm positions, and leg positions from IMAGE 2
+- Use professional studio lighting similar to IMAGE 1
+- Background should be clean white or light grey studio backdrop
+- Maintain photorealistic e-commerce quality
+- Match the camera angle and framing from IMAGE 2
 
-Generate a high-quality fashion photograph combining the talent's appearance with the clay model's pose.`;
+Generate a high-quality fashion photograph combining the talent's appearance and outfit from IMAGE 1 with the pose from IMAGE 2.`;
 
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
@@ -300,15 +305,15 @@ Generate a high-quality fashion photograph combining the talent's appearance wit
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash-image-preview",
+          model: model,
           messages: [
             {
               role: "user",
               content: [
                 { type: "text", text: prompt },
-                { type: "text", text: "TALENT REFERENCE (copy this person's appearance):" },
+                { type: "text", text: "IMAGE 1 - TALENT REFERENCE (copy this person's appearance and outfit):" },
                 { type: "image_url", image_url: { url: task.talentImageUrl } },
-                { type: "text", text: "POSE REFERENCE (copy this exact pose):" },
+                { type: "text", text: "IMAGE 2 - POSE REFERENCE (copy this exact pose):" },
                 { type: "image_url", image_url: { url: task.poseUrl } },
               ],
             },

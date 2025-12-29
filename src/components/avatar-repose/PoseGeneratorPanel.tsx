@@ -27,6 +27,11 @@ import type {
 const RANDOM_COUNTS = [3, 5, 10, 20];
 const ATTEMPTS_OPTIONS = [1, 3, 5];
 
+const AI_MODELS = [
+  { id: "google/gemini-2.5-flash-image-preview", name: "Gemini 2.5 Flash", description: "Fast, balanced quality" },
+  { id: "google/gemini-3-pro-image-preview", name: "Gemini 3 Pro", description: "Highest quality, slower" },
+];
+
 const SLOT_CONFIG: { slot: ImageSlot; label: string }[] = [
   { slot: "A", label: "A: Full Front" },
   { slot: "B", label: "B: Cropped Front" },
@@ -103,6 +108,7 @@ export function PoseGeneratorPanel() {
   
   const [randomCount, setRandomCount] = useState(5);
   const [attemptsPerPose, setAttemptsPerPose] = useState(3);
+  const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].id);
   const [isGenerating, setIsGenerating] = useState(false);
   const [reviewJobId, setReviewJobId] = useState<string | null>(null);
 
@@ -467,6 +473,7 @@ export function PoseGeneratorPanel() {
           randomCount,
           attemptsPerPose,
           bulkMode: true,
+          model: selectedModel,
         },
       });
 
@@ -750,7 +757,26 @@ export function PoseGeneratorPanel() {
             </Select>
           </div>
 
-          <div className="col-span-2" />
+          <div className="space-y-2">
+            <Label>AI Model</Label>
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {AI_MODELS.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    <div className="flex flex-col">
+                      <span>{model.name}</span>
+                      <span className="text-xs text-muted-foreground">{model.description}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="col-span-1" />
         </div>
 
         {/* Warnings */}
