@@ -6,26 +6,49 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+interface Pairing {
+  view: string;
+  talentImageUrl: string;
+  talentImageId: string;
+  slots: string[];
+}
+
+interface ClayImageWithMeta {
+  id: string;
+  stored_url: string;
+  product_images: {
+    slot: string;
+    products: {
+      brand_id: string;
+      gender: string;
+    };
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    const body = await req.json();
     const {
       brandId,
       talentId,
-      talentImageUrl,
-      view,
-      slot,
+      pairings,
       gender,
       randomCount,
       attemptsPerPose,
-    } = await req.json();
+      bulkMode,
+      // Legacy single-mode params
+      talentImageUrl,
+      view,
+      slot,
+    } = body;
 
-    if (!brandId || !talentId || !talentImageUrl) {
+    if (!brandId || !talentId) {
       return new Response(
-        JSON.stringify({ error: "brandId, talentId, and talentImageUrl are required" }),
+        JSON.stringify({ error: "brandId and talentId are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -36,54 +59,134 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch clay images for this brand/slot/gender
-    let query = supabase
+    // Fetch all clay images for this brand
+    const { data: clayImagesData, error: clayError } = await supabase
       .from("clay_images")
       .select("*, product_images!inner(slot, products!inner(brand_id, gender))")
-      .eq("product_images.products.brand_id", brandId)
-      .eq("product_images.slot", slot);
-
-    const { data: clayImagesData, error: clayError } = await query;
+      .eq("product_images.products.brand_id", brandId);
 
     if (clayError) {
       console.error("Failed to fetch clay images:", clayError);
       throw new Error("Failed to fetch clay images");
     }
 
-    let clayImages = clayImagesData || [];
+    let allClayImages = (clayImagesData || []) as ClayImageWithMeta[];
     
     // Filter by gender if specified
     if (gender && gender !== "all") {
-      clayImages = clayImages.filter(
-        (c: any) => c.product_images.products.gender === gender
+      allClayImages = allClayImages.filter(
+        (c) => c.product_images.products.gender === gender
       );
     }
 
-    if (clayImages.length === 0) {
+    // Build generation tasks
+    let tasks: {
+      talentImageUrl: string;
+      talentImageId: string;
+      view: string;
+      slot: string;
+      poseId: string;
+      poseUrl: string;
+      attempt: number;
+    }[] = [];
+
+    if (bulkMode && pairings && pairings.length > 0) {
+      // Bulk mode: process all pairings
+      console.log(`Bulk mode: processing ${pairings.length} pairings`);
+
+      for (const pairing of pairings as Pairing[]) {
+        for (const pairingSlot of pairing.slots) {
+          // Get clay images for this slot
+          const slotPoses = allClayImages.filter(
+            (c) => c.product_images.slot === pairingSlot
+          );
+
+          if (slotPoses.length === 0) {
+            console.log(`No poses for slot ${pairingSlot}, skipping`);
+            continue;
+          }
+
+          // Randomly select poses
+          const shuffled = [...slotPoses].sort(() => Math.random() - 0.5);
+          const selectedPoses = shuffled.slice(0, Math.min(randomCount, slotPoses.length));
+
+          // Create tasks for each pose and attempt
+          for (const pose of selectedPoses) {
+            for (let attempt = 0; attempt < attemptsPerPose; attempt++) {
+              tasks.push({
+                talentImageUrl: pairing.talentImageUrl,
+                talentImageId: pairing.talentImageId,
+                view: pairing.view,
+                slot: pairingSlot,
+                poseId: pose.id,
+                poseUrl: pose.stored_url,
+                attempt,
+              });
+            }
+          }
+        }
+      }
+    } else {
+      // Legacy single mode for backwards compatibility
+      if (!talentImageUrl || !view || !slot) {
+        return new Response(
+          JSON.stringify({ error: "talentImageUrl, view, and slot are required for single mode" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const slotPoses = allClayImages.filter(
+        (c) => c.product_images.slot === slot
+      );
+
+      if (slotPoses.length === 0) {
+        return new Response(
+          JSON.stringify({ error: "No clay images found for this selection" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const shuffled = [...slotPoses].sort(() => Math.random() - 0.5);
+      const selectedPoses = shuffled.slice(0, Math.min(randomCount, slotPoses.length));
+
+      for (const pose of selectedPoses) {
+        for (let attempt = 0; attempt < attemptsPerPose; attempt++) {
+          tasks.push({
+            talentImageUrl,
+            talentImageId: "legacy",
+            view,
+            slot,
+            poseId: pose.id,
+            poseUrl: pose.stored_url,
+            attempt,
+          });
+        }
+      }
+    }
+
+    if (tasks.length === 0) {
       return new Response(
-        JSON.stringify({ error: "No clay images found for this selection" }),
+        JSON.stringify({ error: "No valid tasks to generate" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Randomly select poses
-    const shuffled = [...clayImages].sort(() => Math.random() - 0.5);
-    const selectedPoses = shuffled.slice(0, Math.min(randomCount, clayImages.length));
-    const totalGenerations = selectedPoses.length * attemptsPerPose;
+    console.log(`Created ${tasks.length} generation tasks`);
 
-    // Create job record
+    // Create job record - use first task's slot/view for record (bulk jobs span multiple)
     const { data: job, error: jobError } = await supabase
       .from("generation_jobs")
       .insert({
         brand_id: brandId,
         talent_id: talentId,
-        view,
-        slot,
+        view: bulkMode ? "bulk" : view,
+        slot: bulkMode ? "bulk" : slot,
         random_count: randomCount,
         attempts_per_pose: attemptsPerPose,
         status: "running",
         progress: 0,
-        total: totalGenerations,
+        total: tasks.length,
+        logs: bulkMode ? { pairings: pairings.length, mode: "bulk" } : null,
       })
       .select()
       .single();
@@ -93,18 +196,19 @@ serve(async (req) => {
       throw new Error("Failed to create generation job");
     }
 
-    console.log(`Created job ${job.id} with ${totalGenerations} total generations`);
+    console.log(`Created job ${job.id} with ${tasks.length} total generations`);
 
     // Process in background
     (globalThis as any).EdgeRuntime?.waitUntil?.(
-      processGenerations(supabase, job.id, selectedPoses, talentImageUrl, attemptsPerPose, lovableApiKey)
-    ) ?? processGenerations(supabase, job.id, selectedPoses, talentImageUrl, attemptsPerPose, lovableApiKey);
+      processGenerations(supabase, job.id, tasks, lovableApiKey)
+    ) ?? processGenerations(supabase, job.id, tasks, lovableApiKey);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         jobId: job.id,
-        message: `Started generating ${totalGenerations} images` 
+        taskCount: tasks.length,
+        message: `Started generating ${tasks.length} images` 
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
@@ -118,33 +222,42 @@ serve(async (req) => {
   }
 });
 
+interface GenerationTask {
+  talentImageUrl: string;
+  talentImageId: string;
+  view: string;
+  slot: string;
+  poseId: string;
+  poseUrl: string;
+  attempt: number;
+}
+
 async function processGenerations(
   supabase: any,
   jobId: string,
-  poses: any[],
-  talentImageUrl: string,
-  attemptsPerPose: number,
+  tasks: GenerationTask[],
   lovableApiKey: string
 ) {
-  console.log(`Processing ${poses.length} poses with ${attemptsPerPose} attempts each`);
+  console.log(`Processing ${tasks.length} generation tasks`);
 
   let progress = 0;
-  const total = poses.length * attemptsPerPose;
+  const total = tasks.length;
+  let consecutiveErrors = 0;
+  const maxConsecutiveErrors = 10;
 
-  for (const pose of poses) {
-    for (let attempt = 0; attempt < attemptsPerPose; attempt++) {
-      progress++;
-      console.log(`[${progress}/${total}] Generating pose ${pose.id}, attempt ${attempt + 1}`);
+  for (const task of tasks) {
+    progress++;
+    console.log(`[${progress}/${total}] View: ${task.view}, Slot: ${task.slot}, Pose: ${task.poseId}, Attempt: ${task.attempt + 1}`);
 
-      try {
-        // Update job progress
-        await supabase
-          .from("generation_jobs")
-          .update({ progress, updated_at: new Date().toISOString() })
-          .eq("id", jobId);
+    try {
+      // Update job progress
+      await supabase
+        .from("generation_jobs")
+        .update({ progress, updated_at: new Date().toISOString() })
+        .eq("id", jobId);
 
-        // Generate image using Lovable AI
-        const prompt = `You are a professional fashion photography AI. Your task is to transfer the exact pose and body position from the clay model reference onto the digital talent.
+      // Generate image using Lovable AI
+      const prompt = `You are a professional fashion photography AI. Your task is to transfer the exact pose and body position from the clay model reference onto the digital talent.
 
 CRITICAL REQUIREMENTS:
 1. The output person MUST match the talent reference image exactly - same face, skin tone, hair, and physical features
@@ -157,94 +270,123 @@ CRITICAL REQUIREMENTS:
 
 Generate a high-quality fashion photograph combining the talent's appearance with the clay model's pose.`;
 
-        const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${lovableApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "google/gemini-2.5-flash-image-preview",
-            messages: [
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: prompt },
-                  { type: "text", text: "TALENT REFERENCE (copy this person's appearance):" },
-                  { type: "image_url", image_url: { url: talentImageUrl } },
-                  { type: "text", text: "POSE REFERENCE (copy this exact pose):" },
-                  { type: "image_url", image_url: { url: pose.stored_url } },
-                ],
-              },
-            ],
-            modalities: ["image", "text"],
-          }),
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${lovableApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash-image-preview",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: prompt },
+                { type: "text", text: "TALENT REFERENCE (copy this person's appearance):" },
+                { type: "image_url", image_url: { url: task.talentImageUrl } },
+                { type: "text", text: "POSE REFERENCE (copy this exact pose):" },
+                { type: "image_url", image_url: { url: task.poseUrl } },
+              ],
+            },
+          ],
+          modalities: ["image", "text"],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`AI API error:`, response.status, errorText);
+        
+        if (response.status === 429) {
+          console.log("Rate limited, waiting 30 seconds...");
+          await new Promise((r) => setTimeout(r, 30000));
+          // Don't increment progress, will retry on next iteration concept
+          consecutiveErrors++;
+        } else {
+          consecutiveErrors++;
+        }
+
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          console.error(`Too many consecutive errors (${consecutiveErrors}), aborting job`);
+          await supabase
+            .from("generation_jobs")
+            .update({ 
+              status: "failed", 
+              updated_at: new Date().toISOString(),
+              logs: { error: "Too many consecutive errors" }
+            })
+            .eq("id", jobId);
+          return;
+        }
+        continue;
+      }
+
+      // Reset error counter on success
+      consecutiveErrors = 0;
+
+      const data = await response.json();
+      const generatedImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+
+      if (!generatedImageUrl) {
+        console.error("No image returned from AI");
+        continue;
+      }
+
+      // Upload to storage
+      const base64Data = generatedImageUrl.replace(/^data:image\/\w+;base64,/, "");
+      const binaryData = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
+      
+      const fileName = `generations/${jobId}/${task.view}_${task.slot}_${task.poseId}_${task.attempt}_${Date.now()}.png`;
+      const { error: uploadError } = await supabase.storage
+        .from("images")
+        .upload(fileName, binaryData, {
+          contentType: "image/png",
+          upsert: true,
         });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`AI API error:`, response.status, errorText);
-          
-          if (response.status === 429) {
-            console.log("Rate limited, waiting 30 seconds...");
-            await new Promise((r) => setTimeout(r, 30000));
-            attempt--; // Retry this attempt
-            progress--;
-            continue;
-          }
-          continue;
-        }
+      if (uploadError) {
+        console.error(`Upload error:`, uploadError);
+        continue;
+      }
 
-        const data = await response.json();
-        const generatedImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+      const { data: { publicUrl } } = supabase.storage
+        .from("images")
+        .getPublicUrl(fileName);
 
-        if (!generatedImageUrl) {
-          console.error("No image returned");
-          continue;
-        }
+      // Save to generations table
+      const { error: insertError } = await supabase
+        .from("generations")
+        .insert({
+          generation_job_id: jobId,
+          pose_clay_image_id: task.poseId,
+          attempt_index: task.attempt,
+          stored_url: publicUrl,
+        });
 
-        // Upload to storage
-        const base64Data = generatedImageUrl.replace(/^data:image\/\w+;base64,/, "");
-        const binaryData = Uint8Array.from(atob(base64Data), (c) => c.charCodeAt(0));
-        
-        const fileName = `generations/${jobId}/${pose.id}_${attempt}_${Date.now()}.png`;
-        const { error: uploadError } = await supabase.storage
-          .from("images")
-          .upload(fileName, binaryData, {
-            contentType: "image/png",
-            upsert: true,
-          });
+      if (insertError) {
+        console.error(`Insert error:`, insertError);
+        continue;
+      }
 
-        if (uploadError) {
-          console.error(`Upload error:`, uploadError);
-          continue;
-        }
+      console.log(`Successfully generated ${fileName}`);
 
-        const { data: { publicUrl } } = supabase.storage
-          .from("images")
-          .getPublicUrl(fileName);
-
-        // Save to generations table
-        const { error: insertError } = await supabase
-          .from("generations")
-          .insert({
-            generation_job_id: jobId,
-            pose_clay_image_id: pose.id,
-            attempt_index: attempt,
-            stored_url: publicUrl,
-          });
-
-        if (insertError) {
-          console.error(`Insert error:`, insertError);
-          continue;
-        }
-
-        console.log(`Successfully generated ${fileName}`);
-
-        // Small delay between requests
-        await new Promise((r) => setTimeout(r, 2000));
-      } catch (error) {
-        console.error(`Error processing pose ${pose.id}, attempt ${attempt}:`, error);
+      // Small delay between requests to avoid rate limiting
+      await new Promise((r) => setTimeout(r, 2000));
+    } catch (error) {
+      console.error(`Error processing task:`, error);
+      consecutiveErrors++;
+      
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        console.error(`Too many consecutive errors, aborting job`);
+        await supabase
+          .from("generation_jobs")
+          .update({ 
+            status: "failed", 
+            updated_at: new Date().toISOString() 
+          })
+          .eq("id", jobId);
+        return;
       }
     }
   }
