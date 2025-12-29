@@ -2,7 +2,14 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Check, Download, Lock, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ArrowLeft, Check, Download, Lock, RefreshCw, ChevronDown, ChevronUp, Grid3X3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { DigitalModel, DigitalModelRef, ExpressionRecipe } from "@/types";
@@ -29,6 +36,8 @@ interface ReviewPanelProps {
   }) => Promise<void>;
 }
 
+const GRID_TARGET_OPTIONS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+
 export function ReviewPanel({ 
   projectId, 
   models, 
@@ -45,6 +54,7 @@ export function ReviewPanel({
   const [missingRecipeVariations, setMissingRecipeVariations] = useState<Record<string, number>>({});
   const [isRedoing, setIsRedoing] = useState(false);
   const [showMissingSection, setShowMissingSection] = useState(false);
+  const [targetGridSize, setTargetGridSize] = useState(20);
   const exportRef = useRef<HTMLDivElement>(null);
 
   // Fetch outputs for this project
@@ -413,9 +423,35 @@ export function ReviewPanel({
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <div className="text-sm">
-              <span className="font-medium text-primary">{favorites.size}</span>
-              <span className="text-muted-foreground"> selected</span>
+            {/* Target grid selector */}
+            <div className="flex items-center gap-2">
+              <Grid3X3 className="w-4 h-4 text-muted-foreground" />
+              <Select
+                value={targetGridSize.toString()}
+                onValueChange={(v) => setTargetGridSize(parseInt(v))}
+              >
+                <SelectTrigger className="w-20 h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {GRID_TARGET_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={n.toString()}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Progress toward target */}
+            <div className={cn(
+              "text-sm font-medium px-3 py-1 rounded-full",
+              favorites.size === targetGridSize 
+                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                : favorites.size > targetGridSize
+                  ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400"
+                  : "bg-muted text-muted-foreground"
+            )}>
+              {favorites.size} / {targetGridSize}
             </div>
             <Button onClick={handleExport} disabled={favorites.size === 0}>
               Proceed
