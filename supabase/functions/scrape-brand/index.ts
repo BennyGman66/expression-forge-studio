@@ -45,10 +45,13 @@ serve(async (req) => {
 
     console.log(`Created scrape job ${job.id}`);
 
-    // Start background task for scraping
-    runScrapeJob(supabase, job.id, brandId, startUrl, limit).catch(err => {
+    // Start background task for scraping - use EdgeRuntime.waitUntil to keep function alive
+    const scrapePromise = runScrapeJob(supabase, job.id, brandId, startUrl, limit).catch(err => {
       console.error('Background scrape failed:', err);
     });
+    
+    // Keep the edge function running until the scrape completes
+    (globalThis as any).EdgeRuntime?.waitUntil?.(scrapePromise);
 
     return new Response(
       JSON.stringify({ success: true, jobId: job.id }),
