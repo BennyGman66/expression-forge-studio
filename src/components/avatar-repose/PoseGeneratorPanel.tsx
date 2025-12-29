@@ -367,25 +367,63 @@ export function PoseGeneratorPanel() {
     return 0;
   }, [smartPairingMode, pairingsByTalentLook]);
 
-  // Warnings
+  // Warnings - enhanced to show why 0 images might be generated
   const warnings = useMemo(() => {
     const msgs: string[] = [];
+    
+    // Warning: No brand selected
+    if (!selectedBrand) {
+      msgs.push("Select a brand to load available clay poses");
+      return msgs;
+    }
+    
+    // Warning: No clay images for selected brand
+    if (allClayImages.length === 0) {
+      msgs.push("No clay poses found for this brand. Generate clay images first.");
+      return msgs;
+    }
+    
+    // Warning: No talent-looks selected
+    if (selectedTalentLooks.length === 0) {
+      msgs.push("Select at least one talent-look to generate images");
+      return msgs;
+    }
+    
     if (smartPairingMode) {
       selectedTalentLooks.forEach(tl => {
         const lookImages = allTalentImages.filter(img => img.look_id === tl.lookId);
+        
+        // Warning: No images uploaded for look
         if (lookImages.length === 0) {
           msgs.push(`${tl.talentName} - ${tl.lookName}: No images uploaded`);
-        } else {
-          const hasFront = lookImages.some(img => img.view === 'front');
-          const hasBack = lookImages.some(img => img.view === 'back');
-          if (!hasFront && !hasBack) {
-            msgs.push(`${tl.talentName} - ${tl.lookName}: No front or back shots`);
-          }
+          return;
+        }
+        
+        // Warning: Missing product type
+        if (!tl.productType) {
+          msgs.push(`${tl.talentName} - ${tl.lookName}: Product type not set. Go to Talent Library to set it.`);
+          return;
+        }
+        
+        // Warning: No matching clay poses for product type
+        const clayBySlot = getClayImagesBySlotForProductType(tl.productType);
+        const totalClayPoses = Object.values(clayBySlot).flat().length;
+        if (totalClayPoses === 0) {
+          const typeLabel = tl.productType === 'bottoms' ? 'bottoms/trousers' : tl.productType;
+          msgs.push(`${tl.talentName} - ${tl.lookName}: No clay poses for "${typeLabel}" product type`);
+          return;
+        }
+        
+        // Warning: Missing front or back views
+        const hasFront = lookImages.some(img => img.view === 'front');
+        const hasBack = lookImages.some(img => img.view === 'back');
+        if (!hasFront && !hasBack) {
+          msgs.push(`${tl.talentName} - ${tl.lookName}: No front or back shots`);
         }
       });
     }
     return msgs;
-  }, [smartPairingMode, selectedTalentLooks, allTalentImages]);
+  }, [smartPairingMode, selectedTalentLooks, allTalentImages, selectedBrand, allClayImages, getClayImagesBySlotForProductType]);
 
   const handleGenerate = async () => {
     if (!selectedBrand) {
@@ -831,48 +869,83 @@ export function PoseGeneratorPanel() {
             Available Poses by Slot
           </p>
           <ScrollArea className="h-64">
-            <div className="space-y-3">
-              {SLOT_CONFIG.map(({ slot, label }) => {
-                // Show poses without product type filter for overview
-                const poses = allClayImages.filter(c => {
-                  const s = c.product_images?.slot as ImageSlot;
-                  if (s !== slot) return false;
-                  if (selectedGender !== "all" && c.product_images?.products?.gender !== selectedGender) return false;
-                  return true;
-                });
-                
-                return (
-                  <div 
-                    key={slot}
-                    className="p-2 rounded-lg border border-border"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium">{label}</span>
-                      <Badge variant="outline">{poses.length}</Badge>
-                    </div>
-                    <div className="grid grid-cols-6 gap-1">
-                      {poses.slice(0, 6).map((clay) => (
-                        <div
-                          key={clay.id}
-                          className="aspect-[3/4] rounded bg-muted overflow-hidden"
-                        >
-                          <img
-                            src={clay.stored_url}
-                            alt="Pose"
-                            className="w-full h-full object-cover"
-                          />
+            {!selectedBrand ? (
+              <div className="h-32 flex flex-col items-center justify-center text-muted-foreground gap-2">
+                <ImageIcon className="w-8 h-8" />
+                <p className="text-sm">Select a brand to see available clay poses</p>
+              </div>
+            ) : allClayImages.length === 0 ? (
+              <div className="h-32 flex flex-col items-center justify-center text-muted-foreground gap-2">
+                <ImageIcon className="w-8 h-8" />
+                <p className="text-sm">No clay poses found for this brand</p>
+                <p className="text-xs">Generate clay images first in the Clay Generation panel</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {SLOT_CONFIG.map(({ slot, label }) => {
+                  // Show poses without product type filter for overview
+                  const poses = allClayImages.filter(c => {
+                    const s = c.product_images?.slot as ImageSlot;
+                    if (s !== slot) return false;
+                    if (selectedGender !== "all" && c.product_images?.products?.gender !== selectedGender) return false;
+                    return true;
+                  });
+                  
+                  // Count by product type for breakdown
+                  const topsPoses = poses.filter(p => p.product_images?.products?.product_type === 'tops').length;
+                  const bottomsPoses = poses.filter(p => p.product_images?.products?.product_type === 'trousers').length;
+                  
+                  return (
+                    <div 
+                      key={slot}
+                      className={`p-2 rounded-lg border ${poses.length === 0 ? 'border-amber-500/50 bg-amber-500/5' : 'border-border'}`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium">{label}</span>
+                        <div className="flex gap-1">
+                          <Badge variant="outline" className="text-xs">
+                            {poses.length} total
+                          </Badge>
+                          {topsPoses > 0 && (
+                            <Badge variant="secondary" className="text-xs">
+                              {topsPoses} tops
+                            </Badge>
+                          )}
+                          {bottomsPoses > 0 && (
+                            <Badge variant="secondary" className="text-xs">
+                              {bottomsPoses} bottoms
+                            </Badge>
+                          )}
                         </div>
-                      ))}
-                      {poses.length > 6 && (
-                        <div className="aspect-[3/4] rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">
-                          +{poses.length - 6}
+                      </div>
+                      {poses.length === 0 ? (
+                        <p className="text-xs text-muted-foreground py-2">No poses for this slot</p>
+                      ) : (
+                        <div className="grid grid-cols-6 gap-1">
+                          {poses.slice(0, 6).map((clay) => (
+                            <div
+                              key={clay.id}
+                              className="aspect-[3/4] rounded bg-muted overflow-hidden"
+                            >
+                              <img
+                                src={clay.stored_url}
+                                alt="Pose"
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          ))}
+                          {poses.length > 6 && (
+                            <div className="aspect-[3/4] rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                              +{poses.length - 6}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </ScrollArea>
         </Card>
       </div>
