@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Download, Trash2, Eye } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Download, Trash2, Eye, Pencil, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -22,6 +23,8 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
   const [exports, setExports] = useState<ExpressionMapExport[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedExport, setSelectedExport] = useState<ExpressionMapExport | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
 
   useEffect(() => {
     fetchExports();
@@ -63,6 +66,43 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
       setExports((prev) => prev.filter((e) => e.id !== id));
       if (selectedExport?.id === id) setSelectedExport(null);
     }
+  };
+
+  const startEditing = (exp: ExpressionMapExport) => {
+    setEditingId(exp.id);
+    setEditName(exp.name);
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditName("");
+  };
+
+  const handleRename = async (id: string) => {
+    const trimmedName = editName.trim();
+    if (!trimmedName) {
+      toast.error("Name cannot be empty");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("expression_map_exports")
+      .update({ name: trimmedName })
+      .eq("id", id);
+
+    if (error) {
+      toast.error("Failed to rename");
+    } else {
+      toast.success("Renamed successfully");
+      setExports((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, name: trimmedName } : e))
+      );
+      if (selectedExport?.id === id) {
+        setSelectedExport({ ...selectedExport, name: trimmedName });
+      }
+    }
+    setEditingId(null);
+    setEditName("");
   };
 
   const handleDownload = async (exp: ExpressionMapExport) => {
@@ -199,7 +239,7 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
           >
             <div className="flex items-center gap-4">
               {exp.image_urls.length > 0 && (
-                <div className="w-16 h-16 rounded overflow-hidden bg-muted">
+                <div className="w-16 h-16 rounded overflow-hidden bg-muted flex-shrink-0">
                   <img
                     src={exp.image_urls[0]}
                     alt=""
@@ -207,8 +247,39 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
                   />
                 </div>
               )}
-              <div>
-                <h3 className="font-medium">{exp.name}</h3>
+              <div className="min-w-0">
+                {editingId === exp.id ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="h-8 w-64"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRename(exp.id);
+                        if (e.key === "Escape") cancelEditing();
+                      }}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => handleRename(exp.id)}
+                    >
+                      <Check className="w-4 h-4 text-green-600" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={cancelEditing}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <h3 className="font-medium">{exp.name}</h3>
+                )}
                 <p className="text-sm text-muted-foreground">
                   {exp.image_urls.length} expressions •{" "}
                   {format(new Date(exp.created_at), "MMM d, yyyy 'at' h:mm a")}
@@ -222,6 +293,14 @@ export function ExpressionMapsReviewTab({ projectId }: ExpressionMapsReviewTabPr
                 onClick={() => setSelectedExport(exp)}
               >
                 <Eye className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => startEditing(exp)}
+                disabled={editingId !== null}
+              >
+                <Pencil className="w-4 h-4" />
               </Button>
               <Button
                 variant="ghost"
