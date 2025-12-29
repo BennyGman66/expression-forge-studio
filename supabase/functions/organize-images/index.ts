@@ -2,6 +2,10 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+declare const EdgeRuntime: {
+  waitUntil(promise: Promise<unknown>): void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -14,7 +18,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 interface ImageToClassify {
   id: string;
   stored_url: string;
-  current_slot: string;
+  slot: string;
 }
 
 async function classifyImage(imageUrl: string): Promise<string> {
@@ -80,6 +84,43 @@ Respond with ONLY the single letter (A, B, C, or D) that best matches this image
   }
 }
 
+async function processOrganization(brandId: string, images: ImageToClassify[]) {
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  
+  console.log(`Background: Starting organization of ${images.length} images`);
+
+  let updated = 0;
+
+  for (const image of images) {
+    try {
+      const newSlot = await classifyImage(image.stored_url);
+      
+      if (newSlot !== image.slot) {
+        const { error: updateError } = await supabase
+          .from("product_images")
+          .update({ slot: newSlot })
+          .eq("id", image.id);
+
+        if (updateError) {
+          console.error(`Error updating image ${image.id}:`, updateError);
+        } else {
+          updated++;
+          console.log(`Image ${image.id}: ${image.slot} -> ${newSlot}`);
+        }
+      } else {
+        console.log(`Image ${image.id}: already in correct slot ${image.slot}`);
+      }
+
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 300));
+    } catch (error) {
+      console.error(`Failed to classify image ${image.id}:`, error);
+    }
+  }
+
+  console.log(`Background: Organization complete. Updated ${updated} of ${images.length} images`);
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -117,53 +158,28 @@ serve(async (req) => {
 
     if (!images || images.length === 0) {
       return new Response(
-        JSON.stringify({ message: "No images to organize", updated: 0 }),
+        JSON.stringify({ message: "No images to organize", total: 0 }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Starting organization of ${images.length} images`);
+    const imagesToProcess: ImageToClassify[] = images.map(img => ({
+      id: img.id,
+      stored_url: img.stored_url,
+      slot: img.slot,
+    }));
 
-    let updated = 0;
-    const results: { id: string; oldSlot: string; newSlot: string }[] = [];
+    console.log(`Starting background organization of ${imagesToProcess.length} images`);
 
-    // Process images with rate limiting
-    for (const image of images) {
-      try {
-        const newSlot = await classifyImage(image.stored_url);
-        
-        if (newSlot !== image.slot) {
-          const { error: updateError } = await supabase
-            .from("product_images")
-            .update({ slot: newSlot })
-            .eq("id", image.id);
+    // Start background processing
+    EdgeRuntime.waitUntil(processOrganization(brandId, imagesToProcess));
 
-          if (updateError) {
-            console.error(`Error updating image ${image.id}:`, updateError);
-          } else {
-            updated++;
-            results.push({ id: image.id, oldSlot: image.slot, newSlot });
-            console.log(`Image ${image.id}: ${image.slot} -> ${newSlot}`);
-          }
-        } else {
-          console.log(`Image ${image.id}: already in correct slot ${image.slot}`);
-        }
-
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 200));
-      } catch (error) {
-        console.error(`Failed to classify image ${image.id}:`, error);
-      }
-    }
-
-    console.log(`Organization complete. Updated ${updated} of ${images.length} images`);
-
+    // Return immediately
     return new Response(
       JSON.stringify({ 
-        message: "Organization complete",
-        total: images.length,
-        updated,
-        results 
+        message: "Organization started",
+        total: imagesToProcess.length,
+        status: "processing"
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
