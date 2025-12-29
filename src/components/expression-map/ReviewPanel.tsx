@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Check, Download, Lock } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ArrowLeft, Check, Download, Lock, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { DigitalModel, DigitalModelRef } from "@/types";
+import type { DigitalModel, DigitalModelRef, ExpressionRecipe } from "@/types";
 
 interface Output {
   id: string;
@@ -19,13 +20,31 @@ interface ReviewPanelProps {
   projectId: string;
   models: DigitalModel[];
   modelRefs: Record<string, DigitalModelRef[]>;
+  recipes: ExpressionRecipe[];
+  masterPrompt: string;
+  onRedoGenerate: (payload: {
+    modelId: string;
+    recipeVariations: Array<{ recipeId: string; variations: number }>;
+    aiModel: string;
+  }) => Promise<void>;
 }
 
-export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) {
+export function ReviewPanel({ 
+  projectId, 
+  models, 
+  modelRefs, 
+  recipes, 
+  masterPrompt, 
+  onRedoGenerate 
+}: ReviewPanelProps) {
   const [outputs, setOutputs] = useState<Output[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [showExport, setShowExport] = useState(false);
+  const [lockedInOutputIds, setLockedInOutputIds] = useState<Set<string>>(new Set());
+  const [missingRecipeVariations, setMissingRecipeVariations] = useState<Record<string, number>>({});
+  const [isRedoing, setIsRedoing] = useState(false);
+  const [showMissingSection, setShowMissingSection] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
   // Fetch outputs for this project
@@ -68,6 +87,91 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
       supabase.removeChannel(channel);
     };
   }, [projectId]);
+
+  // Fetch locked-in output IDs from expression_map_exports
+  useEffect(() => {
+    const fetchLockedInOutputs = async () => {
+      const { data } = await supabase
+        .from("expression_map_exports")
+        .select("output_ids")
+        .eq("project_id", projectId);
+
+      if (data) {
+        const allLockedIds = new Set<string>();
+        for (const row of data) {
+          const ids = row.output_ids as string[] | null;
+          if (ids) {
+            for (const id of ids) {
+              allLockedIds.add(id);
+            }
+          }
+        }
+        setLockedInOutputIds(allLockedIds);
+      }
+    };
+
+    fetchLockedInOutputs();
+
+    // Subscribe to exports changes
+    const channel = supabase
+      .channel("review-exports")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "expression_map_exports",
+          filter: `project_id=eq.${projectId}`,
+        },
+        () => fetchLockedInOutputs()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [projectId]);
+
+  // Get coverage info for a model
+  const getRecipeCoverage = useMemo(() => {
+    return (modelId: string) => {
+      const modelOutputs = outputs.filter((o) => o.digital_model_id === modelId);
+      const coveredRecipeIds = new Set<string>();
+      
+      for (const output of modelOutputs) {
+        if (output.recipe_id && lockedInOutputIds.has(output.id)) {
+          coveredRecipeIds.add(output.recipe_id);
+        }
+      }
+
+      // Get all recipes that have outputs for this model
+      const recipesWithOutputs = new Set<string>();
+      for (const output of modelOutputs) {
+        if (output.recipe_id) {
+          recipesWithOutputs.add(output.recipe_id);
+        }
+      }
+
+      const covered = Array.from(coveredRecipeIds);
+      const missing = recipes
+        .filter((r) => recipesWithOutputs.has(r.id) && !coveredRecipeIds.has(r.id))
+        .map((r) => r.id);
+
+      return { covered, missing, total: recipesWithOutputs.size };
+    };
+  }, [outputs, lockedInOutputIds, recipes]);
+
+  // Initialize missing recipe variations when selecting a model
+  useEffect(() => {
+    if (selectedModelId) {
+      const { missing } = getRecipeCoverage(selectedModelId);
+      const initial: Record<string, number> = {};
+      for (const recipeId of missing) {
+        initial[recipeId] = missingRecipeVariations[recipeId] ?? 2;
+      }
+      setMissingRecipeVariations(initial);
+    }
+  }, [selectedModelId, getRecipeCoverage]);
 
   const toggleFavorite = (id: string) => {
     setFavorites((prev) => {
@@ -115,11 +219,9 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Fill background
     ctx.fillStyle = '#e8e6e1';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-    // Load and draw images
     const loadImage = (url: string): Promise<HTMLImageElement> => {
       return new Promise((resolve, reject) => {
         const img = new Image();
@@ -143,7 +245,6 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
         const x = col * (cellSize + gap);
         const y = row * (cellSize + gap);
         
-        // Draw image covering the cell (object-cover equivalent)
         const scale = Math.max(cellSize / img.width, cellSize / img.height);
         const scaledWidth = img.width * scale;
         const scaledHeight = img.height * scale;
@@ -158,7 +259,6 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
         ctx.restore();
       }
 
-      // Download
       const link = document.createElement('a');
       link.download = `expression-grid-${Date.now()}.png`;
       link.href = canvas.toDataURL('image/png');
@@ -195,9 +295,59 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
     }
   };
 
+  const handleVariationChange = (recipeId: string, value: number) => {
+    const clamped = Math.min(20, Math.max(1, value));
+    setMissingRecipeVariations((prev) => ({ ...prev, [recipeId]: clamped }));
+  };
+
+  const setAllVariations = (value: number) => {
+    setMissingRecipeVariations((prev) => {
+      const next: Record<string, number> = {};
+      for (const key of Object.keys(prev)) {
+        next[key] = value;
+      }
+      return next;
+    });
+  };
+
+  const handleRedoMissing = async () => {
+    if (!selectedModelId) return;
+    
+    const recipeVariations = Object.entries(missingRecipeVariations)
+      .filter(([_, count]) => count > 0)
+      .map(([recipeId, variations]) => ({ recipeId, variations }));
+
+    if (recipeVariations.length === 0) {
+      toast.error("No recipes selected for regeneration");
+      return;
+    }
+
+    setIsRedoing(true);
+    try {
+      await onRedoGenerate({
+        modelId: selectedModelId,
+        recipeVariations,
+        aiModel: "gemini-2.5-flash",
+      });
+      setShowMissingSection(false);
+    } finally {
+      setIsRedoing(false);
+    }
+  };
+
+  const totalRedoCount = Object.values(missingRecipeVariations).reduce((a, b) => a + b, 0);
+
   const selectedModel = models.find((m) => m.id === selectedModelId);
   const modelOutputs = selectedModelId ? getModelOutputs(selectedModelId) : [];
   const favoriteOutputs = outputs.filter((o) => favorites.has(o.id));
+  const coverage = selectedModelId ? getRecipeCoverage(selectedModelId) : null;
+  const missingRecipes = coverage ? recipes.filter((r) => coverage.missing.includes(r.id)) : [];
+
+  // Check if an output's recipe is covered
+  const isRecipeCovered = (recipeId: string | null) => {
+    if (!recipeId || !coverage) return false;
+    return coverage.covered.includes(recipeId);
+  };
 
   // Export grid view
   if (showExport) {
@@ -273,35 +423,139 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
           </div>
         </div>
 
+        {/* Coverage summary and redo missing section */}
+        {coverage && coverage.total > 0 && (
+          <div className="border border-border rounded-lg bg-card p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-green-500" />
+                  <span className="text-sm font-medium">
+                    {coverage.covered.length} of {coverage.total} recipes covered
+                  </span>
+                </div>
+                {coverage.missing.length > 0 && (
+                  <span className="text-sm text-orange-500">
+                    ({coverage.missing.length} missing)
+                  </span>
+                )}
+              </div>
+              {coverage.missing.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowMissingSection(!showMissingSection)}
+                >
+                  Redo Missing
+                  {showMissingSection ? (
+                    <ChevronUp className="w-4 h-4 ml-1" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 ml-1" />
+                  )}
+                </Button>
+              )}
+            </div>
+
+            {showMissingSection && missingRecipes.length > 0 && (
+              <div className="border-t border-border pt-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Set how many variations to generate for each uncovered recipe (1-20)
+                  </p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setAllVariations(2)}>
+                      All 2
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setAllVariations(5)}>
+                      All 5
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setAllVariations(10)}>
+                      All 10
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-64 overflow-y-auto">
+                  {missingRecipes.map((recipe) => (
+                    <div
+                      key={recipe.id}
+                      className="flex items-center justify-between gap-3 p-3 border border-border rounded-md bg-background"
+                    >
+                      <span className="text-sm font-medium truncate flex-1">
+                        {recipe.name}
+                      </span>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={missingRecipeVariations[recipe.id] ?? 2}
+                        onChange={(e) =>
+                          handleVariationChange(recipe.id, parseInt(e.target.value) || 1)
+                        }
+                        className="w-16 h-8 text-center"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex justify-end">
+                  <Button
+                    onClick={handleRedoMissing}
+                    disabled={isRedoing || totalRedoCount === 0}
+                  >
+                    {isRedoing ? (
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                    )}
+                    Redo Missing ({totalRedoCount} total)
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {modelOutputs.length === 0 ? (
           <div className="text-center py-16 text-muted-foreground">
             <p>No expressions generated for this model yet</p>
           </div>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
-            {modelOutputs.map((output) => (
-              <div
-                key={output.id}
-                onClick={() => toggleFavorite(output.id)}
-                className={cn(
-                  "aspect-square rounded-lg overflow-hidden cursor-pointer relative transition-all hover:scale-[1.02]",
-                  favorites.has(output.id) 
-                    ? "ring-2 ring-primary ring-offset-2 ring-offset-background" 
-                    : "hover:ring-1 hover:ring-border"
-                )}
-              >
-                <img
-                  src={output.image_url!}
-                  alt=""
-                  className="w-full h-full object-cover"
-                />
-                {favorites.has(output.id) && (
-                  <div className="absolute top-2 right-2 w-6 h-6 bg-primary rounded-full flex items-center justify-center">
-                    <Check className="w-4 h-4 text-primary-foreground" />
-                  </div>
-                )}
-              </div>
-            ))}
+            {modelOutputs.map((output) => {
+              const recipeCovered = isRecipeCovered(output.recipe_id);
+              return (
+                <div
+                  key={output.id}
+                  onClick={() => toggleFavorite(output.id)}
+                  className={cn(
+                    "aspect-square rounded-lg overflow-hidden cursor-pointer relative transition-all hover:scale-[1.02]",
+                    favorites.has(output.id) 
+                      ? "ring-2 ring-primary ring-offset-2 ring-offset-background" 
+                      : "hover:ring-1 hover:ring-border"
+                  )}
+                >
+                  <img
+                    src={output.image_url!}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
+                  {/* Coverage indicator */}
+                  <div
+                    className={cn(
+                      "absolute top-2 left-2 w-2.5 h-2.5 rounded-full",
+                      recipeCovered ? "bg-green-500" : "bg-orange-400"
+                    )}
+                    title={recipeCovered ? "Recipe covered" : "Recipe not covered"}
+                  />
+                  {favorites.has(output.id) && (
+                    <div className="absolute top-2 right-2 w-6 h-6 bg-primary rounded-full flex items-center justify-center">
+                      <Check className="w-4 h-4 text-primary-foreground" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -342,6 +596,7 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
             const thumbnail = getModelThumbnail(model.id);
             const outputCount = getModelOutputs(model.id).length;
             const modelFavorites = getModelOutputs(model.id).filter((o) => favorites.has(o.id)).length;
+            const modelCoverage = getRecipeCoverage(model.id);
 
             return (
               <div
@@ -364,10 +619,17 @@ export function ReviewPanel({ projectId, models, modelRefs }: ReviewPanelProps) 
                 </div>
                 <div className="mt-2">
                   <h3 className="font-medium">{model.name}</h3>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex flex-col gap-0.5 text-sm text-muted-foreground">
                     <span>{outputCount} expressions</span>
+                    {modelCoverage.total > 0 && (
+                      <span className={cn(
+                        modelCoverage.missing.length > 0 ? "text-orange-500" : "text-green-600"
+                      )}>
+                        {modelCoverage.covered.length}/{modelCoverage.total} covered
+                      </span>
+                    )}
                     {modelFavorites > 0 && (
-                      <span className="text-primary">• {modelFavorites} selected</span>
+                      <span className="text-primary">{modelFavorites} selected</span>
                     )}
                   </div>
                 </div>

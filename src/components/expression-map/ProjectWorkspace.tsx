@@ -232,120 +232,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
         toast.info(`Starting generation of ${prompts.length} images...`);
       }
 
-      // Step 1: Create the job first
-      const { data: jobData, error: jobError } = await supabase.functions.invoke("generate-images", {
-        body: {
-          action: "create-job",
-          projectId: project.id,
-          total: prompts.length,
-          aiModel: payload.aiModel,
-        },
-      });
-
-      if (jobError || !jobData?.jobId) {
-        console.error("Failed to create job:", jobError);
-        toast.error("Failed to start generation");
-        setIsGenerating(false);
-        return;
-      }
-
-      const jobId = jobData.jobId;
-      toast.success(`Generation started! Processing ${prompts.length} images...`);
-
-      // Step 2: Process prompts one at a time from the frontend
-      // This runs in the background - we don't await the whole loop
-      (async () => {
-        const MAX_RETRIES = 3;
-        const BASE_DELAY = 1000; // 1 second
-
-        for (let i = 0; i < prompts.length; i++) {
-          let retryCount = 0;
-          let success = false;
-
-          while (retryCount <= MAX_RETRIES && !success) {
-            try {
-              const response = await supabase.functions.invoke("generate-images", {
-                body: {
-                  projectId: project.id,
-                  jobId,
-                  promptIndex: i,
-                  prompt: prompts[i],
-                  total: prompts.length,
-                  aiModel: payload.aiModel,
-                },
-              });
-
-              if (response.error) {
-                console.error(`Error on prompt ${i} (attempt ${retryCount + 1}):`, response.error);
-                retryCount++;
-                if (retryCount <= MAX_RETRIES) {
-                  const delay = BASE_DELAY * Math.pow(2, retryCount - 1); // 1s, 2s, 4s
-                  console.log(`Retrying in ${delay}ms...`);
-                  await new Promise(r => setTimeout(r, delay));
-                  continue;
-                }
-                break; // Max retries exceeded, move to next prompt
-              }
-
-              const result = response.data;
-
-              // Handle rate limiting with exponential backoff
-              if (result?.rateLimited) {
-                retryCount++;
-                const delay = result.retryAfter || BASE_DELAY * Math.pow(2, retryCount);
-                console.log(`Rate limited, waiting ${delay}ms (attempt ${retryCount})...`);
-                await new Promise(r => setTimeout(r, delay));
-                continue;
-              }
-
-              // Handle stop/credits exhausted - break out entirely
-              if (result?.stopped || result?.creditsExhausted) {
-                console.log("Generation stopped or credits exhausted");
-                return; // Exit the entire loop
-              }
-
-              // Handle other failures with retry
-              if (result?.success === false && !result?.skipped) {
-                retryCount++;
-                if (retryCount <= MAX_RETRIES) {
-                  const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
-                  console.log(`Generation failed, retrying in ${delay}ms (attempt ${retryCount})...`);
-                  await new Promise(r => setTimeout(r, delay));
-                  continue;
-                }
-                console.error(`Failed after ${MAX_RETRIES} retries, moving on`);
-                break;
-              }
-
-              // Success!
-              success = true;
-
-              // Small delay between successful requests
-              if (i < prompts.length - 1) {
-                await new Promise(r => setTimeout(r, 500));
-              }
-            } catch (err) {
-              console.error(`Error processing prompt ${i} (attempt ${retryCount + 1}):`, err);
-              retryCount++;
-              if (retryCount <= MAX_RETRIES) {
-                const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
-                console.log(`Exception caught, retrying in ${delay}ms...`);
-                await new Promise(r => setTimeout(r, delay));
-              }
-            }
-          }
-        }
-
-        // Mark job as completed
-        await supabase
-          .from("jobs")
-          .update({
-            status: "completed",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", jobId)
-          .eq("status", "running"); // Only update if still running
-      })();
+      await processGenerationPrompts(prompts, payload.aiModel);
 
     } catch (err) {
       console.error("Generation error:", err);
@@ -353,6 +240,177 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  // Redo generate for specific model + recipe combinations
+  const handleRedoGenerate = async (payload: {
+    modelId: string;
+    recipeVariations: Array<{ recipeId: string; variations: number }>;
+    aiModel: string;
+  }) => {
+    const model = digitalModels.find((m) => m.id === payload.modelId);
+    const refs = modelRefs[payload.modelId] || [];
+    
+    if (!model || refs.length === 0) {
+      toast.error("Model not found or has no reference images");
+      return;
+    }
+
+    const prompts: Array<{
+      modelId: string;
+      modelName: string;
+      recipeId: string;
+      recipeName: string;
+      fullPrompt: string;
+      modelRefUrl: string;
+    }> = [];
+
+    for (const { recipeId, variations } of payload.recipeVariations) {
+      const recipe = recipes.find((r) => r.id === recipeId);
+      if (!recipe) continue;
+
+      const fullPrompt = buildFullPrompt(masterPrompt, recipe.delta_line || "");
+
+      for (let v = 0; v < variations; v++) {
+        prompts.push({
+          modelId: payload.modelId,
+          modelName: model.name,
+          recipeId,
+          recipeName: recipe.name,
+          fullPrompt,
+          modelRefUrl: refs[0].image_url,
+        });
+      }
+    }
+
+    if (prompts.length === 0) {
+      toast.error("No valid prompts to generate");
+      return;
+    }
+
+    toast.info(`Generating ${prompts.length} new expressions...`);
+    await processGenerationPrompts(prompts, payload.aiModel);
+  };
+
+  // Shared generation logic
+  const processGenerationPrompts = async (
+    prompts: Array<{
+      modelId: string;
+      modelName: string;
+      recipeId: string;
+      recipeName: string;
+      fullPrompt: string;
+      modelRefUrl: string;
+    }>,
+    aiModel: string
+  ) => {
+    // Step 1: Create the job first
+    const { data: jobData, error: jobError } = await supabase.functions.invoke("generate-images", {
+      body: {
+        action: "create-job",
+        projectId: project.id,
+        total: prompts.length,
+        aiModel,
+      },
+    });
+
+    if (jobError || !jobData?.jobId) {
+      console.error("Failed to create job:", jobError);
+      toast.error("Failed to start generation");
+      return;
+    }
+
+    const jobId = jobData.jobId;
+    toast.success(`Generation started! Processing ${prompts.length} images...`);
+
+    // Step 2: Process prompts one at a time from the frontend
+    (async () => {
+      const MAX_RETRIES = 3;
+      const BASE_DELAY = 1000;
+
+      for (let i = 0; i < prompts.length; i++) {
+        let retryCount = 0;
+        let success = false;
+
+        while (retryCount <= MAX_RETRIES && !success) {
+          try {
+            const response = await supabase.functions.invoke("generate-images", {
+              body: {
+                projectId: project.id,
+                jobId,
+                promptIndex: i,
+                prompt: prompts[i],
+                total: prompts.length,
+                aiModel,
+              },
+            });
+
+            if (response.error) {
+              console.error(`Error on prompt ${i} (attempt ${retryCount + 1}):`, response.error);
+              retryCount++;
+              if (retryCount <= MAX_RETRIES) {
+                const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
+                console.log(`Retrying in ${delay}ms...`);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+              }
+              break;
+            }
+
+            const result = response.data;
+
+            if (result?.rateLimited) {
+              retryCount++;
+              const delay = result.retryAfter || BASE_DELAY * Math.pow(2, retryCount);
+              console.log(`Rate limited, waiting ${delay}ms (attempt ${retryCount})...`);
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+
+            if (result?.stopped || result?.creditsExhausted) {
+              console.log("Generation stopped or credits exhausted");
+              return;
+            }
+
+            if (result?.success === false && !result?.skipped) {
+              retryCount++;
+              if (retryCount <= MAX_RETRIES) {
+                const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
+                console.log(`Generation failed, retrying in ${delay}ms (attempt ${retryCount})...`);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+              }
+              console.error(`Failed after ${MAX_RETRIES} retries, moving on`);
+              break;
+            }
+
+            success = true;
+
+            if (i < prompts.length - 1) {
+              await new Promise(r => setTimeout(r, 500));
+            }
+          } catch (err) {
+            console.error(`Error processing prompt ${i} (attempt ${retryCount + 1}):`, err);
+            retryCount++;
+            if (retryCount <= MAX_RETRIES) {
+              const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
+              console.log(`Exception caught, retrying in ${delay}ms...`);
+              await new Promise(r => setTimeout(r, delay));
+            }
+          }
+        }
+      }
+
+      // Mark job as completed
+      await supabase
+        .from("jobs")
+        .update({
+          status: "completed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", jobId)
+        .eq("status", "running");
+    })();
   };
 
   return (
@@ -423,6 +481,9 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
             projectId={project.id}
             models={digitalModels}
             modelRefs={modelRefs}
+            recipes={recipes}
+            masterPrompt={masterPrompt}
+            onRedoGenerate={handleRedoGenerate}
           />
         )}
 
