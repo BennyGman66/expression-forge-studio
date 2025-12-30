@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, Play, RefreshCw, Trash2, CheckCircle, XCircle, Clock, ImageIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -28,6 +29,7 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
   // Image preview state
   const [previewImages, setPreviewImages] = useState<FaceScrapeImage[]>([]);
   const [loadingImages, setLoadingImages] = useState(false);
+  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [imageStats, setImageStats] = useState<{ men: number; women: number; unknown: number } | null>(null);
 
   useEffect(() => {
@@ -48,8 +50,9 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
     };
   }, []);
 
-  // Fetch images when a run is selected
+  // Fetch images when a run is selected and clear selection
   useEffect(() => {
+    setSelectedImages(new Set());
     if (selectedRunId) {
       fetchPreviewImages(selectedRunId);
     } else {
@@ -106,6 +109,106 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
     } finally {
       setLoadingImages(false);
     }
+  };
+
+  // Delete single image
+  const handleDeleteImage = async (imageId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    try {
+      const { error } = await supabase
+        .from('face_scrape_images')
+        .delete()
+        .eq('id', imageId);
+
+      if (error) throw error;
+
+      setPreviewImages(prev => prev.filter(img => img.id !== imageId));
+      setSelectedImages(prev => {
+        const next = new Set(prev);
+        next.delete(imageId);
+        return next;
+      });
+      
+      // Update stats
+      if (imageStats) {
+        const deletedImage = previewImages.find(img => img.id === imageId);
+        if (deletedImage) {
+          setImageStats(prev => prev ? {
+            ...prev,
+            [deletedImage.gender]: prev[deletedImage.gender as keyof typeof prev] - 1
+          } : null);
+        }
+      }
+      
+      toast({ title: "Deleted", description: "Image deleted" });
+    } catch (error) {
+      console.error('Error deleting image:', error);
+      toast({ title: "Error", description: "Failed to delete image", variant: "destructive" });
+    }
+  };
+
+  // Bulk delete selected images
+  const handleBulkDelete = async () => {
+    if (selectedImages.size === 0) return;
+    
+    const imageIds = Array.from(selectedImages);
+    
+    try {
+      const { error } = await supabase
+        .from('face_scrape_images')
+        .delete()
+        .in('id', imageIds);
+
+      if (error) throw error;
+
+      setPreviewImages(prev => prev.filter(img => !selectedImages.has(img.id)));
+      setSelectedImages(new Set());
+      
+      // Refresh stats
+      if (selectedRunId) {
+        const { data: statsData } = await supabase
+          .from('face_scrape_images')
+          .select('gender')
+          .eq('scrape_run_id', selectedRunId);
+
+        if (statsData) {
+          const stats = { men: 0, women: 0, unknown: 0 };
+          statsData.forEach((img: { gender: string }) => {
+            if (img.gender === 'men') stats.men++;
+            else if (img.gender === 'women') stats.women++;
+            else stats.unknown++;
+          });
+          setImageStats(stats);
+        }
+      }
+      
+      toast({ title: "Deleted", description: `Deleted ${imageIds.length} images` });
+    } catch (error) {
+      console.error('Error deleting images:', error);
+      toast({ title: "Error", description: "Failed to delete images", variant: "destructive" });
+    }
+  };
+
+  const toggleImageSelection = (imageId: string) => {
+    setSelectedImages(prev => {
+      const next = new Set(prev);
+      if (next.has(imageId)) {
+        next.delete(imageId);
+      } else {
+        next.add(imageId);
+      }
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedImages(new Set(previewImages.map(img => img.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedImages(new Set());
   };
 
   const handleStartScrape = async () => {
@@ -349,19 +452,21 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
       {selectedRunId && (
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <CardTitle className="flex items-center gap-2">
                 <ImageIcon className="h-5 w-5" />
                 Scraped Images {selectedRun && `- ${selectedRun.brand_name}`}
               </CardTitle>
-              {imageStats && (
-                <div className="flex gap-2">
-                  <Badge variant="secondary">Men: {imageStats.men}</Badge>
-                  <Badge variant="secondary">Women: {imageStats.women}</Badge>
-                  <Badge variant="outline">Unknown: {imageStats.unknown}</Badge>
-                  <Badge>Total: {imageStats.men + imageStats.women + imageStats.unknown}</Badge>
-                </div>
-              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                {imageStats && (
+                  <>
+                    <Badge variant="secondary">Men: {imageStats.men}</Badge>
+                    <Badge variant="secondary">Women: {imageStats.women}</Badge>
+                    <Badge variant="outline">Unknown: {imageStats.unknown}</Badge>
+                    <Badge>Total: {imageStats.men + imageStats.women + imageStats.unknown}</Badge>
+                  </>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -379,36 +484,98 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
               </div>
             ) : (
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Showing first {previewImages.length} images. Click on an image to view source.
-                </p>
+                {/* Selection toolbar */}
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-sm text-muted-foreground">
+                    Showing first {previewImages.length} images
+                    {selectedImages.size > 0 && ` · ${selectedImages.size} selected`}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {selectedImages.size > 0 ? (
+                      <>
+                        <Button variant="outline" size="sm" onClick={clearSelection}>
+                          Clear Selection
+                        </Button>
+                        <Button 
+                          variant="destructive" 
+                          size="sm" 
+                          onClick={handleBulkDelete}
+                        >
+                          <Trash2 className="h-4 w-4 mr-1" />
+                          Delete {selectedImages.size}
+                        </Button>
+                      </>
+                    ) : (
+                      <Button variant="outline" size="sm" onClick={selectAll}>
+                        Select All
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                  {previewImages.map((image) => (
-                    <a
-                      key={image.id}
-                      href={image.product_url || image.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group relative aspect-[3/4] bg-muted rounded-lg overflow-hidden border hover:border-primary transition-colors"
-                    >
-                      <img
-                        src={image.source_url}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = '/placeholder.svg';
-                        }}
-                      />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
-                      <Badge 
-                        className="absolute top-1 right-1 text-[10px]"
-                        variant={image.gender === 'women' ? 'default' : image.gender === 'men' ? 'secondary' : 'outline'}
+                  {previewImages.map((image) => {
+                    const isSelected = selectedImages.has(image.id);
+                    return (
+                      <div
+                        key={image.id}
+                        className={`group relative aspect-[3/4] bg-muted rounded-lg overflow-hidden border transition-colors ${
+                          isSelected ? 'border-primary ring-2 ring-primary/50' : 'border-border hover:border-primary'
+                        }`}
                       >
-                        {image.gender}
-                      </Badge>
-                    </a>
-                  ))}
+                        <img
+                          src={image.source_url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = '/placeholder.svg';
+                          }}
+                        />
+                        
+                        {/* Hover overlay with actions */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
+                        
+                        {/* Selection checkbox - top left */}
+                        <div className="absolute top-1 left-1">
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleImageSelection(image.id)}
+                            className="bg-white/90 border-white/50"
+                          />
+                        </div>
+                        
+                        {/* Gender badge - top right */}
+                        <Badge 
+                          className="absolute top-1 right-1 text-[10px]"
+                          variant={image.gender === 'women' ? 'default' : image.gender === 'men' ? 'secondary' : 'outline'}
+                        >
+                          {image.gender}
+                        </Badge>
+                        
+                        {/* Action buttons - bottom */}
+                        <div className="absolute bottom-1 left-1 right-1 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <a
+                            href={image.product_url || image.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] bg-white/90 text-black px-2 py-1 rounded hover:bg-white truncate max-w-[60%]"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            View
+                          </a>
+                          <Button
+                            variant="destructive"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={(e) => handleDeleteImage(image.id, e)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
