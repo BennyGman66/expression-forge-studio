@@ -30,10 +30,10 @@ const apps = [
   {
     id: "face-creator",
     title: "Face Creator",
-    description: "Create and customize digital faces from scratch.",
+    description: "Scrape & segment model faces for reference datasets.",
     icon: Grid3X3,
-    path: null,
-    disabled: true,
+    path: "/face-creator",
+    disabled: false,
   },
 ];
 
