@@ -89,7 +89,7 @@ async function processCrops(
       .from('face_scrape_images')
       .select('*')
       .eq('scrape_run_id', runId)
-      .not('stored_url', 'is', null);
+      .not('source_url', 'is', null);
 
     if (imagesError) {
       throw new Error(`Failed to fetch images: ${imagesError.message}`);
@@ -136,7 +136,7 @@ async function processImage(
   aspectRatio: string,
   lovableApiKey: string
 ) {
-  const imageUrl = image.stored_url;
+  const imageUrl = image.stored_url || image.source_url;
   
   // Call AI to detect face location
   const faceResult = await detectFace(imageUrl, lovableApiKey);
