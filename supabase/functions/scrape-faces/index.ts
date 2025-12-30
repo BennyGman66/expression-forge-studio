@@ -39,8 +39,9 @@ Deno.serve(async (req) => {
 
     if (runError) throw runError;
 
-    // Start background job
-    EdgeRuntime.waitUntil(runScrapeJob(run.id, startUrl, maxProducts, imagesPerProduct, supabase));
+    // Start background job using waitUntil if available, otherwise fire-and-forget
+    const backgroundPromise = runScrapeJob(run.id, startUrl, maxProducts, imagesPerProduct, supabase);
+    (globalThis as any).EdgeRuntime?.waitUntil?.(backgroundPromise);
 
     return new Response(
       JSON.stringify({ success: true, runId: run.id }),
@@ -48,8 +49,9 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error('Error starting face scrape:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

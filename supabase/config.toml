@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.generate-face-crops]
 verify_jwt = false
+
+[functions.classify-all]
+verify_jwt = false
