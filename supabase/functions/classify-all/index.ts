@@ -160,90 +160,108 @@ async function updateJob(supabase: any, jobId: string, type: string, progress: n
 }
 
 async function classifyGender(imageUrl: string, lovableKey?: string, openaiKey?: string): Promise<string> {
-  const apiKey = lovableKey || openaiKey;
-  const baseUrl = lovableKey ? 'https://api.lovable.dev/v1' : 'https://api.openai.com/v1';
-  
-  if (!apiKey) {
+  if (!lovableKey) {
+    console.log('No LOVABLE_API_KEY found, skipping gender classification');
     return 'unknown';
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: lovableKey ? 'google/gemini-2.5-flash' : 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: 'Look at this fashion/clothing image. Is the model wearing the clothes a man or woman? Reply with just one word: "men" or "women". If you cannot determine, reply "unknown".',
-            },
-            {
-              type: 'image_url',
-              image_url: { url: imageUrl },
-            },
-          ],
-        },
-      ],
-      max_tokens: 10,
-    }),
-  });
+  try {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Look at this fashion/clothing image. Is the model wearing the clothes a man or woman? Reply with just one word: "men" or "women". If you cannot determine, reply "unknown".',
+              },
+              {
+                type: 'image_url',
+                image_url: { url: imageUrl },
+              },
+            ],
+          },
+        ],
+        max_tokens: 10,
+      }),
+    });
 
-  const data = await response.json();
-  const answer = data.choices?.[0]?.message?.content?.toLowerCase().trim() || 'unknown';
-  
-  if (answer.includes('men') && !answer.includes('women')) return 'men';
-  if (answer.includes('women') || answer.includes('woman')) return 'women';
-  return 'unknown';
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Gender classification API error:', response.status, errorText.substring(0, 200));
+      return 'unknown';
+    }
+
+    const data = await response.json();
+    const answer = data.choices?.[0]?.message?.content?.toLowerCase().trim() || 'unknown';
+    
+    if (answer.includes('men') && !answer.includes('women')) return 'men';
+    if (answer.includes('women') || answer.includes('woman')) return 'women';
+    return 'unknown';
+  } catch (error) {
+    console.error('Gender classification error:', error);
+    return 'unknown';
+  }
 }
 
 async function classifyView(imageUrl: string, lovableKey?: string, openaiKey?: string): Promise<string> {
-  const apiKey = lovableKey || openaiKey;
-  const baseUrl = lovableKey ? 'https://api.lovable.dev/v1' : 'https://api.openai.com/v1';
-  
-  if (!apiKey) {
+  if (!lovableKey) {
+    console.log('No LOVABLE_API_KEY found, skipping view classification');
     return 'unknown';
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: lovableKey ? 'google/gemini-2.5-flash' : 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: 'Look at this fashion model image. From what angle is the model photographed? Reply with just one word: "front" (facing camera), "side" (profile view), or "back" (back to camera). If unclear, reply "unknown".',
-            },
-            {
-              type: 'image_url',
-              image_url: { url: imageUrl },
-            },
-          ],
-        },
-      ],
-      max_tokens: 10,
-    }),
-  });
+  try {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Look at this fashion model image. From what angle is the model photographed? Reply with just one word: "front" (facing camera), "side" (profile view), or "back" (back to camera). If unclear, reply "unknown".',
+              },
+              {
+                type: 'image_url',
+                image_url: { url: imageUrl },
+              },
+            ],
+          },
+        ],
+        max_tokens: 10,
+      }),
+    });
 
-  const data = await response.json();
-  const answer = data.choices?.[0]?.message?.content?.toLowerCase().trim() || 'unknown';
-  
-  if (answer.includes('front')) return 'front';
-  if (answer.includes('side')) return 'side';
-  if (answer.includes('back')) return 'back';
-  return 'unknown';
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('View classification API error:', response.status, errorText.substring(0, 200));
+      return 'unknown';
+    }
+
+    const data = await response.json();
+    const answer = data.choices?.[0]?.message?.content?.toLowerCase().trim() || 'unknown';
+    
+    if (answer.includes('front')) return 'front';
+    if (answer.includes('side')) return 'side';
+    if (answer.includes('back')) return 'back';
+    return 'unknown';
+  } catch (error) {
+    console.error('View classification error:', error);
+    return 'unknown';
+  }
 }
 
 async function createIdentityClusters(
