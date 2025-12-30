@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, DragEvent } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { RefreshCw, CheckCircle, XCircle, Clock, Loader2, Image, Play, AlertTriangle } from "lucide-react";
+import { RefreshCw, CheckCircle, XCircle, Clock, Loader2, Image, Play, AlertTriangle, X, GripVertical } from "lucide-react";
 import { formatDistanceToNow, differenceInMinutes } from "date-fns";
 import { toast } from "sonner";
 import { PoseReviewPanel } from "./PoseReviewPanel";
@@ -43,8 +43,11 @@ interface GenerationTask {
 export function PoseReviewsTab() {
   const [jobs, setJobs] = useState<GenerationJob[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
   const [resumingJobId, setResumingJobId] = useState<string | null>(null);
+  const [groupedJobIds, setGroupedJobIds] = useState<string[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isReviewMode, setIsReviewMode] = useState(false);
 
   useEffect(() => {
     fetchJobs();
@@ -361,24 +364,140 @@ export function PoseReviewsTab() {
     }
   };
 
-  // If a job is selected, show the review panel
-  if (selectedJobId) {
+  // Drag and drop handlers
+  const handleDragStart = (e: DragEvent<HTMLDivElement>, jobId: string) => {
+    e.dataTransfer.setData("jobId", jobId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const jobId = e.dataTransfer.getData("jobId");
+    if (jobId && !groupedJobIds.includes(jobId)) {
+      setGroupedJobIds(prev => [...prev, jobId]);
+    }
+  };
+
+  const removeFromGroup = (jobId: string) => {
+    setGroupedJobIds(prev => prev.filter(id => id !== jobId));
+  };
+
+  const getGroupedJobInfo = (jobId: string) => {
+    return jobs.find(j => j.id === jobId);
+  };
+
+  // If reviewing grouped jobs, show the review panel with multiple job IDs
+  if (isReviewMode && groupedJobIds.length > 0) {
     return (
       <PoseReviewPanel
-        jobId={selectedJobId}
-        onBack={() => setSelectedJobId(null)}
+        jobIds={groupedJobIds}
+        onBack={() => {
+          setIsReviewMode(false);
+        }}
       />
     );
   }
 
+  // If a single job is selected (from individual "Review & Select" button)
+  if (selectedJobIds.length === 1) {
+    return (
+      <PoseReviewPanel
+        jobIds={selectedJobIds}
+        onBack={() => setSelectedJobIds([])}
+      />
+    );
+  }
+
+  const completedJobs = jobs.filter(j => j.status === "completed" && (j.generation_count || 0) > 0);
+
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Drop Zone */}
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`border-2 border-dashed rounded-lg p-6 transition-all ${
+          isDragOver 
+            ? "border-primary bg-primary/10" 
+            : groupedJobIds.length > 0 
+              ? "border-primary/50 bg-muted/30" 
+              : "border-muted-foreground/30 bg-muted/10"
+        }`}
+      >
+        {groupedJobIds.length === 0 ? (
+          <div className="text-center text-muted-foreground">
+            <GripVertical className="w-8 h-8 mx-auto mb-2 opacity-50" />
+            <p className="font-medium">Drag completed jobs here to group them</p>
+            <p className="text-sm mt-1">Create a unified review across multiple looks</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {groupedJobIds.map(jobId => {
+                const job = getGroupedJobInfo(jobId);
+                return (
+                  <Badge 
+                    key={jobId} 
+                    variant="secondary" 
+                    className="px-3 py-1.5 text-sm flex items-center gap-2"
+                  >
+                    <span>{job?.brand_name} / {job?.talent_name}</span>
+                    {job?.look_name && <span className="text-muted-foreground">- {job.look_name}</span>}
+                    <button
+                      onClick={() => removeFromGroup(jobId)}
+                      className="ml-1 hover:text-destructive transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </Badge>
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                {groupedJobIds.length} job{groupedJobIds.length > 1 ? "s" : ""} selected • 
+                {" "}{groupedJobIds.reduce((sum, id) => sum + (getGroupedJobInfo(id)?.generation_count || 0), 0)} total images
+              </p>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setGroupedJobIds([])}
+                >
+                  Clear All
+                </Button>
+                <Button 
+                  size="sm"
+                  onClick={() => setIsReviewMode(true)}
+                  className="gap-2"
+                >
+                  Review {groupedJobIds.length} Job{groupedJobIds.length > 1 ? "s" : ""} Together
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-serif">Past Generation Jobs</h2>
           <p className="text-muted-foreground mt-1">
-            Review and select poses from completed generation jobs
+            Drag completed jobs to group them, or review individually
           </p>
         </div>
         <Button variant="outline" onClick={fetchJobs} className="gap-2">
@@ -413,16 +532,33 @@ export function PoseReviewsTab() {
             const isStale = isJobStale(job);
             const canResume = isStale || job.status === "failed";
             const isResuming = resumingJobId === job.id;
+            const isCompleted = job.status === "completed" && (job.generation_count || 0) > 0;
+            const isInGroup = groupedJobIds.includes(job.id);
             
             return (
-              <Card key={job.id} className={`p-4 hover:bg-muted/30 transition-colors ${isStale ? 'border-amber-500/50' : ''}`}>
+              <Card 
+                key={job.id} 
+                className={`p-4 transition-colors ${isStale ? 'border-amber-500/50' : ''} ${isInGroup ? 'border-primary bg-primary/5' : 'hover:bg-muted/30'}`}
+                draggable={isCompleted && !isInGroup}
+                onDragStart={(e) => handleDragStart(e, job.id)}
+              >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
+                    {isCompleted && !isInGroup && (
+                      <div className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground transition-colors">
+                        <GripVertical className="w-5 h-5" />
+                      </div>
+                    )}
                     {getStatusIcon(job)}
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-semibold">{job.brand_name}</span>
                         {getStatusBadge(job)}
+                        {isInGroup && (
+                          <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30">
+                            In Group
+                          </Badge>
+                        )}
                       </div>
                       <div className="text-sm text-muted-foreground mt-1">
                         {job.talent_name}
@@ -465,12 +601,25 @@ export function PoseReviewsTab() {
                     )}
                     
                     {/* Review button for completed jobs with images */}
-                    {job.status === "completed" && job.generation_count > 0 && (
+                    {isCompleted && !isInGroup && (
                       <Button 
-                        onClick={() => setSelectedJobId(job.id)}
+                        onClick={() => setSelectedJobIds([job.id])}
                         className="gap-2"
                       >
                         Review & Select
+                      </Button>
+                    )}
+
+                    {/* Remove from group button */}
+                    {isInGroup && (
+                      <Button 
+                        variant="outline"
+                        size="sm"
+                        onClick={() => removeFromGroup(job.id)}
+                        className="gap-2"
+                      >
+                        <X className="w-4 h-4" />
+                        Remove
                       </Button>
                     )}
                     
