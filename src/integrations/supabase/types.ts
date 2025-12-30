@@ -680,6 +680,162 @@ export type Database = {
           },
         ]
       }
+      face_pairing_jobs: {
+        Row: {
+          attempts_per_pairing: number | null
+          created_at: string
+          id: string
+          logs: Json | null
+          name: string
+          pairing_mode: string
+          progress: number | null
+          scrape_run_id: string | null
+          status: string
+          total_pairings: number | null
+          updated_at: string
+        }
+        Insert: {
+          attempts_per_pairing?: number | null
+          created_at?: string
+          id?: string
+          logs?: Json | null
+          name?: string
+          pairing_mode?: string
+          progress?: number | null
+          scrape_run_id?: string | null
+          status?: string
+          total_pairings?: number | null
+          updated_at?: string
+        }
+        Update: {
+          attempts_per_pairing?: number | null
+          created_at?: string
+          id?: string
+          logs?: Json | null
+          name?: string
+          pairing_mode?: string
+          progress?: number | null
+          scrape_run_id?: string | null
+          status?: string
+          total_pairings?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_pairing_jobs_scrape_run_id_fkey"
+            columns: ["scrape_run_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      face_pairing_outputs: {
+        Row: {
+          attempt_index: number
+          created_at: string
+          error_message: string | null
+          final_prompt: string | null
+          id: string
+          pairing_id: string
+          status: string
+          stored_url: string | null
+        }
+        Insert: {
+          attempt_index?: number
+          created_at?: string
+          error_message?: string | null
+          final_prompt?: string | null
+          id?: string
+          pairing_id: string
+          status?: string
+          stored_url?: string | null
+        }
+        Update: {
+          attempt_index?: number
+          created_at?: string
+          error_message?: string | null
+          final_prompt?: string | null
+          id?: string
+          pairing_id?: string
+          status?: string
+          stored_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_pairing_outputs_pairing_id_fkey"
+            columns: ["pairing_id"]
+            isOneToOne: false
+            referencedRelation: "face_pairings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      face_pairings: {
+        Row: {
+          created_at: string
+          cropped_face_id: string
+          id: string
+          job_id: string
+          outfit_description: string | null
+          outfit_description_status: string | null
+          status: string
+          talent_id: string
+          talent_image_id: string
+        }
+        Insert: {
+          created_at?: string
+          cropped_face_id: string
+          id?: string
+          job_id: string
+          outfit_description?: string | null
+          outfit_description_status?: string | null
+          status?: string
+          talent_id: string
+          talent_image_id: string
+        }
+        Update: {
+          created_at?: string
+          cropped_face_id?: string
+          id?: string
+          job_id?: string
+          outfit_description?: string | null
+          outfit_description_status?: string | null
+          status?: string
+          talent_id?: string
+          talent_image_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_pairings_cropped_face_id_fkey"
+            columns: ["cropped_face_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_pairings_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "face_pairing_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_pairings_talent_id_fkey"
+            columns: ["talent_id"]
+            isOneToOne: false
+            referencedRelation: "talents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_pairings_talent_image_id_fkey"
+            columns: ["talent_image_id"]
+            isOneToOne: false
+            referencedRelation: "talent_images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       face_scrape_images: {
         Row: {
           created_at: string
