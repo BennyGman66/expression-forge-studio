@@ -35,29 +35,45 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const selectedImage = images[selectedIndex];
 
   useEffect(() => {
-    if (runId) {
-      fetchImagesWithCrops();
-      fetchJob();
+    if (!runId) return;
+    
+    fetchImagesWithCrops();
+    fetchJob();
 
-      const channel = supabase
-        .channel('crop-editor')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'face_jobs', filter: `scrape_run_id=eq.${runId}` },
-          () => fetchJob()
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'face_crops' },
-          () => fetchImagesWithCrops()
-        )
-        .subscribe();
+    const channel = supabase
+      .channel('crop-editor')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'face_jobs' },
+        (payload) => {
+          if ((payload.new as any)?.scrape_run_id === runId) {
+            fetchJob();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'face_crops' },
+        () => fetchImagesWithCrops()
+      )
+      .subscribe();
 
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    }
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [runId]);
+
+  // Polling fallback when generating - catches updates if realtime fails
+  useEffect(() => {
+    if (!generating || !runId) return;
+    
+    const interval = setInterval(() => {
+      fetchJob();
+      fetchImagesWithCrops();
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [generating, runId]);
 
   useEffect(() => {
     if (selectedImage?.crop) {
@@ -119,7 +135,12 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
 
     if (data) {
       setJob(data as unknown as FaceJob);
-      setGenerating(data.status === 'running');
+      // Reset generating when job is no longer active
+      if (data.status === 'completed' || data.status === 'failed') {
+        setGenerating(false);
+      } else if (data.status === 'running' || data.status === 'pending') {
+        setGenerating(true);
+      }
     }
   };
 
