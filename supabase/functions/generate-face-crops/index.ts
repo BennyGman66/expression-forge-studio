@@ -9,15 +9,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface FaceDetectionResult {
-  faceDetected: boolean;
-  faceCenterX: number;
-  faceCenterY: number;
-  suggestedCropX: number;
-  suggestedCropY: number;
-  suggestedCropWidth: number;
-  suggestedCropHeight: number;
-}
+// Simplified detection types for fashion images
+type DetectionType = 'FACE' | 'HEAD' | 'NONE';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -119,8 +112,8 @@ async function processCrops(
         await addLog(supabase, jobId, `Failed to process image: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
 
-      // Small delay to avoid rate limits
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Reduced delay - faster since simpler AI prompt
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     const finalStatus = failed === images.length ? 'failed' : 'completed';
@@ -140,20 +133,14 @@ async function processImage(
   lovableApiKey: string
 ) {
   const imageUrl = image.stored_url || image.source_url;
-  console.log(`[generate-face-crops] Processing image ${image.id} with URL: ${imageUrl?.substring(0, 60)}...`);
+  console.log(`[generate-face-crops] Processing image ${image.id}`);
   
-  // Call AI to detect face location
-  const faceResult = await detectFace(imageUrl, lovableApiKey);
+  // Quick AI check - just classify the image
+  const detection = await quickDetectPerson(imageUrl, lovableApiKey);
+  console.log(`[generate-face-crops] Detection result for ${image.id}: ${detection}`);
   
-  if (!faceResult.faceDetected) {
-    console.log(`No face detected in image ${image.id}`);
-    // Still create a crop record with default center crop
-    await createDefaultCrop(supabase, image.id, aspectRatio);
-    return;
-  }
-
-  // Calculate crop coordinates based on face detection and aspect ratio
-  const cropData = calculateCrop(faceResult, aspectRatio);
+  // Get smart fashion crop based on detection
+  const cropData = getFashionCrop(detection, aspectRatio);
 
   // Check if crop already exists
   const { data: existingCrop } = await supabase
@@ -192,24 +179,10 @@ async function processImage(
   }
 }
 
-async function detectFace(imageUrl: string, apiKey: string): Promise<FaceDetectionResult> {
-  const prompt = `Analyze this fashion/product image and locate the model's face.
-Return the face position as percentages of image dimensions (0-100).
-Also return the optimal crop rectangle for a portrait headshot that includes the face with proper framing.
-
-Return ONLY valid JSON in this exact format, no other text:
-{
-  "faceDetected": true,
-  "faceCenterX": 50,
-  "faceCenterY": 25,
-  "suggestedCropX": 25,
-  "suggestedCropY": 5,
-  "suggestedCropWidth": 50,
-  "suggestedCropHeight": 60
-}
-
-If no face is detected, return:
-{"faceDetected": false, "faceCenterX": 50, "faceCenterY": 50, "suggestedCropX": 25, "suggestedCropY": 10, "suggestedCropWidth": 50, "suggestedCropHeight": 80}`;
+// Simplified AI prompt - just classify the image quickly
+async function quickDetectPerson(imageUrl: string, apiKey: string): Promise<DetectionType> {
+  const prompt = `Look at this fashion product image. Is there a person's face or back of head visible in the TOP PORTION of the image?
+Reply with ONLY one word: "FACE" or "HEAD" or "NONE"`;
 
   try {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -219,7 +192,7 @@ If no face is detected, return:
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'google/gemini-2.5-flash-lite', // Faster model for simple classification
         messages: [
           {
             role: 'user',
@@ -235,110 +208,43 @@ If no face is detected, return:
     if (!response.ok) {
       const errorText = await response.text();
       console.error('AI API error:', response.status, errorText);
-      throw new Error(`AI API error: ${response.status}`);
+      return 'NONE';
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
+    const content = (data.choices?.[0]?.message?.content || '').trim().toUpperCase();
     
-    // Parse JSON from response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]) as FaceDetectionResult;
-    }
-
-    throw new Error('No valid JSON in AI response');
+    console.log(`[generate-face-crops] AI response: "${content}"`);
+    
+    // Parse the simple response
+    if (content.includes('FACE')) return 'FACE';
+    if (content.includes('HEAD')) return 'HEAD';
+    return 'NONE';
   } catch (error) {
-    console.error('Face detection error:', error);
-    // Return default center detection on error
-    return {
-      faceDetected: false,
-      faceCenterX: 50,
-      faceCenterY: 30,
-      suggestedCropX: 25,
-      suggestedCropY: 10,
-      suggestedCropWidth: 50,
-      suggestedCropHeight: 80
-    };
+    console.error('Quick detection error:', error);
+    return 'NONE';
   }
 }
 
-function calculateCrop(faceResult: FaceDetectionResult, aspectRatio: string): { x: number; y: number; width: number; height: number } {
-  // Use suggested crop from AI, adjusted for aspect ratio
-  let width = faceResult.suggestedCropWidth;
-  let height = faceResult.suggestedCropHeight;
-  
-  // Adjust for aspect ratio
-  if (aspectRatio === '1:1') {
-    // Square: use the larger dimension
-    const size = Math.max(width, height);
-    width = size;
-    height = size;
-  } else if (aspectRatio === '4:5') {
-    // Portrait: height should be 1.25x width
-    if (height < width * 1.25) {
-      height = width * 1.25;
+// Smart default crops for fashion images based on detection type
+function getFashionCrop(detection: DetectionType, aspectRatio: string): { x: number; y: number; width: number; height: number } {
+  // Fashion images: subject typically centered, head at top
+  if (detection === 'FACE' || detection === 'HEAD') {
+    if (aspectRatio === '1:1') {
+      // Top center square - capture head and shoulders
+      return { x: 20, y: 0, width: 60, height: 60 };
     } else {
-      width = height / 1.25;
+      // 4:5 portrait - top center, more vertical space for shoulders
+      return { x: 15, y: 0, width: 70, height: 87 }; // 70 * 1.25 ≈ 87.5
     }
   }
   
-  // Center the crop on the face
-  let x = faceResult.faceCenterX - width / 2;
-  let y = faceResult.faceCenterY - height / 3; // Face in upper third
-  
-  // Clamp to image bounds
-  x = Math.max(0, Math.min(100 - width, x));
-  y = Math.max(0, Math.min(100 - height, y));
-  
-  // Ensure dimensions don't exceed bounds
-  width = Math.min(width, 100 - x);
-  height = Math.min(height, 100 - y);
-  
-  return {
-    x: Math.round(x),
-    y: Math.round(y),
-    width: Math.round(width),
-    height: Math.round(height)
-  };
-}
-
-async function createDefaultCrop(supabase: any, imageId: string, aspectRatio: string) {
-  const { data: existingCrop } = await supabase
-    .from('face_crops')
-    .select('id')
-    .eq('scrape_image_id', imageId)
-    .single();
-
-  const cropData = aspectRatio === '1:1'
-    ? { x: 25, y: 10, width: 50, height: 50 }
-    : { x: 25, y: 5, width: 50, height: 62 }; // 4:5 ratio
-
-  if (existingCrop) {
-    await supabase
-      .from('face_crops')
-      .update({
-        crop_x: cropData.x,
-        crop_y: cropData.y,
-        crop_width: cropData.width,
-        crop_height: cropData.height,
-        aspect_ratio: aspectRatio,
-        is_auto: true,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', existingCrop.id);
+  // No person detected - center crop
+  if (aspectRatio === '1:1') {
+    return { x: 20, y: 20, width: 60, height: 60 };
   } else {
-    await supabase
-      .from('face_crops')
-      .insert({
-        scrape_image_id: imageId,
-        crop_x: cropData.x,
-        crop_y: cropData.y,
-        crop_width: cropData.width,
-        crop_height: cropData.height,
-        aspect_ratio: aspectRatio,
-        is_auto: true
-      });
+    // 4:5 ratio
+    return { x: 15, y: 10, width: 70, height: 87 };
   }
 }
 
