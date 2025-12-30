@@ -16,7 +16,10 @@ import {
   ChevronRight,
   X,
   HelpCircle,
-  ArrowRight
+  ArrowRight,
+  Download,
+  Link,
+  Unlink
 } from "lucide-react";
 import {
   Select,
@@ -43,6 +46,12 @@ interface ClassificationPanelProps {
   runId: string | null;
 }
 
+interface Talent {
+  id: string;
+  name: string;
+  gender: string | null;
+}
+
 interface Identity {
   id: string;
   name: string;
@@ -50,6 +59,8 @@ interface Identity {
   image_count: number;
   representative_image_id: string | null;
   representative_image_url?: string | null;
+  talent_id?: string | null;
+  talent?: Talent | null;
 }
 
 interface IdentityImage {
@@ -95,6 +106,12 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   // Move image dialog
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [selectedImageToMove, setSelectedImageToMove] = useState<UnclassifiedImage | null>(null);
+  
+  // Link talent dialog
+  const [linkTalentDialogOpen, setLinkTalentDialogOpen] = useState(false);
+  const [selectedIdentityForLink, setSelectedIdentityForLink] = useState<Identity | null>(null);
+  const [talents, setTalents] = useState<Talent[]>([]);
+  const [talentsLoading, setTalentsLoading] = useState(false);
 
   // Fetch identities with thumbnails when runId or gender changes
   useEffect(() => {
@@ -110,7 +127,8 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
         .from('face_identities')
         .select(`
           *,
-          representative_image:face_scrape_images!face_identities_representative_image_id_fkey(stored_url, source_url)
+          representative_image:face_scrape_images!face_identities_representative_image_id_fkey(stored_url, source_url),
+          talent:talents(id, name, gender)
         `)
         .eq('scrape_run_id', runId)
         .order('image_count', { ascending: false });
@@ -127,6 +145,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
         const identitiesWithUrls = (data || []).map((identity: any) => ({
           ...identity,
           representative_image_url: identity.representative_image?.stored_url || identity.representative_image?.source_url || null,
+          talent: identity.talent || null,
         }));
         setIdentities(identitiesWithUrls);
         if (identitiesWithUrls.length > 0 && !selectedIdentity && !showUnclassified) {
@@ -138,6 +157,26 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
 
     fetchIdentities();
   }, [runId, selectedGender]);
+
+  // Fetch talents for linking
+  useEffect(() => {
+    async function fetchTalents() {
+      setTalentsLoading(true);
+      const { data, error } = await supabase
+        .from('talents')
+        .select('id, name, gender')
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching talents:', error);
+      } else {
+        setTalents(data || []);
+      }
+      setTalentsLoading(false);
+    }
+
+    fetchTalents();
+  }, []);
 
   // Fetch unclassified images
   useEffect(() => {
@@ -337,6 +376,76 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     setSelectedIdentity(identityId);
   };
 
+  const handleOpenLinkDialog = (e: React.MouseEvent, identity: Identity) => {
+    e.stopPropagation();
+    setSelectedIdentityForLink(identity);
+    setLinkTalentDialogOpen(true);
+  };
+
+  const handleLinkTalent = async (talentId: string) => {
+    if (!selectedIdentityForLink) return;
+
+    const { error } = await supabase
+      .from('face_identities')
+      .update({ talent_id: talentId } as any)
+      .eq('id', selectedIdentityForLink.id);
+
+    if (error) {
+      toast({ title: "Failed to link talent", variant: "destructive" });
+    } else {
+      const linkedTalent = talents.find(t => t.id === talentId);
+      setIdentities(prev =>
+        prev.map(id => id.id === selectedIdentityForLink.id 
+          ? { ...id, talent_id: talentId, talent: linkedTalent || null } 
+          : id
+        )
+      );
+      toast({ title: "Talent linked successfully" });
+    }
+
+    setLinkTalentDialogOpen(false);
+    setSelectedIdentityForLink(null);
+  };
+
+  const handleUnlinkTalent = async (e: React.MouseEvent, identity: Identity) => {
+    e.stopPropagation();
+
+    const { error } = await supabase
+      .from('face_identities')
+      .update({ talent_id: null } as any)
+      .eq('id', identity.id);
+
+    if (error) {
+      toast({ title: "Failed to unlink talent", variant: "destructive" });
+    } else {
+      setIdentities(prev =>
+        prev.map(id => id.id === identity.id 
+          ? { ...id, talent_id: null, talent: null } 
+          : id
+        )
+      );
+      toast({ title: "Talent unlinked" });
+    }
+  };
+
+  const handleDownloadImage = async (e: React.MouseEvent, imageUrl: string) => {
+    e.stopPropagation();
+    try {
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `image-${Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({ title: "Failed to download image", variant: "destructive" });
+    }
+  };
+
   const filteredImages = viewFilter === 'all' 
     ? identityImages 
     : identityImages.filter(img => img.view === viewFilter);
@@ -489,35 +598,66 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                     </div>
                   ) : (
                     identities.map(identity => (
-                      <button
+                      <div
                         key={identity.id}
                         onClick={() => handleSelectIdentity(identity.id)}
-                        className={`w-full px-4 py-3 text-left hover:bg-muted/50 flex items-center justify-between ${
+                        className={`w-full px-4 py-3 text-left hover:bg-muted/50 cursor-pointer ${
                           selectedIdentity === identity.id && !showUnclassified ? 'bg-muted' : ''
                         }`}
                       >
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-8 w-8">
-                            {identity.representative_image_url ? (
-                              <AvatarImage 
-                                src={identity.representative_image_url} 
-                                alt={identity.name}
-                                className="object-cover"
-                              />
-                            ) : null}
-                            <AvatarFallback>
-                              <User className="h-4 w-4" />
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium">{identity.name}</span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-8 w-8">
+                              {identity.representative_image_url ? (
+                                <AvatarImage 
+                                  src={identity.representative_image_url} 
+                                  alt={identity.name}
+                                  className="object-cover"
+                                />
+                              ) : null}
+                              <AvatarFallback>
+                                <User className="h-4 w-4" />
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{identity.name}</span>
+                              {identity.talent && (
+                                <span className="text-xs text-primary flex items-center gap-1">
+                                  <Link className="h-3 w-3" />
+                                  {identity.talent.name}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {identity.talent ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={(e) => handleUnlinkTalent(e, identity)}
+                                title="Unlink talent"
+                              >
+                                <Unlink className="h-3 w-3" />
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={(e) => handleOpenLinkDialog(e, identity)}
+                                title="Link to talent"
+                              >
+                                <Link className="h-3 w-3" />
+                              </Button>
+                            )}
+                            <Badge variant="secondary">{identity.image_count}</Badge>
+                            {selectedIdentity === identity.id && !showUnclassified && (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">{identity.image_count}</Badge>
-                          {selectedIdentity === identity.id && !showUnclassified && (
-                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                          )}
-                        </div>
-                      </button>
+                      </div>
                     ))
                   )}
                 </div>
@@ -568,30 +708,42 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                  {unclassifiedImages.map(image => (
-                    <div 
-                      key={image.id} 
-                      className="relative group rounded-lg overflow-hidden border border-border bg-muted/30 cursor-pointer"
-                      onClick={() => {
-                        setSelectedImageToMove(image);
-                        setMoveDialogOpen(true);
-                      }}
-                    >
-                      <img
-                        src={image.stored_url || image.source_url}
-                        alt=""
-                        className="w-full aspect-[3/4] object-cover"
-                        loading="lazy"
-                      />
-                      
-                      {/* Move indicator */}
-                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <div className="bg-background/90 rounded-full p-2">
-                          <ArrowRight className="h-5 w-5 text-foreground" />
+                  {unclassifiedImages.map(image => {
+                    const imageUrl = image.stored_url || image.source_url;
+                    return (
+                      <div 
+                        key={image.id} 
+                        className="relative group rounded-lg overflow-hidden border border-border bg-muted/30 cursor-pointer"
+                        onClick={() => {
+                          setSelectedImageToMove(image);
+                          setMoveDialogOpen(true);
+                        }}
+                      >
+                        <img
+                          src={imageUrl}
+                          alt=""
+                          className="w-full aspect-[3/4] object-cover"
+                          loading="lazy"
+                        />
+                        
+                        {/* Download button */}
+                        <button
+                          onClick={(e) => handleDownloadImage(e, imageUrl)}
+                          className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background/90 rounded-full p-1.5 hover:bg-background"
+                          title="Download image"
+                        >
+                          <Download className="h-4 w-4" />
+                        </button>
+                        
+                        {/* Move indicator */}
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                          <div className="bg-background/90 rounded-full p-2">
+                            <ArrowRight className="h-5 w-5 text-foreground" />
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )
             ) : !selectedIdentity ? (
@@ -604,56 +756,68 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                {filteredImages.map(image => (
-                  <div 
-                    key={image.id} 
-                    className="relative group rounded-lg overflow-hidden border border-border bg-muted/30"
-                  >
-                    <img
-                      src={image.scrape_image?.stored_url || image.scrape_image?.source_url || ''}
-                      alt=""
-                      className="w-full aspect-[3/4] object-cover"
-                      loading="lazy"
-                    />
-                    
-                    {/* View Badge */}
-                    <div className="absolute bottom-2 left-2">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button 
-                            size="sm" 
-                            variant="secondary"
-                            className="h-7 text-xs capitalize"
-                          >
-                            {image.view || 'unknown'}
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent>
-                          <DropdownMenuItem onClick={() => handleViewChange(image.id, 'front')}>
-                            Front
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleViewChange(image.id, 'side')}>
-                            Side
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleViewChange(image.id, 'back')}>
-                            Back
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleViewChange(image.id, 'unknown')}>
-                            Unknown
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-
-                    {/* Remove Button */}
-                    <button
-                      onClick={() => handleRemoveImage(image.id)}
-                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-destructive text-destructive-foreground rounded-full p-1"
+                {filteredImages.map(image => {
+                  const imageUrl = image.scrape_image?.stored_url || image.scrape_image?.source_url || '';
+                  return (
+                    <div 
+                      key={image.id} 
+                      className="relative group rounded-lg overflow-hidden border border-border bg-muted/30"
                     >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
+                      <img
+                        src={imageUrl}
+                        alt=""
+                        className="w-full aspect-[3/4] object-cover"
+                        loading="lazy"
+                      />
+                      
+                      {/* View Badge */}
+                      <div className="absolute bottom-2 left-2">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button 
+                              size="sm" 
+                              variant="secondary"
+                              className="h-7 text-xs capitalize"
+                            >
+                              {image.view || 'unknown'}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            <DropdownMenuItem onClick={() => handleViewChange(image.id, 'front')}>
+                              Front
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleViewChange(image.id, 'side')}>
+                              Side
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleViewChange(image.id, 'back')}>
+                              Back
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleViewChange(image.id, 'unknown')}>
+                              Unknown
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+
+                      {/* Download Button */}
+                      <button
+                        onClick={(e) => handleDownloadImage(e, imageUrl)}
+                        className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background/90 rounded-full p-1.5 hover:bg-background"
+                        title="Download image"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+
+                      {/* Remove Button */}
+                      <button
+                        onClick={() => handleRemoveImage(image.id)}
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-destructive text-destructive-foreground rounded-full p-1"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </CardContent>
@@ -696,6 +860,55 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                 </button>
               ))}
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Link Talent Dialog */}
+      <Dialog open={linkTalentDialogOpen} onOpenChange={setLinkTalentDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Link to Digital Talent</DialogTitle>
+            <DialogDescription>
+              Select a digital talent to link with "{selectedIdentityForLink?.name}".
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[400px] overflow-y-auto">
+            {talentsLoading ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map(i => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : talents.length === 0 ? (
+              <div className="py-8 text-center text-muted-foreground">
+                No talents found. Create talents in the Avatar Repose workflow first.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {talents.map(talent => (
+                  <button
+                    key={talent.id}
+                    onClick={() => handleLinkTalent(talent.id)}
+                    className="w-full px-4 py-3 text-left hover:bg-muted/50 rounded-lg flex items-center justify-between border border-border"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback>
+                          <User className="h-4 w-4" />
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{talent.name}</span>
+                        {talent.gender && (
+                          <span className="text-xs text-muted-foreground capitalize">{talent.gender}</span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
