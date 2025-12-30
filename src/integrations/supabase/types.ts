@@ -315,6 +315,65 @@ export type Database = {
           },
         ]
       }
+      digital_talent_assets: {
+        Row: {
+          asset_type: string
+          created_at: string
+          id: string
+          metadata: Json | null
+          stored_url: string
+          talent_id: string
+        }
+        Insert: {
+          asset_type?: string
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          stored_url: string
+          talent_id: string
+        }
+        Update: {
+          asset_type?: string
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          stored_url?: string
+          talent_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "digital_talent_assets_talent_id_fkey"
+            columns: ["talent_id"]
+            isOneToOne: false
+            referencedRelation: "digital_talents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      digital_talents: {
+        Row: {
+          created_at: string
+          front_face_url: string | null
+          gender: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          front_face_url?: string | null
+          gender?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          front_face_url?: string | null
+          gender?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
       expression_map_exports: {
         Row: {
           created_at: string
@@ -775,6 +834,7 @@ export type Database = {
         Row: {
           created_at: string
           cropped_face_id: string
+          digital_talent_id: string | null
           id: string
           job_id: string
           outfit_description: string | null
@@ -786,6 +846,7 @@ export type Database = {
         Insert: {
           created_at?: string
           cropped_face_id: string
+          digital_talent_id?: string | null
           id?: string
           job_id: string
           outfit_description?: string | null
@@ -797,6 +858,7 @@ export type Database = {
         Update: {
           created_at?: string
           cropped_face_id?: string
+          digital_talent_id?: string | null
           id?: string
           job_id?: string
           outfit_description?: string | null
@@ -811,6 +873,13 @@ export type Database = {
             columns: ["cropped_face_id"]
             isOneToOne: false
             referencedRelation: "face_scrape_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_pairings_digital_talent_id_fkey"
+            columns: ["digital_talent_id"]
+            isOneToOne: false
+            referencedRelation: "digital_talents"
             referencedColumns: ["id"]
           },
           {
@@ -1401,6 +1470,7 @@ export type Database = {
       talent_looks: {
         Row: {
           created_at: string
+          digital_talent_id: string | null
           id: string
           name: string
           product_type: string | null
@@ -1408,6 +1478,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          digital_talent_id?: string | null
           id?: string
           name: string
           product_type?: string | null
@@ -1415,12 +1486,20 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          digital_talent_id?: string | null
           id?: string
           name?: string
           product_type?: string | null
           talent_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "talent_looks_digital_talent_id_fkey"
+            columns: ["digital_talent_id"]
+            isOneToOne: false
+            referencedRelation: "digital_talents"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "talent_looks_talent_id_fkey"
             columns: ["talent_id"]
