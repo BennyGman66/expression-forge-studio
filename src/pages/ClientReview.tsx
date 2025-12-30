@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,6 +39,7 @@ const SLOT_LABELS: Record<string, string> = {
 
 export default function ClientReview() {
   const { reviewId } = useParams<{ reviewId: string }>();
+  const navigate = useNavigate();
   const [reviewName, setReviewName] = useState("");
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [lookInfoMap, setLookInfoMap] = useState<Record<string, LookInfo>>({});
@@ -415,11 +416,21 @@ export default function ClientReview() {
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card sticky top-0 z-10">
         <div className="px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-medium">{reviewName}</h1>
-            <p className="text-sm text-muted-foreground">
-              Click a look to review and select your favorites
-            </p>
+          <div className="flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/external/talent-replacement')}
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+            <div>
+              <h1 className="text-2xl font-medium">{reviewName}</h1>
+              <p className="text-sm text-muted-foreground">
+                Click a look to review and select your favorites
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-muted-foreground">
