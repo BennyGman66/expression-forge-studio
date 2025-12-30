@@ -2,12 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Download, Camera, Users, Eye, Crop, Package } from "lucide-react";
+import { ArrowLeft, Download, Users, Crop, Package } from "lucide-react";
 import { ScrapePanel } from "@/components/face-creator/ScrapePanel";
-import { GenderSegmentPanel } from "@/components/face-creator/GenderSegmentPanel";
-import { FaceDetectionPanel } from "@/components/face-creator/FaceDetectionPanel";
-import { IdentityClusterPanel } from "@/components/face-creator/IdentityClusterPanel";
-import { ViewClassificationPanel } from "@/components/face-creator/ViewClassificationPanel";
+import { ClassificationPanel } from "@/components/face-creator/ClassificationPanel";
 import { CropEditorPanel } from "@/components/face-creator/CropEditorPanel";
 import { ExportPanel } from "@/components/face-creator/ExportPanel";
 
@@ -38,34 +35,22 @@ export default function FaceCreator() {
 
       <main className="p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid grid-cols-7 w-full max-w-4xl">
+          <TabsList className="grid grid-cols-4 w-full max-w-2xl">
             <TabsTrigger value="scrape" className="flex items-center gap-2">
               <Download className="h-4 w-4" />
-              <span className="hidden sm:inline">Scrape</span>
+              <span>Scrape</span>
             </TabsTrigger>
-            <TabsTrigger value="gender" className="flex items-center gap-2">
+            <TabsTrigger value="classify" className="flex items-center gap-2">
               <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">Gender</span>
-            </TabsTrigger>
-            <TabsTrigger value="faces" className="flex items-center gap-2">
-              <Camera className="h-4 w-4" />
-              <span className="hidden sm:inline">Faces</span>
-            </TabsTrigger>
-            <TabsTrigger value="identity" className="flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">Identity</span>
-            </TabsTrigger>
-            <TabsTrigger value="views" className="flex items-center gap-2">
-              <Eye className="h-4 w-4" />
-              <span className="hidden sm:inline">Views</span>
+              <span>Classify</span>
             </TabsTrigger>
             <TabsTrigger value="crop" className="flex items-center gap-2">
               <Crop className="h-4 w-4" />
-              <span className="hidden sm:inline">Crop</span>
+              <span>Crop</span>
             </TabsTrigger>
             <TabsTrigger value="export" className="flex items-center gap-2">
               <Package className="h-4 w-4" />
-              <span className="hidden sm:inline">Export</span>
+              <span>Export</span>
             </TabsTrigger>
           </TabsList>
 
@@ -76,20 +61,8 @@ export default function FaceCreator() {
             />
           </TabsContent>
           
-          <TabsContent value="gender">
-            <GenderSegmentPanel runId={selectedRunId} />
-          </TabsContent>
-          
-          <TabsContent value="faces">
-            <FaceDetectionPanel runId={selectedRunId} />
-          </TabsContent>
-          
-          <TabsContent value="identity">
-            <IdentityClusterPanel runId={selectedRunId} />
-          </TabsContent>
-          
-          <TabsContent value="views">
-            <ViewClassificationPanel runId={selectedRunId} />
+          <TabsContent value="classify">
+            <ClassificationPanel runId={selectedRunId} />
           </TabsContent>
           
           <TabsContent value="crop">
