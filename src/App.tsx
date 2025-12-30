@@ -9,6 +9,7 @@ import AvatarRepose from "./pages/AvatarRepose";
 import External from "./pages/External";
 import TalentReplacement from "./pages/TalentReplacement";
 import ClientReview from "./pages/ClientReview";
+import FaceCreator from "./pages/FaceCreator";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -27,6 +28,7 @@ const App = () => (
           <Route path="/external" element={<External />} />
           <Route path="/external/talent-replacement" element={<TalentReplacement />} />
           <Route path="/review/:reviewId" element={<ClientReview />} />
+          <Route path="/face-creator" element={<FaceCreator />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

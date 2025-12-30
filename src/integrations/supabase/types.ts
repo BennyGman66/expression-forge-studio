@@ -448,6 +448,320 @@ export type Database = {
           },
         ]
       }
+      face_crops: {
+        Row: {
+          aspect_ratio: string
+          created_at: string
+          crop_height: number
+          crop_width: number
+          crop_x: number
+          crop_y: number
+          cropped_stored_url: string | null
+          id: string
+          is_auto: boolean | null
+          scrape_image_id: string
+          updated_at: string
+        }
+        Insert: {
+          aspect_ratio?: string
+          created_at?: string
+          crop_height: number
+          crop_width: number
+          crop_x: number
+          crop_y: number
+          cropped_stored_url?: string | null
+          id?: string
+          is_auto?: boolean | null
+          scrape_image_id: string
+          updated_at?: string
+        }
+        Update: {
+          aspect_ratio?: string
+          created_at?: string
+          crop_height?: number
+          crop_width?: number
+          crop_x?: number
+          crop_y?: number
+          cropped_stored_url?: string | null
+          id?: string
+          is_auto?: boolean | null
+          scrape_image_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_crops_scrape_image_id_fkey"
+            columns: ["scrape_image_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      face_detections: {
+        Row: {
+          bounding_boxes: Json | null
+          created_at: string
+          face_count: number
+          id: string
+          primary_box_index: number | null
+          scrape_image_id: string
+          status: string
+        }
+        Insert: {
+          bounding_boxes?: Json | null
+          created_at?: string
+          face_count?: number
+          id?: string
+          primary_box_index?: number | null
+          scrape_image_id: string
+          status?: string
+        }
+        Update: {
+          bounding_boxes?: Json | null
+          created_at?: string
+          face_count?: number
+          id?: string
+          primary_box_index?: number | null
+          scrape_image_id?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_detections_scrape_image_id_fkey"
+            columns: ["scrape_image_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      face_identities: {
+        Row: {
+          created_at: string
+          gender: string
+          id: string
+          image_count: number
+          name: string
+          representative_image_id: string | null
+          scrape_run_id: string
+        }
+        Insert: {
+          created_at?: string
+          gender: string
+          id?: string
+          image_count?: number
+          name: string
+          representative_image_id?: string | null
+          scrape_run_id: string
+        }
+        Update: {
+          created_at?: string
+          gender?: string
+          id?: string
+          image_count?: number
+          name?: string
+          representative_image_id?: string | null
+          scrape_run_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_identities_representative_image_id_fkey"
+            columns: ["representative_image_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_identities_scrape_run_id_fkey"
+            columns: ["scrape_run_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      face_identity_images: {
+        Row: {
+          created_at: string
+          id: string
+          identity_id: string
+          is_ignored: boolean | null
+          scrape_image_id: string
+          view: string | null
+          view_source: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          identity_id: string
+          is_ignored?: boolean | null
+          scrape_image_id: string
+          view?: string | null
+          view_source?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          identity_id?: string
+          is_ignored?: boolean | null
+          scrape_image_id?: string
+          view?: string | null
+          view_source?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_identity_images_identity_id_fkey"
+            columns: ["identity_id"]
+            isOneToOne: false
+            referencedRelation: "face_identities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_identity_images_scrape_image_id_fkey"
+            columns: ["scrape_image_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      face_jobs: {
+        Row: {
+          created_at: string
+          id: string
+          logs: Json | null
+          progress: number | null
+          scrape_run_id: string
+          status: string
+          total: number | null
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          logs?: Json | null
+          progress?: number | null
+          scrape_run_id: string
+          status?: string
+          total?: number | null
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          logs?: Json | null
+          progress?: number | null
+          scrape_run_id?: string
+          status?: string
+          total?: number | null
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_jobs_scrape_run_id_fkey"
+            columns: ["scrape_run_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      face_scrape_images: {
+        Row: {
+          created_at: string
+          gender: string | null
+          gender_source: string | null
+          id: string
+          image_hash: string | null
+          image_index: number
+          product_title: string | null
+          product_url: string | null
+          scrape_run_id: string
+          source_url: string
+          stored_url: string | null
+        }
+        Insert: {
+          created_at?: string
+          gender?: string | null
+          gender_source?: string | null
+          id?: string
+          image_hash?: string | null
+          image_index?: number
+          product_title?: string | null
+          product_url?: string | null
+          scrape_run_id: string
+          source_url: string
+          stored_url?: string | null
+        }
+        Update: {
+          created_at?: string
+          gender?: string | null
+          gender_source?: string | null
+          id?: string
+          image_hash?: string | null
+          image_index?: number
+          product_title?: string | null
+          product_url?: string | null
+          scrape_run_id?: string
+          source_url?: string
+          stored_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_scrape_images_scrape_run_id_fkey"
+            columns: ["scrape_run_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      face_scrape_runs: {
+        Row: {
+          brand_name: string
+          created_at: string
+          id: string
+          images_per_product: number
+          logs: Json | null
+          max_products: number
+          progress: number | null
+          start_url: string
+          status: string
+          total: number | null
+          updated_at: string
+        }
+        Insert: {
+          brand_name: string
+          created_at?: string
+          id?: string
+          images_per_product?: number
+          logs?: Json | null
+          max_products?: number
+          progress?: number | null
+          start_url: string
+          status?: string
+          total?: number | null
+          updated_at?: string
+        }
+        Update: {
+          brand_name?: string
+          created_at?: string
+          id?: string
+          images_per_product?: number
+          logs?: Json | null
+          max_products?: number
+          progress?: number | null
+          start_url?: string
+          status?: string
+          total?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       generation_jobs: {
         Row: {
           attempts_per_pose: number | null

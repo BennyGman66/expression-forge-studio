@@ -29,3 +29,21 @@ verify_jwt = false
 
 [functions.verify-review-password]
 verify_jwt = false
+
+[functions.scrape-faces]
+verify_jwt = false
+
+[functions.classify-face-gender]
+verify_jwt = false
+
+[functions.detect-faces]
+verify_jwt = false
+
+[functions.cluster-identities]
+verify_jwt = false
+
+[functions.classify-face-views]
+verify_jwt = false
+
+[functions.generate-face-crops]
+verify_jwt = false
