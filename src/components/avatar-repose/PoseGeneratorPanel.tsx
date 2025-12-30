@@ -108,7 +108,7 @@ export function PoseGeneratorPanel() {
   
   const [randomCount, setRandomCount] = useState(3);
   const [attemptsPerPose, setAttemptsPerPose] = useState(3);
-  const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].id);
+  const [selectedModel, setSelectedModel] = useState(AI_MODELS[1].id);
   const [isGenerating, setIsGenerating] = useState(false);
   const [reviewJobId, setReviewJobId] = useState<string | null>(null);
 
