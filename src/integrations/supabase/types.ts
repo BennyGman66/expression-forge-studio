@@ -545,6 +545,7 @@ export type Database = {
           name: string
           representative_image_id: string | null
           scrape_run_id: string
+          talent_id: string | null
         }
         Insert: {
           created_at?: string
@@ -554,6 +555,7 @@ export type Database = {
           name: string
           representative_image_id?: string | null
           scrape_run_id: string
+          talent_id?: string | null
         }
         Update: {
           created_at?: string
@@ -563,6 +565,7 @@ export type Database = {
           name?: string
           representative_image_id?: string | null
           scrape_run_id?: string
+          talent_id?: string | null
         }
         Relationships: [
           {
@@ -577,6 +580,13 @@ export type Database = {
             columns: ["scrape_run_id"]
             isOneToOne: false
             referencedRelation: "face_scrape_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_identities_talent_id_fkey"
+            columns: ["talent_id"]
+            isOneToOne: false
+            referencedRelation: "talents"
             referencedColumns: ["id"]
           },
         ]
