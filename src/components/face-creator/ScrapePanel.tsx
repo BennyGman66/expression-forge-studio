@@ -635,7 +635,8 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
                     return (
                       <div
                         key={image.id}
-                        className={`group relative aspect-[3/4] bg-muted rounded-lg overflow-hidden border transition-colors ${
+                        onClick={() => toggleImageSelection(image.id)}
+                        className={`group relative aspect-[3/4] bg-muted rounded-lg overflow-hidden border transition-colors cursor-pointer ${
                           isSelected ? 'border-primary ring-2 ring-primary/50' : 'border-border hover:border-primary'
                         }`}
                       >
@@ -657,6 +658,7 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
                           <Checkbox
                             checked={isSelected}
                             onCheckedChange={() => toggleImageSelection(image.id)}
+                            onClick={(e) => e.stopPropagation()}
                             className="bg-white/90 border-white/50"
                           />
                         </div>
