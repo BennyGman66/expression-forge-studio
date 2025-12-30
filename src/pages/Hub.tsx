@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
-import { Grid3X3, Users, ExternalLink } from "lucide-react";
+import { Grid3X3, Users, ExternalLink, User } from "lucide-react";
 
 const apps = [
   {
@@ -17,6 +17,14 @@ const apps = [
     description: "Scrape brands, generate clay poses, transfer to digital talent.",
     icon: Users,
     path: "/avatar-repose",
+    disabled: false,
+  },
+  {
+    id: "digital-talent",
+    title: "Digital Talent",
+    description: "Manage digital talent identities and track their usage.",
+    icon: User,
+    path: "/digital-talent",
     disabled: false,
   },
   {

@@ -9,10 +9,10 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Play, RefreshCw, Check, X, Edit2, Download, Loader2 } from "lucide-react";
+import { Play, Check, Loader2, User } from "lucide-react";
 import type { PairingMode, FacePairingJob } from "@/types/face-pairing";
+import type { DigitalTalent } from "@/types/digital-talent";
 
 interface ImagePairingPanelProps {
   runId: string | null;
@@ -29,25 +29,14 @@ interface CroppedFace {
   brand_name: string;
 }
 
-interface TalentWithImages {
-  id: string;
-  name: string;
-  gender: string | null;
-  images: Array<{
-    id: string;
-    stored_url: string;
-    view: string;
-  }>;
-}
-
 export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   const [activeSubTab, setActiveSubTab] = useState<'select' | 'review'>('select');
   
   // Selection state
   const [croppedFaces, setCroppedFaces] = useState<CroppedFace[]>([]);
-  const [talents, setTalents] = useState<TalentWithImages[]>([]);
+  const [digitalTalents, setDigitalTalents] = useState<DigitalTalent[]>([]);
   const [selectedFaceIds, setSelectedFaceIds] = useState<Set<string>>(new Set());
-  const [selectedTalentImageIds, setSelectedTalentImageIds] = useState<Set<string>>(new Set());
+  const [selectedTalentIds, setSelectedTalentIds] = useState<Set<string>>(new Set());
   
   // Filters
   const [genderFilter, setGenderFilter] = useState<string>('all');
@@ -63,12 +52,12 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   const [currentJob, setCurrentJob] = useState<FacePairingJob | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
-  // Load cropped faces and talents
+  // Load cropped faces and digital talents
   useEffect(() => {
     if (runId) {
       loadCroppedFaces();
     }
-    loadTalents();
+    loadDigitalTalents();
   }, [runId]);
 
   // Poll for job updates
@@ -96,7 +85,6 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   const loadCroppedFaces = async () => {
     if (!runId) return;
 
-    // Get images with crops and identity info
     const { data: images, error } = await supabase
       .from('face_scrape_images')
       .select(`
@@ -125,7 +113,6 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
       return;
     }
 
-    // Get run info for brand name
     const { data: run } = await supabase
       .from('face_scrape_runs')
       .select('brand_name')
@@ -149,34 +136,18 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setCroppedFaces(faces);
   };
 
-  const loadTalents = async () => {
+  const loadDigitalTalents = async () => {
     const { data, error } = await supabase
-      .from('talents')
-      .select(`
-        id,
-        name,
-        gender,
-        talent_images (
-          id,
-          stored_url,
-          view
-        )
-      `);
+      .from('digital_talents')
+      .select('*')
+      .order('name');
 
     if (error) {
-      console.error('Error loading talents:', error);
+      console.error('Error loading digital talents:', error);
       return;
     }
 
-    const mappedTalents: TalentWithImages[] = (data || [])
-      .filter((t: any) => t.talent_images?.length > 0)
-      .map((t: any) => ({
-        id: t.id,
-        name: t.name,
-        gender: t.gender,
-        images: t.talent_images || []
-      }));
-    setTalents(mappedTalents);
+    setDigitalTalents(data || []);
   };
 
   // Filter cropped faces
@@ -203,21 +174,21 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   // Calculate total pairings
   const totalPairings = useMemo(() => {
     const faceCount = selectedFaceIds.size;
-    const talentImageCount = selectedTalentImageIds.size;
+    const talentCount = selectedTalentIds.size;
     
-    if (faceCount === 0 || talentImageCount === 0) return 0;
+    if (faceCount === 0 || talentCount === 0) return 0;
     
     switch (pairingMode) {
       case 'one-to-one':
-        return Math.min(faceCount, talentImageCount);
+        return Math.min(faceCount, talentCount);
       case 'one-to-many':
       case 'many-to-one':
       case 'many-to-many':
-        return faceCount * talentImageCount;
+        return faceCount * talentCount;
       default:
         return 0;
     }
-  }, [selectedFaceIds.size, selectedTalentImageIds.size, pairingMode]);
+  }, [selectedFaceIds.size, selectedTalentIds.size, pairingMode]);
 
   const toggleFaceSelection = (faceId: string) => {
     const newSelected = new Set(selectedFaceIds);
@@ -229,14 +200,14 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setSelectedFaceIds(newSelected);
   };
 
-  const toggleTalentImageSelection = (imageId: string) => {
-    const newSelected = new Set(selectedTalentImageIds);
-    if (newSelected.has(imageId)) {
-      newSelected.delete(imageId);
+  const toggleTalentSelection = (talentId: string) => {
+    const newSelected = new Set(selectedTalentIds);
+    if (newSelected.has(talentId)) {
+      newSelected.delete(talentId);
     } else {
-      newSelected.add(imageId);
+      newSelected.add(talentId);
     }
-    setSelectedTalentImageIds(newSelected);
+    setSelectedTalentIds(newSelected);
   };
 
   const selectAllFilteredFaces = () => {
@@ -247,9 +218,17 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setSelectedFaceIds(new Set());
   };
 
+  const selectAllTalents = () => {
+    setSelectedTalentIds(new Set(digitalTalents.map(t => t.id)));
+  };
+
+  const clearTalentSelection = () => {
+    setSelectedTalentIds(new Set());
+  };
+
   const startGeneration = async () => {
-    if (selectedFaceIds.size === 0 || selectedTalentImageIds.size === 0) {
-      toast.error('Please select at least one cropped face and one talent image');
+    if (selectedFaceIds.size === 0 || selectedTalentIds.size === 0) {
+      toast.error('Please select at least one cropped face and one digital talent');
       return;
     }
 
@@ -274,42 +253,37 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
 
       // Create pairings based on mode
       const faceIds = Array.from(selectedFaceIds);
-      const talentImageIds = Array.from(selectedTalentImageIds);
-      
-      // Get talent info for each image
-      const { data: talentImages } = await supabase
-        .from('talent_images')
-        .select('id, talent_id')
-        .in('id', talentImageIds);
-
-      const talentImageMap = new Map((talentImages || []).map(ti => [ti.id, ti.talent_id]));
+      const talentIds = Array.from(selectedTalentIds);
 
       const pairings: Array<{
         job_id: string;
         cropped_face_id: string;
         talent_id: string;
         talent_image_id: string;
+        digital_talent_id: string;
       }> = [];
 
       if (pairingMode === 'one-to-one') {
-        const count = Math.min(faceIds.length, talentImageIds.length);
+        const count = Math.min(faceIds.length, talentIds.length);
         for (let i = 0; i < count; i++) {
           pairings.push({
             job_id: job.id,
             cropped_face_id: faceIds[i],
-            talent_id: talentImageMap.get(talentImageIds[i]) || '',
-            talent_image_id: talentImageIds[i]
+            talent_id: talentIds[i],
+            talent_image_id: talentIds[i], // Using talent_id as placeholder
+            digital_talent_id: talentIds[i]
           });
         }
       } else {
         // Cross-product for all other modes
         for (const faceId of faceIds) {
-          for (const imageId of talentImageIds) {
+          for (const talentId of talentIds) {
             pairings.push({
               job_id: job.id,
               cropped_face_id: faceId,
-              talent_id: talentImageMap.get(imageId) || '',
-              talent_image_id: imageId
+              talent_id: talentId,
+              talent_image_id: talentId, // Using talent_id as placeholder
+              digital_talent_id: talentId
             });
           }
         }
@@ -499,52 +473,61 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">Digital Talents</CardTitle>
-                  <Badge variant="outline">{selectedTalentImageIds.size} selected</Badge>
+                  <Badge variant="outline">{selectedTalentIds.size} selected</Badge>
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Button size="sm" variant="outline" onClick={selectAllTalents}>
+                    Select All ({digitalTalents.length})
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={clearTalentSelection}>
+                    Clear
+                  </Button>
                 </div>
               </CardHeader>
               
               <CardContent>
                 <ScrollArea className="h-[450px]">
-                  {talents.length === 0 ? (
+                  {digitalTalents.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-8">
-                      No digital talents found
+                      No digital talents found. Create them in the Digital Talent app.
                     </p>
                   ) : (
-                    <div className="space-y-4">
-                      {talents.map(talent => (
-                        <div key={talent.id} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-sm">{talent.name}</span>
-                            <Badge variant="secondary" className="text-xs">
-                              {talent.gender || 'unspecified'}
-                            </Badge>
-                          </div>
-                          <div className="grid grid-cols-4 gap-2">
-                            {talent.images.map(img => (
-                              <div
-                                key={img.id}
-                                className={`relative cursor-pointer rounded-md overflow-hidden border-2 transition-all ${
-                                  selectedTalentImageIds.has(img.id)
-                                    ? 'border-primary ring-2 ring-primary/20'
-                                    : 'border-transparent hover:border-muted-foreground/30'
-                                }`}
-                                onClick={() => toggleTalentImageSelection(img.id)}
-                              >
-                                <img
-                                  src={img.stored_url}
-                                  alt=""
-                                  className="w-full aspect-square object-cover"
-                                />
-                                {selectedTalentImageIds.has(img.id) && (
-                                  <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5">
-                                    <Check className="h-3 w-3" />
-                                  </div>
-                                )}
-                                <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] p-1 text-center">
-                                  {img.view}
-                                </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {digitalTalents.map(talent => (
+                        <div
+                          key={talent.id}
+                          className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                            selectedTalentIds.has(talent.id)
+                              ? 'border-primary ring-2 ring-primary/20'
+                              : 'border-transparent hover:border-muted-foreground/30'
+                          }`}
+                          onClick={() => toggleTalentSelection(talent.id)}
+                        >
+                          <div className="aspect-square bg-muted">
+                            {talent.front_face_url ? (
+                              <img
+                                src={talent.front_face_url}
+                                alt={talent.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <User className="w-8 h-8 text-muted-foreground" />
                               </div>
-                            ))}
+                            )}
+                          </div>
+                          {selectedTalentIds.has(talent.id) && (
+                            <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5">
+                              <Check className="h-3 w-3" />
+                            </div>
+                          )}
+                          <div className="p-2 bg-background">
+                            <p className="font-medium text-sm truncate">{talent.name}</p>
+                            {talent.gender && (
+                              <Badge variant="secondary" className="text-xs capitalize mt-1">
+                                {talent.gender}
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -610,7 +593,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
               <div className="flex justify-end mt-4">
                 <Button
                   onClick={startGeneration}
-                  disabled={isLoading || selectedFaceIds.size === 0 || selectedTalentImageIds.size === 0}
+                  disabled={isLoading || selectedFaceIds.size === 0 || selectedTalentIds.size === 0}
                 >
                   {isLoading ? (
                     <>
@@ -648,25 +631,27 @@ interface ImagePairingReviewProps {
 
 function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProps) {
   const [pairings, setPairings] = useState<any[]>([]);
-  const [outputs, setOutputs] = useState<any[]>([]);
+  const [outputs, setOutputs] = useState<Record<string, any[]>>({});
   const [job, setJob] = useState<FacePairingJob | null>(null);
   const [groupBy, setGroupBy] = useState<'talent' | 'identity'>('talent');
 
   useEffect(() => {
     if (jobId) {
-      loadData();
+      loadJobData();
     }
   }, [jobId]);
 
-  // Poll for updates when job is running
   useEffect(() => {
     if (!job || ['completed', 'failed'].includes(job.status)) return;
 
-    const interval = setInterval(loadData, 3000);
-    return () => clearInterval(interval);
-  }, [job?.status]);
+    const interval = setInterval(() => {
+      loadJobData();
+    }, 3000);
 
-  const loadData = async () => {
+    return () => clearInterval(interval);
+  }, [job]);
+
+  const loadJobData = async () => {
     if (!jobId) return;
 
     // Load job
@@ -676,53 +661,56 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
       .eq('id', jobId)
       .single();
 
-    if (jobData) setJob(jobData as FacePairingJob);
+    if (jobData) {
+      setJob(jobData as FacePairingJob);
+    }
 
     // Load pairings with related data
-    const { data: pairingData } = await supabase
+    const { data: pairingsData } = await supabase
       .from('face_pairings')
       .select(`
         *,
         face_scrape_images!cropped_face_id (
           id,
-          source_url,
           stored_url,
-          gender
+          source_url,
+          face_identity_images (
+            face_identities (
+              name
+            )
+          )
         ),
-        talents!talent_id (
+        digital_talents!digital_talent_id (
           id,
           name,
-          gender
-        ),
-        talent_images!talent_image_id (
-          id,
-          stored_url,
-          view
+          front_face_url
         )
       `)
       .eq('job_id', jobId);
 
-    if (pairingData) setPairings(pairingData);
+    if (pairingsData) {
+      setPairings(pairingsData);
 
-    // Load outputs
-    const { data: outputData } = await supabase
-      .from('face_pairing_outputs')
-      .select('*')
-      .in('pairing_id', (pairingData || []).map((p: any) => p.id));
+      // Load outputs for each pairing
+      const outputsMap: Record<string, any[]> = {};
+      for (const pairing of pairingsData) {
+        const { data: outputData } = await supabase
+          .from('face_pairing_outputs')
+          .select('*')
+          .eq('pairing_id', pairing.id);
 
-    if (outputData) setOutputs(outputData);
-  };
-
-  const getOutputsForPairing = (pairingId: string) => {
-    return outputs.filter(o => o.pairing_id === pairingId);
+        if (outputData) {
+          outputsMap[pairing.id] = outputData;
+        }
+      }
+      setOutputs(outputsMap);
+    }
   };
 
   if (!jobId) {
     return (
-      <Card>
-        <CardContent className="py-12 text-center text-muted-foreground">
-          No generation job selected. Create pairings first.
-        </CardContent>
+      <Card className="p-8 text-center text-muted-foreground">
+        <p>No generation job selected. Start a new generation to see results here.</p>
       </Card>
     );
   }
@@ -731,130 +719,130 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
     <div className="space-y-4">
       {/* Job Status */}
       {job && (
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Badge 
-                  variant={
-                    job.status === 'completed' ? 'default' :
-                    job.status === 'failed' ? 'destructive' :
-                    'secondary'
-                  }
-                >
-                  {job.status}
-                </Badge>
-                <span className="text-sm">{job.name}</span>
-                <span className="text-sm text-muted-foreground">
-                  {job.progress}/{job.total_pairings} processed
-                </span>
-              </div>
-              
-              {job.status === 'describing' && (
-                <Button size="sm" onClick={onStartGeneration}>
-                  <Play className="h-4 w-4 mr-2" />
-                  Start Image Generation
-                </Button>
-              )}
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-medium">{job.name}</h3>
+              <p className="text-sm text-muted-foreground capitalize">
+                Status: {job.status} • {job.progress}/{job.total_pairings} pairings
+              </p>
             </div>
-            
-            {!['completed', 'failed'].includes(job.status) && (
-              <Progress 
-                value={job.total_pairings > 0 ? (job.progress / job.total_pairings) * 100 : 0}
-                className="mt-3"
-              />
+            {job.status === 'describing' && (
+              <Button onClick={onStartGeneration}>
+                <Play className="h-4 w-4 mr-2" />
+                Start Image Generation
+              </Button>
             )}
-          </CardContent>
+          </div>
+          {!['completed', 'failed'].includes(job.status) && (
+            <Progress 
+              className="mt-3"
+              value={job.total_pairings > 0 ? (job.progress / job.total_pairings) * 100 : 0} 
+            />
+          )}
         </Card>
       )}
 
       {/* Group By Toggle */}
-      <div className="flex items-center gap-2">
-        <Label className="text-sm">Group by:</Label>
-        <Select value={groupBy} onValueChange={(v) => setGroupBy(v as 'talent' | 'identity')}>
-          <SelectTrigger className="w-40 h-8">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="talent">Digital Talent</SelectItem>
-            <SelectItem value="identity">Model Identity</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex gap-2">
+        <Button 
+          variant={groupBy === 'talent' ? 'default' : 'outline'} 
+          size="sm"
+          onClick={() => setGroupBy('talent')}
+        >
+          Group by Talent
+        </Button>
+        <Button 
+          variant={groupBy === 'identity' ? 'default' : 'outline'} 
+          size="sm"
+          onClick={() => setGroupBy('identity')}
+        >
+          Group by Identity
+        </Button>
       </div>
 
-      {/* Results Grid */}
+      {/* Pairings Grid */}
       <ScrollArea className="h-[600px]">
-        <div className="space-y-6">
-          {pairings.map(pairing => (
-            <Card key={pairing.id}>
-              <CardContent className="pt-4">
-                <div className="flex gap-4">
-                  {/* Reference Images */}
-                  <div className="flex gap-2">
-                    <div className="w-20">
-                      <img
-                        src={pairing.face_scrape_images?.stored_url || pairing.face_scrape_images?.source_url}
-                        alt="Cropped face"
-                        className="w-full aspect-square object-cover rounded-md"
-                      />
-                      <p className="text-[10px] text-center mt-1 text-muted-foreground">Source</p>
+        <div className="space-y-4">
+          {pairings.map(pairing => {
+            const pairingOutputs = outputs[pairing.id] || [];
+            const sourceImage = pairing.face_scrape_images;
+            const talent = pairing.digital_talents;
+            const identityName = sourceImage?.face_identity_images?.[0]?.face_identities?.name || 'Unknown';
+
+            return (
+              <Card key={pairing.id} className="p-4">
+                <div className="grid grid-cols-6 gap-4">
+                  {/* Source Image */}
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">Source</p>
+                    <div className="aspect-[3/4] rounded-md overflow-hidden bg-muted">
+                      {sourceImage && (
+                        <img 
+                          src={sourceImage.stored_url || sourceImage.source_url} 
+                          alt="" 
+                          className="w-full h-full object-cover"
+                        />
+                      )}
                     </div>
-                    <div className="w-20">
-                      <img
-                        src={pairing.talent_images?.stored_url}
-                        alt="Talent"
-                        className="w-full aspect-square object-cover rounded-md"
-                      />
-                      <p className="text-[10px] text-center mt-1 text-muted-foreground">
-                        {pairing.talents?.name}
-                      </p>
+                    <p className="text-xs truncate">{identityName}</p>
+                  </div>
+
+                  {/* Digital Talent */}
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">Digital Talent</p>
+                    <div className="aspect-square rounded-md overflow-hidden bg-muted">
+                      {talent?.front_face_url ? (
+                        <img 
+                          src={talent.front_face_url} 
+                          alt={talent.name} 
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <User className="w-6 h-6 text-muted-foreground" />
+                        </div>
+                      )}
                     </div>
+                    <p className="text-xs truncate">{talent?.name || 'Unknown'}</p>
                   </div>
 
                   {/* Outfit Description */}
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-xs text-muted-foreground">Outfit Description</Label>
-                      <Badge variant="outline" className="text-[10px]">
-                        {pairing.outfit_description_status}
-                      </Badge>
-                    </div>
-                    <p className="text-xs bg-muted p-2 rounded-md">
+                  <div className="col-span-2 space-y-1">
+                    <p className="text-xs text-muted-foreground">Outfit Description</p>
+                    <p className="text-xs bg-muted p-2 rounded-md h-20 overflow-y-auto">
                       {pairing.outfit_description || 'Pending...'}
                     </p>
+                    <Badge variant="secondary" className="text-xs capitalize">
+                      {pairing.outfit_description_status}
+                    </Badge>
                   </div>
 
-                  {/* Generated Outputs */}
-                  <div className="flex gap-2">
-                    {getOutputsForPairing(pairing.id).map(output => (
-                      <div key={output.id} className="w-20">
-                        {output.status === 'completed' && output.stored_url ? (
-                          <img
-                            src={output.stored_url}
-                            alt="Generated"
-                            className="w-full aspect-square object-cover rounded-md"
-                          />
-                        ) : output.status === 'running' ? (
-                          <div className="w-full aspect-square bg-muted rounded-md flex items-center justify-center">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          </div>
-                        ) : output.status === 'failed' ? (
-                          <div className="w-full aspect-square bg-destructive/10 rounded-md flex items-center justify-center">
-                            <X className="h-4 w-4 text-destructive" />
-                          </div>
-                        ) : (
-                          <div className="w-full aspect-square bg-muted rounded-md" />
-                        )}
-                        <p className="text-[10px] text-center mt-1 text-muted-foreground">
-                          #{output.attempt_index + 1}
-                        </p>
-                      </div>
-                    ))}
+                  {/* Outputs */}
+                  <div className="col-span-2 space-y-1">
+                    <p className="text-xs text-muted-foreground">Outputs ({pairingOutputs.length})</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {pairingOutputs.map(output => (
+                        <div key={output.id} className="aspect-[3/4] rounded-md overflow-hidden bg-muted">
+                          {output.stored_url ? (
+                            <img 
+                              src={output.stored_url} 
+                              alt="" 
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
         </div>
       </ScrollArea>
     </div>

@@ -3,13 +3,13 @@ import { HubHeader } from "@/components/layout/HubHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrandIngestPanel } from "@/components/avatar-repose/BrandIngestPanel";
 import { ClayGenerationPanel } from "@/components/avatar-repose/ClayGenerationPanel";
-import { TalentLibraryPanel } from "@/components/avatar-repose/TalentLibraryPanel";
+import { LooksLibraryPanel } from "@/components/avatar-repose/LooksLibraryPanel";
 import { PoseGeneratorPanel } from "@/components/avatar-repose/PoseGeneratorPanel";
 import { ClayPoseLibrary } from "@/components/avatar-repose/ClayPoseLibrary";
 import { PoseReviewsTab } from "@/components/avatar-repose/PoseReviewsTab";
-import { Globe, Palette, Users, Sparkles, Library, ClipboardList } from "lucide-react";
+import { Globe, Palette, Shirt, Sparkles, Library, ClipboardList } from "lucide-react";
 
-const VALID_TABS = ["ingest", "clay", "library", "talent", "generate", "reviews"];
+const VALID_TABS = ["ingest", "clay", "library", "looks", "generate", "reviews"];
 
 export default function AvatarRepose() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -47,9 +47,9 @@ export default function AvatarRepose() {
                 <Library className="w-4 h-4" />
                 Clay Pose Library
               </TabsTrigger>
-              <TabsTrigger value="talent" className="gap-2">
-                <Users className="w-4 h-4" />
-                Talent Library
+              <TabsTrigger value="looks" className="gap-2">
+                <Shirt className="w-4 h-4" />
+                Looks Library
               </TabsTrigger>
               <TabsTrigger value="generate" className="gap-2">
                 <Sparkles className="w-4 h-4" />
@@ -73,8 +73,8 @@ export default function AvatarRepose() {
               <ClayPoseLibrary />
             </TabsContent>
 
-            <TabsContent value="talent">
-              <TalentLibraryPanel />
+            <TabsContent value="looks">
+              <LooksLibraryPanel />
             </TabsContent>
 
             <TabsContent value="generate">
