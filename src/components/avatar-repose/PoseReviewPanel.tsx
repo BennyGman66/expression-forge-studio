@@ -38,27 +38,30 @@ interface LookInfo {
 }
 
 interface PoseReviewPanelProps {
-  jobId: string;
+  jobIds: string[];
   onBack: () => void;
 }
 
-export function PoseReviewPanel({ jobId, onBack }: PoseReviewPanelProps) {
+export function PoseReviewPanel({ jobIds, onBack }: PoseReviewPanelProps) {
   const [generations, setGenerations] = useState<GenerationWithMeta[]>([]);
   const [lookInfoMap, setLookInfoMap] = useState<Record<string, LookInfo>>({});
   const [selectedBySlot, setSelectedBySlot] = useState<Record<string, string[]>>({});
   const [expandedLooks, setExpandedLooks] = useState<string[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [showSendDialog, setShowSendDialog] = useState(false);
+
   useEffect(() => {
     fetchGenerations();
-  }, [jobId]);
+  }, [jobIds]);
 
   const fetchGenerations = async () => {
-    // Fetch generations for this job
+    if (jobIds.length === 0) return;
+
+    // Fetch generations for all job IDs
     const { data: gens, error } = await supabase
       .from("generations")
       .select("*")
-      .eq("generation_job_id", jobId)
+      .in("generation_job_id", jobIds)
       .order("created_at", { ascending: true });
 
     if (error) {
@@ -301,10 +304,17 @@ export function PoseReviewPanel({ jobId, onBack }: PoseReviewPanelProps) {
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
-      <Button variant="ghost" onClick={onBack} className="gap-2">
-          <ArrowLeft className="w-4 h-4" />
-          Back to Jobs List
-        </Button>
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={onBack} className="gap-2">
+            <ArrowLeft className="w-4 h-4" />
+            Back to Jobs List
+          </Button>
+          {jobIds.length > 1 && (
+            <Badge variant="secondary" className="text-sm">
+              Reviewing {jobIds.length} jobs
+            </Badge>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <Badge variant="secondary" className="text-lg">
             {totalSelections} selected

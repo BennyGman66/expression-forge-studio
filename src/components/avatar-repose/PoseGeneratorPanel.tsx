@@ -628,7 +628,7 @@ export function PoseGeneratorPanel() {
   if (reviewJobId) {
     return (
       <PoseReviewPanel 
-        jobId={reviewJobId} 
+        jobIds={[reviewJobId]} 
         onBack={() => setReviewJobId(null)} 
       />
     );
