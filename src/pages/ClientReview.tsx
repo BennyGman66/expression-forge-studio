@@ -369,7 +369,7 @@ export default function ClientReview() {
                           <img
                             src={item.stored_url}
                             alt=""
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-contain bg-muted"
                           />
                           <button
                             onClick={() => toggleFavorite(item.id)}
@@ -467,7 +467,7 @@ export default function ClientReview() {
                           <img
                             src={url}
                             alt=""
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            className="w-full h-full object-contain bg-muted group-hover:scale-105 transition-transform duration-300"
                           />
                         </div>
                       ))}
