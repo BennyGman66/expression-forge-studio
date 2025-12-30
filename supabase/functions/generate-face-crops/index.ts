@@ -91,6 +91,9 @@ async function processCrops(
       .eq('scrape_run_id', runId)
       .not('source_url', 'is', null);
 
+    console.log(`[generate-face-crops] Received runId: ${runId}`);
+    console.log(`[generate-face-crops] Found ${images?.length || 0} images to process`);
+
     if (imagesError) {
       throw new Error(`Failed to fetch images: ${imagesError.message}`);
     }
@@ -137,6 +140,7 @@ async function processImage(
   lovableApiKey: string
 ) {
   const imageUrl = image.stored_url || image.source_url;
+  console.log(`[generate-face-crops] Processing image ${image.id} with URL: ${imageUrl?.substring(0, 60)}...`);
   
   // Call AI to detect face location
   const faceResult = await detectFace(imageUrl, lovableApiKey);

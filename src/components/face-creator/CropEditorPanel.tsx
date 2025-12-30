@@ -126,6 +126,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const handleGenerateCrops = async () => {
     if (!runId) return;
     setGenerating(true);
+    setJob(null); // Clear stale job display
     
     try {
       const { error } = await supabase.functions.invoke('generate-face-crops', {
@@ -134,6 +135,12 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
 
       if (error) throw error;
       toast({ title: "Started", description: "Crop generation started" });
+      
+      // Force re-fetch to capture new job
+      setTimeout(() => {
+        fetchJob();
+        fetchImagesWithCrops();
+      }, 1000);
     } catch (error) {
       console.error('Error generating crops:', error);
       toast({ title: "Error", description: "Failed to start crop generation", variant: "destructive" });
