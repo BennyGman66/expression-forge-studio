@@ -9,8 +9,13 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Simplified detection types for fashion images
-type DetectionType = 'FACE' | 'HEAD' | 'NONE';
+// Face bounding box from AI detection (percentages 0-100)
+interface FaceBbox {
+  ymin: number;
+  xmin: number;
+  ymax: number;
+  xmax: number;
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -112,8 +117,8 @@ async function processCrops(
         await addLog(supabase, jobId, `Failed to process image: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
 
-      // Reduced delay - faster since simpler AI prompt
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Small delay between requests
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
 
     const finalStatus = failed === images.length ? 'failed' : 'completed';
@@ -135,12 +140,13 @@ async function processImage(
   const imageUrl = image.stored_url || image.source_url;
   console.log(`[generate-face-crops] Processing image ${image.id}`);
   
-  // Quick AI check - just classify the image
-  const detection = await quickDetectPerson(imageUrl, lovableApiKey);
-  console.log(`[generate-face-crops] Detection result for ${image.id}: ${detection}`);
+  // Detect face bounding box using AI
+  const faceBbox = await detectFaceBbox(imageUrl, lovableApiKey);
+  console.log(`[generate-face-crops] Detection result for ${image.id}:`, faceBbox);
   
-  // Get smart fashion crop based on detection
-  const cropData = getFashionCrop(detection, aspectRatio);
+  // Calculate head + shoulders crop based on face position
+  const cropData = calculateHeadAndShouldersCrop(faceBbox, aspectRatio);
+  console.log(`[generate-face-crops] Crop data for ${image.id}:`, cropData);
 
   // Check if crop already exists
   const { data: existingCrop } = await supabase
@@ -179,10 +185,13 @@ async function processImage(
   }
 }
 
-// Simplified AI prompt - just classify the image quickly
-async function quickDetectPerson(imageUrl: string, apiKey: string): Promise<DetectionType> {
-  const prompt = `Look at this fashion product image. Is there a person's face or back of head visible in the TOP PORTION of the image?
-Reply with ONLY one word: "FACE" or "HEAD" or "NONE"`;
+// Detect face bounding box using Gemini
+async function detectFaceBbox(imageUrl: string, apiKey: string): Promise<FaceBbox | null> {
+  const prompt = `Detect the person's face in this fashion image.
+Return the bounding box coordinates around their FACE ONLY (not the whole head, just the face from forehead to chin) as a JSON array: [ymin, xmin, ymax, xmax]
+- Coordinates must be normalized to 0-1000 scale (where 0,0 is top-left and 1000,1000 is bottom-right)
+- If no face is visible (e.g., back view, no person), return exactly: NONE
+- Only return the array like [123, 456, 789, 567] or NONE, nothing else`;
 
   try {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -192,7 +201,7 @@ Reply with ONLY one word: "FACE" or "HEAD" or "NONE"`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-lite', // Faster model for simple classification
+        model: 'google/gemini-2.5-flash', // Better model for accurate bounding box detection
         messages: [
           {
             role: 'user',
@@ -208,44 +217,108 @@ Reply with ONLY one word: "FACE" or "HEAD" or "NONE"`;
     if (!response.ok) {
       const errorText = await response.text();
       console.error('AI API error:', response.status, errorText);
-      return 'NONE';
+      return null;
     }
 
     const data = await response.json();
-    const content = (data.choices?.[0]?.message?.content || '').trim().toUpperCase();
+    const content = (data.choices?.[0]?.message?.content || '').trim();
     
     console.log(`[generate-face-crops] AI response: "${content}"`);
     
-    // Parse the simple response
-    if (content.includes('FACE')) return 'FACE';
-    if (content.includes('HEAD')) return 'HEAD';
-    return 'NONE';
+    // Check for NONE response
+    if (content.toUpperCase().includes('NONE')) {
+      return null;
+    }
+    
+    // Parse bounding box array [ymin, xmin, ymax, xmax]
+    const match = content.match(/\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]/);
+    if (!match) {
+      console.log(`[generate-face-crops] Could not parse bounding box from: "${content}"`);
+      return null;
+    }
+
+    // Convert from 0-1000 scale to 0-100 percentages
+    return {
+      ymin: parseInt(match[1]) / 10,
+      xmin: parseInt(match[2]) / 10,
+      ymax: parseInt(match[3]) / 10,
+      xmax: parseInt(match[4]) / 10
+    };
   } catch (error) {
-    console.error('Quick detection error:', error);
-    return 'NONE';
+    console.error('Face detection error:', error);
+    return null;
   }
 }
 
-// Smart default crops for fashion images based on detection type
-function getFashionCrop(detection: DetectionType, aspectRatio: string): { x: number; y: number; width: number; height: number } {
-  // Fashion images: subject typically centered, head at top
-  if (detection === 'FACE' || detection === 'HEAD') {
+// Calculate head + shoulders crop based on detected face position
+function calculateHeadAndShouldersCrop(
+  faceBbox: FaceBbox | null,
+  aspectRatio: string
+): { x: number; y: number; width: number; height: number } {
+  
+  // No face detected - use center-weighted default
+  if (!faceBbox) {
     if (aspectRatio === '1:1') {
-      // Top center square - capture head and shoulders
-      return { x: 20, y: 0, width: 60, height: 60 };
+      return { x: 20, y: 5, width: 60, height: 60 };
     } else {
-      // 4:5 portrait - top center, more vertical space for shoulders
-      return { x: 15, y: 0, width: 70, height: 87 }; // 70 * 1.25 ≈ 87.5
+      // 4:5 ratio
+      return { x: 15, y: 5, width: 70, height: 87 };
     }
   }
+
+  // Calculate face dimensions
+  const faceHeight = faceBbox.ymax - faceBbox.ymin;
+  const faceWidth = faceBbox.xmax - faceBbox.xmin;
+  const faceCenterX = (faceBbox.xmin + faceBbox.xmax) / 2;
+  const faceCenterY = (faceBbox.ymin + faceBbox.ymax) / 2;
   
-  // No person detected - center crop
+  console.log(`[generate-face-crops] Face: height=${faceHeight.toFixed(1)}%, width=${faceWidth.toFixed(1)}%, center=(${faceCenterX.toFixed(1)}, ${faceCenterY.toFixed(1)})`);
+
+  // HEAD + SHOULDERS FRAMING:
+  // - Add ~60% of face height ABOVE the face (for hair/forehead)
+  // - Add ~180% of face height BELOW the face (for neck + shoulders)
+  // - Width should be ~3.5x face width to include shoulders
+  
+  const paddingAbove = faceHeight * 0.6;   // Space above head for hair
+  const paddingBelow = faceHeight * 1.8;   // Space for neck + top of shoulders
+  const totalHeight = faceHeight + paddingAbove + paddingBelow;
+  
+  // Calculate width based on aspect ratio
+  let cropWidth: number;
+  let cropHeight: number;
+  
   if (aspectRatio === '1:1') {
-    return { x: 20, y: 20, width: 60, height: 60 };
+    // For 1:1, use the larger of width or height calculation
+    cropHeight = totalHeight;
+    cropWidth = cropHeight; // Square
   } else {
-    // 4:5 ratio
-    return { x: 15, y: 10, width: 70, height: 87 };
+    // For 4:5, height is 1.25x width
+    cropHeight = totalHeight;
+    cropWidth = cropHeight / 1.25;
   }
+  
+  // Ensure minimum crop size (at least 40% of image)
+  cropWidth = Math.max(cropWidth, 40);
+  cropHeight = Math.max(cropHeight, aspectRatio === '1:1' ? 40 : 50);
+  
+  // Cap at reasonable max (90% of image)
+  cropWidth = Math.min(cropWidth, 90);
+  cropHeight = Math.min(cropHeight, 95);
+
+  // Position crop so face is in upper portion, centered horizontally
+  let cropX = faceCenterX - cropWidth / 2;
+  let cropY = faceBbox.ymin - paddingAbove;
+  
+  // Clamp to image bounds
+  cropX = Math.max(0, Math.min(100 - cropWidth, cropX));
+  cropY = Math.max(0, Math.min(100 - cropHeight, cropY));
+
+  return {
+    x: Math.round(cropX),
+    y: Math.round(cropY),
+    width: Math.round(cropWidth),
+    height: Math.round(cropHeight)
+  };
 }
 
 async function updateJob(supabase: any, jobId: string, status: string, progress: number, total: number, message: string) {
