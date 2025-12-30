@@ -79,7 +79,7 @@ export interface FaceCrop {
 export interface FaceJob {
   id: string;
   scrape_run_id: string;
-  type: 'scrape' | 'gender' | 'face_detection' | 'clustering' | 'view' | 'crop';
+  type: 'scrape' | 'gender' | 'face_detection' | 'clustering' | 'view' | 'crop' | 'organize';
   status: 'pending' | 'running' | 'completed' | 'failed';
   progress: number;
   total: number;

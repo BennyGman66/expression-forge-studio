@@ -7,10 +7,10 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Play, RefreshCw, Trash2, CheckCircle, XCircle, Clock, ImageIcon } from "lucide-react";
+import { Loader2, Play, RefreshCw, Trash2, CheckCircle, XCircle, Clock, ImageIcon, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import type { FaceScrapeRun, FaceScrapeImage } from "@/types/face-creator";
+import type { FaceScrapeRun, FaceScrapeImage, FaceJob } from "@/types/face-creator";
 
 interface ScrapePanelProps {
   selectedRunId: string | null;
@@ -31,6 +31,10 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
   const [loadingImages, setLoadingImages] = useState(false);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [imageStats, setImageStats] = useState<{ men: number; women: number; unknown: number } | null>(null);
+  
+  // AVA Organise state
+  const [organizeJob, setOrganizeJob] = useState<FaceJob | null>(null);
+  const [isOrganizing, setIsOrganizing] = useState(false);
 
   useEffect(() => {
     fetchRuns();
@@ -53,12 +57,50 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
   // Fetch images when a run is selected and clear selection
   useEffect(() => {
     setSelectedImages(new Set());
+    setOrganizeJob(null);
     if (selectedRunId) {
       fetchPreviewImages(selectedRunId);
+      fetchOrganizeJob(selectedRunId);
     } else {
       setPreviewImages([]);
       setImageStats(null);
     }
+  }, [selectedRunId]);
+
+  // Subscribe to organize job updates
+  useEffect(() => {
+    if (!selectedRunId) return;
+
+    const channel = supabase
+      .channel(`face-jobs-${selectedRunId}`)
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'face_jobs',
+          filter: `scrape_run_id=eq.${selectedRunId}`
+        },
+        (payload) => {
+          const job = payload.new as FaceJob;
+          if (job.type === 'organize') {
+            setOrganizeJob(job);
+            if (job.status === 'completed') {
+              setIsOrganizing(false);
+              toast({ title: "Complete", description: "AVA Organise finished filtering images" });
+              fetchPreviewImages(selectedRunId);
+            } else if (job.status === 'failed') {
+              setIsOrganizing(false);
+              toast({ title: "Error", description: "AVA Organise failed", variant: "destructive" });
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [selectedRunId]);
 
   const fetchRuns = async () => {
@@ -73,6 +115,22 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
     }
 
     setRuns(data as unknown as FaceScrapeRun[]);
+  };
+
+  const fetchOrganizeJob = async (runId: string) => {
+    const { data, error } = await supabase
+      .from('face_jobs')
+      .select('*')
+      .eq('scrape_run_id', runId)
+      .eq('type', 'organize')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data) {
+      setOrganizeJob(data as unknown as FaceJob);
+      setIsOrganizing(data.status === 'running' || data.status === 'pending');
+    }
   };
 
   const fetchPreviewImages = async (runId: string) => {
@@ -209,6 +267,28 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
 
   const clearSelection = () => {
     setSelectedImages(new Set());
+  };
+
+  const handleAvaOrganise = async () => {
+    if (!selectedRunId) return;
+    
+    setIsOrganizing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('organize-face-images', {
+        body: { scrapeRunId: selectedRunId },
+      });
+
+      if (error) throw error;
+
+      toast({ 
+        title: "AVA Organise Started", 
+        description: "Analyzing images to remove product shots, children, and images without visible faces..." 
+      });
+    } catch (error) {
+      console.error('Error starting organize:', error);
+      setIsOrganizing(false);
+      toast({ title: "Error", description: "Failed to start AVA Organise", variant: "destructive" });
+    }
   };
 
   const handleStartScrape = async () => {
@@ -484,6 +564,28 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
               </div>
             ) : (
               <div className="space-y-4">
+                {/* AVA Organise progress */}
+                {organizeJob && organizeJob.status === 'running' && (
+                  <div className="p-3 bg-muted rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-primary animate-pulse" />
+                        <span className="text-sm font-medium">AVA Organise Running...</span>
+                      </div>
+                      <span className="text-sm text-muted-foreground">
+                        {organizeJob.progress} / {organizeJob.total}
+                      </span>
+                    </div>
+                    <Progress 
+                      value={organizeJob.total > 0 ? (organizeJob.progress / organizeJob.total) * 100 : 0} 
+                      className="h-2" 
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Analyzing images to remove product shots, children, and images without visible faces...
+                    </p>
+                  </div>
+                )}
+
                 {/* Selection toolbar */}
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <p className="text-sm text-muted-foreground">
@@ -491,6 +593,20 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
                     {selectedImages.size > 0 && ` · ${selectedImages.size} selected`}
                   </p>
                   <div className="flex items-center gap-2">
+                    {/* AVA Organise Button */}
+                    <Button 
+                      variant="secondary" 
+                      size="sm" 
+                      onClick={handleAvaOrganise}
+                      disabled={isOrganizing || previewImages.length === 0}
+                    >
+                      {isOrganizing ? (
+                        <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Organizing...</>
+                      ) : (
+                        <><Sparkles className="h-4 w-4 mr-1" /> AVA Organise</>
+                      )}
+                    </Button>
+                    
                     {selectedImages.size > 0 ? (
                       <>
                         <Button variant="outline" size="sm" onClick={clearSelection}>
