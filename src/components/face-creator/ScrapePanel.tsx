@@ -22,8 +22,8 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
   const [loading, setLoading] = useState(false);
   const [startUrl, setStartUrl] = useState("");
   const [brandName, setBrandName] = useState("");
-  const [maxProducts, setMaxProducts] = useState(200);
-  const [imagesPerProduct, setImagesPerProduct] = useState(4);
+  const [maxProducts, setMaxProducts] = useState("200");
+  const [imagesPerProduct, setImagesPerProduct] = useState("4");
 
   useEffect(() => {
     fetchRuns();
@@ -69,8 +69,8 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
         body: {
           startUrl,
           brandName: brandName || new URL(startUrl).hostname.replace('www.', ''),
-          maxProducts,
-          imagesPerProduct,
+          maxProducts: parseInt(maxProducts) || 200,
+          imagesPerProduct: parseInt(imagesPerProduct) || 4,
         },
       });
 
@@ -162,7 +162,17 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
                 min={1}
                 max={1000}
                 value={maxProducts}
-                onChange={(e) => setMaxProducts(Number(e.target.value))}
+                onChange={(e) => setMaxProducts(e.target.value)}
+                onBlur={(e) => {
+                  const num = parseInt(e.target.value);
+                  if (isNaN(num) || num < 1) {
+                    setMaxProducts("200");
+                  } else if (num > 1000) {
+                    setMaxProducts("1000");
+                  } else {
+                    setMaxProducts(String(num));
+                  }
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -173,7 +183,17 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
                 min={1}
                 max={20}
                 value={imagesPerProduct}
-                onChange={(e) => setImagesPerProduct(Number(e.target.value))}
+                onChange={(e) => setImagesPerProduct(e.target.value)}
+                onBlur={(e) => {
+                  const num = parseInt(e.target.value);
+                  if (isNaN(num) || num < 1) {
+                    setImagesPerProduct("4");
+                  } else if (num > 20) {
+                    setImagesPerProduct("20");
+                  } else {
+                    setImagesPerProduct(String(num));
+                  }
+                }}
               />
             </div>
           </div>
