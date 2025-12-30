@@ -76,6 +76,7 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
 
     // Step 1: Gender Classification (for images without gender)
     const unknownGenderImages = images.filter((img: any) => img.gender === 'unknown' || !img.gender);
+    console.log(`Starting gender classification for ${unknownGenderImages.length} images`);
     
     for (const image of unknownGenderImages) {
       try {
@@ -86,6 +87,7 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
           .eq('id', image.id);
         
         image.gender = gender;
+        console.log(`Classified image ${image.id} as ${gender}`);
       } catch (err) {
         console.error('Gender classification error:', err);
       }
@@ -94,6 +96,9 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
       if (progress % 5 === 0) {
         await updateJob(supabase, jobId, 'gender_classification', progress, total);
       }
+      
+      // Add delay between API calls to prevent rate limiting
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     // Step 2: Identity Clustering (group by similar faces)
@@ -116,6 +121,8 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
       .eq('is_ignored', false);
 
     progress = 0;
+    console.log(`Starting view classification for ${identityImages?.length || 0} images`);
+    
     for (const identityImage of (identityImages || [])) {
       try {
         const imageUrl = identityImage.scrape_image?.source_url;
@@ -125,6 +132,7 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
             .from('face_identity_images')
             .update({ view, view_source: 'ai' })
             .eq('id', identityImage.id);
+          console.log(`Classified view for image ${identityImage.id} as ${view}`);
         }
       } catch (err) {
         console.error('View classification error:', err);
@@ -134,6 +142,9 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
       if (progress % 5 === 0) {
         await updateJob(supabase, jobId, 'view_classification', progress, identityImages?.length || 0);
       }
+      
+      // Add delay between API calls to prevent rate limiting
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     // Mark job as completed

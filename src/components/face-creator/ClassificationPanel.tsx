@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -11,10 +12,11 @@ import {
   Play, 
   Users, 
   User, 
-  RotateCcw,
   Eye,
   ChevronRight,
-  X
+  X,
+  HelpCircle,
+  ArrowRight
 } from "lucide-react";
 import {
   Select,
@@ -29,6 +31,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface ClassificationPanelProps {
   runId: string | null;
@@ -40,6 +49,7 @@ interface Identity {
   gender: string;
   image_count: number;
   representative_image_id: string | null;
+  representative_image_url?: string | null;
 }
 
 interface IdentityImage {
@@ -57,20 +67,36 @@ interface IdentityImage {
   } | null;
 }
 
+interface UnclassifiedImage {
+  id: string;
+  stored_url: string | null;
+  source_url: string;
+  gender: string | null;
+}
+
 type ViewType = 'front' | 'side' | 'back' | 'unknown';
+type GenderFilter = 'all' | 'men' | 'women';
 
 export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   const { toast } = useToast();
   const [isRunningAI, setIsRunningAI] = useState(false);
-  const [selectedGender, setSelectedGender] = useState<'men' | 'women'>('women');
+  const [selectedGender, setSelectedGender] = useState<GenderFilter>('all');
   const [identities, setIdentities] = useState<Identity[]>([]);
   const [selectedIdentity, setSelectedIdentity] = useState<string | null>(null);
   const [identityImages, setIdentityImages] = useState<IdentityImage[]>([]);
   const [viewFilter, setViewFilter] = useState<ViewType | 'all'>('all');
   const [isLoading, setIsLoading] = useState(false);
   const [jobProgress, setJobProgress] = useState<{ progress: number; total: number; status: string } | null>(null);
+  
+  // Unclassified state
+  const [unclassifiedImages, setUnclassifiedImages] = useState<UnclassifiedImage[]>([]);
+  const [showUnclassified, setShowUnclassified] = useState(false);
+  
+  // Move image dialog
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [selectedImageToMove, setSelectedImageToMove] = useState<UnclassifiedImage | null>(null);
 
-  // Fetch identities when runId or gender changes
+  // Fetch identities with thumbnails when runId or gender changes
   useEffect(() => {
     if (!runId) {
       setIdentities([]);
@@ -79,19 +105,32 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
 
     async function fetchIdentities() {
       setIsLoading(true);
-      const { data, error } = await supabase
+      
+      let query = supabase
         .from('face_identities')
-        .select('*')
+        .select(`
+          *,
+          representative_image:face_scrape_images!face_identities_representative_image_id_fkey(stored_url, source_url)
+        `)
         .eq('scrape_run_id', runId)
-        .eq('gender', selectedGender)
         .order('image_count', { ascending: false });
+
+      if (selectedGender !== 'all') {
+        query = query.eq('gender', selectedGender);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.error('Error fetching identities:', error);
       } else {
-        setIdentities(data || []);
-        if (data && data.length > 0 && !selectedIdentity) {
-          setSelectedIdentity(data[0].id);
+        const identitiesWithUrls = (data || []).map((identity: any) => ({
+          ...identity,
+          representative_image_url: identity.representative_image?.stored_url || identity.representative_image?.source_url || null,
+        }));
+        setIdentities(identitiesWithUrls);
+        if (identitiesWithUrls.length > 0 && !selectedIdentity && !showUnclassified) {
+          setSelectedIdentity(identitiesWithUrls[0].id);
         }
       }
       setIsLoading(false);
@@ -100,9 +139,39 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     fetchIdentities();
   }, [runId, selectedGender]);
 
+  // Fetch unclassified images
+  useEffect(() => {
+    if (!runId) {
+      setUnclassifiedImages([]);
+      return;
+    }
+
+    async function fetchUnclassified() {
+      // Get all scrape images for this run
+      const { data: allImages } = await supabase
+        .from('face_scrape_images')
+        .select('id, stored_url, source_url, gender')
+        .eq('scrape_run_id', runId);
+
+      // Get all classified image IDs
+      const { data: classifiedLinks } = await supabase
+        .from('face_identity_images')
+        .select('scrape_image_id')
+        .eq('is_ignored', false);
+
+      const classifiedIds = new Set((classifiedLinks || []).map(l => l.scrape_image_id));
+      
+      // Filter to unclassified
+      const unclassified = (allImages || []).filter(img => !classifiedIds.has(img.id));
+      setUnclassifiedImages(unclassified);
+    }
+
+    fetchUnclassified();
+  }, [runId, identities]);
+
   // Fetch identity images when selected identity changes
   useEffect(() => {
-    if (!selectedIdentity) {
+    if (!selectedIdentity || showUnclassified) {
       setIdentityImages([]);
       return;
     }
@@ -125,7 +194,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     }
 
     fetchIdentityImages();
-  }, [selectedIdentity]);
+  }, [selectedIdentity, showUnclassified]);
 
   // Subscribe to job progress
   useEffect(() => {
@@ -152,7 +221,6 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           } else if (job.status === 'completed' || job.status === 'failed') {
             setJobProgress(null);
             setIsRunningAI(false);
-            // Refresh data
             if (job.status === 'completed') {
               toast({ title: "AI classification completed" });
             }
@@ -213,11 +281,60 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
       toast({ title: "Failed to remove image", variant: "destructive" });
     } else {
       setIdentityImages(prev => prev.filter(img => img.id !== imageId));
-      // Update count in identities
       setIdentities(prev =>
         prev.map(id => id.id === selectedIdentity ? { ...id, image_count: id.image_count - 1 } : id)
       );
     }
+  };
+
+  const handleMoveToModel = async (targetIdentityId: string) => {
+    if (!selectedImageToMove) return;
+
+    // Create a new face_identity_images record
+    const { error } = await supabase
+      .from('face_identity_images')
+      .insert({
+        identity_id: targetIdentityId,
+        scrape_image_id: selectedImageToMove.id,
+        view: 'unknown',
+        view_source: 'manual',
+      });
+
+    if (error) {
+      toast({ title: "Failed to move image", variant: "destructive" });
+    } else {
+      // Get current identity to update count
+      const targetIdentity = identities.find(id => id.id === targetIdentityId);
+      if (targetIdentity) {
+        await supabase
+          .from('face_identities')
+          .update({ image_count: targetIdentity.image_count + 1 })
+          .eq('id', targetIdentityId);
+      }
+
+      // Remove from unclassified
+      setUnclassifiedImages(prev => prev.filter(img => img.id !== selectedImageToMove.id));
+      
+      // Update identity count in local state
+      setIdentities(prev =>
+        prev.map(id => id.id === targetIdentityId ? { ...id, image_count: id.image_count + 1 } : id)
+      );
+
+      toast({ title: "Image moved successfully" });
+    }
+
+    setMoveDialogOpen(false);
+    setSelectedImageToMove(null);
+  };
+
+  const handleSelectUnclassified = () => {
+    setShowUnclassified(true);
+    setSelectedIdentity(null);
+  };
+
+  const handleSelectIdentity = (identityId: string) => {
+    setShowUnclassified(false);
+    setSelectedIdentity(identityId);
   };
 
   const filteredImages = viewFilter === 'all' 
@@ -271,7 +388,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           </Card>
         )}
 
-        {/* Gender Toggle */}
+        {/* Gender Filter */}
         <Card>
           <CardHeader className="py-3">
             <CardTitle className="text-sm font-medium">Gender</CardTitle>
@@ -279,11 +396,24 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           <CardContent className="py-2">
             <div className="flex gap-2">
               <Button
+                variant={selectedGender === 'all' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => {
+                  setSelectedGender('all');
+                  setSelectedIdentity(null);
+                  setShowUnclassified(false);
+                }}
+                className="flex-1"
+              >
+                All
+              </Button>
+              <Button
                 variant={selectedGender === 'women' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => {
                   setSelectedGender('women');
                   setSelectedIdentity(null);
+                  setShowUnclassified(false);
                 }}
                 className="flex-1"
               >
@@ -296,6 +426,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                 onClick={() => {
                   setSelectedGender('men');
                   setSelectedIdentity(null);
+                  setShowUnclassified(false);
                 }}
                 className="flex-1"
               >
@@ -322,29 +453,73 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                     <Skeleton key={i} className="h-12 w-full" />
                   ))}
                 </div>
-              ) : identities.length === 0 ? (
-                <div className="p-4 text-center text-muted-foreground text-sm">
-                  No models found. Run AI classification first.
-                </div>
               ) : (
                 <div className="divide-y divide-border">
-                  {identities.map(identity => (
+                  {/* Unclassified Category */}
+                  {unclassifiedImages.length > 0 && (
                     <button
-                      key={identity.id}
-                      onClick={() => setSelectedIdentity(identity.id)}
+                      onClick={handleSelectUnclassified}
                       className={`w-full px-4 py-3 text-left hover:bg-muted/50 flex items-center justify-between ${
-                        selectedIdentity === identity.id ? 'bg-muted' : ''
+                        showUnclassified ? 'bg-muted' : ''
                       }`}
                     >
-                      <span className="font-medium">{identity.name}</span>
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-8 w-8">
+                          <AvatarFallback className="bg-amber-500/20 text-amber-600">
+                            <HelpCircle className="h-4 w-4" />
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="font-medium text-amber-600">Unclassified</span>
+                      </div>
                       <div className="flex items-center gap-2">
-                        <Badge variant="secondary">{identity.image_count}</Badge>
-                        {selectedIdentity === identity.id && (
+                        <Badge variant="secondary" className="bg-amber-500/20 text-amber-600">
+                          {unclassifiedImages.length}
+                        </Badge>
+                        {showUnclassified && (
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
                         )}
                       </div>
                     </button>
-                  ))}
+                  )}
+
+                  {/* Model List */}
+                  {identities.length === 0 && unclassifiedImages.length === 0 ? (
+                    <div className="p-4 text-center text-muted-foreground text-sm">
+                      No models found. Run AI classification first.
+                    </div>
+                  ) : (
+                    identities.map(identity => (
+                      <button
+                        key={identity.id}
+                        onClick={() => handleSelectIdentity(identity.id)}
+                        className={`w-full px-4 py-3 text-left hover:bg-muted/50 flex items-center justify-between ${
+                          selectedIdentity === identity.id && !showUnclassified ? 'bg-muted' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-8 w-8">
+                            {identity.representative_image_url ? (
+                              <AvatarImage 
+                                src={identity.representative_image_url} 
+                                alt={identity.name}
+                                className="object-cover"
+                              />
+                            ) : null}
+                            <AvatarFallback>
+                              <User className="h-4 w-4" />
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="font-medium">{identity.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary">{identity.image_count}</Badge>
+                          {selectedIdentity === identity.id && !showUnclassified && (
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </div>
+                      </button>
+                    ))
+                  )}
                 </div>
               )}
             </ScrollArea>
@@ -358,32 +533,68 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           <CardHeader className="py-4 flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-lg">
-                {selectedIdentityData?.name || 'Select a model'}
+                {showUnclassified ? 'Unclassified Images' : selectedIdentityData?.name || 'Select a model'}
               </CardTitle>
-              {selectedIdentityData && (
+              {(showUnclassified || selectedIdentityData) && (
                 <p className="text-sm text-muted-foreground">
-                  {filteredImages.length} images
+                  {showUnclassified ? unclassifiedImages.length : filteredImages.length} images
                 </p>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <Select value={viewFilter} onValueChange={(v) => setViewFilter(v as any)}>
-                <SelectTrigger className="w-32">
-                  <Eye className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="All views" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Views</SelectItem>
-                  <SelectItem value="front">Front</SelectItem>
-                  <SelectItem value="side">Side</SelectItem>
-                  <SelectItem value="back">Back</SelectItem>
-                  <SelectItem value="unknown">Unknown</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {!showUnclassified && (
+              <div className="flex items-center gap-2">
+                <Select value={viewFilter} onValueChange={(v) => setViewFilter(v as any)}>
+                  <SelectTrigger className="w-32">
+                    <Eye className="h-4 w-4 mr-2" />
+                    <SelectValue placeholder="All views" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Views</SelectItem>
+                    <SelectItem value="front">Front</SelectItem>
+                    <SelectItem value="side">Side</SelectItem>
+                    <SelectItem value="back">Back</SelectItem>
+                    <SelectItem value="unknown">Unknown</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
-            {!selectedIdentity ? (
+            {showUnclassified ? (
+              // Unclassified Images Grid
+              unclassifiedImages.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground">
+                  No unclassified images
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                  {unclassifiedImages.map(image => (
+                    <div 
+                      key={image.id} 
+                      className="relative group rounded-lg overflow-hidden border border-border bg-muted/30 cursor-pointer"
+                      onClick={() => {
+                        setSelectedImageToMove(image);
+                        setMoveDialogOpen(true);
+                      }}
+                    >
+                      <img
+                        src={image.stored_url || image.source_url}
+                        alt=""
+                        className="w-full aspect-[3/4] object-cover"
+                        loading="lazy"
+                      />
+                      
+                      {/* Move indicator */}
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <div className="bg-background/90 rounded-full p-2">
+                          <ArrowRight className="h-5 w-5 text-foreground" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : !selectedIdentity ? (
               <div className="py-12 text-center text-muted-foreground">
                 Select a model from the sidebar to view their images
               </div>
@@ -448,6 +659,46 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Move Image Dialog */}
+      <Dialog open={moveDialogOpen} onOpenChange={setMoveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Move to Model</DialogTitle>
+            <DialogDescription>
+              Select which model to assign this image to.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[400px] overflow-y-auto">
+            <div className="space-y-2">
+              {identities.map(identity => (
+                <button
+                  key={identity.id}
+                  onClick={() => handleMoveToModel(identity.id)}
+                  className="w-full px-4 py-3 text-left hover:bg-muted/50 rounded-lg flex items-center justify-between border border-border"
+                >
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-8 w-8">
+                      {identity.representative_image_url ? (
+                        <AvatarImage 
+                          src={identity.representative_image_url} 
+                          alt={identity.name}
+                          className="object-cover"
+                        />
+                      ) : null}
+                      <AvatarFallback>
+                        <User className="h-4 w-4" />
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="font-medium">{identity.name}</span>
+                  </div>
+                  <Badge variant="secondary">{identity.image_count}</Badge>
+                </button>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
