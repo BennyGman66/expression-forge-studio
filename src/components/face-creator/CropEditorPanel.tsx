@@ -446,20 +446,23 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                   style={{ aspectRatio: aspectRatio === '1:1' ? '1/1' : '4/5' }}
                 >
                   {selectedImage.crop || cropRect.width > 0 ? (
-                    <div className="w-full h-full overflow-hidden">
+                    <div 
+                      className="w-full h-full overflow-hidden relative"
+                    >
                       <img
                         src={selectedImage.stored_url || selectedImage.source_url}
                         alt=""
-                        className="absolute"
+                        className="absolute origin-top-left"
                         style={{
-                          // Scale image so crop area fills the container
                           // cropRect values are percentages (0-100)
-                          width: `${100 / (cropRect.width / 100)}%`,
-                          height: `${100 / (cropRect.height / 100)}%`,
-                          // Position to show the crop area
-                          left: `${-cropRect.x / (cropRect.width / 100)}%`,
-                          top: `${-cropRect.y / (cropRect.height / 100)}%`,
-                          objectFit: 'cover',
+                          // Scale: if crop is 60% wide, scale to 100/60 = 166%
+                          transform: `scale(${100 / cropRect.width})`,
+                          transformOrigin: 'top left',
+                          // Position: move by the crop offset scaled
+                          left: `${-cropRect.x * (100 / cropRect.width)}%`,
+                          top: `${-cropRect.y * (100 / cropRect.height)}%`,
+                          width: '100%',
+                          height: 'auto',
                         }}
                       />
                     </div>
