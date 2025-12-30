@@ -115,7 +115,9 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
       case 'completed':
         return <Badge variant="default" className="bg-green-500"><CheckCircle className="h-3 w-3 mr-1" />Completed</Badge>;
       case 'running':
-        return <Badge variant="default" className="bg-blue-500"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Running</Badge>;
+        return <Badge variant="default" className="bg-blue-500"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Scraping</Badge>;
+      case 'mapping':
+        return <Badge variant="default" className="bg-yellow-500"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Mapping</Badge>;
       case 'failed':
         return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Failed</Badge>;
       default:
@@ -231,11 +233,13 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
                       </div>
                     </div>
 
-                    {run.status === 'running' && (
-                      <div className="space-y-1">
-                        <Progress value={(run.progress / Math.max(run.total, 1)) * 100} />
+                    {(run.status === 'running' || run.status === 'mapping') && (
+                      <div className="space-y-1 mt-2">
+                        <Progress value={run.total > 0 ? (run.progress / run.total) * 100 : 0} className="h-2" />
                         <p className="text-xs text-muted-foreground">
-                          {run.progress} / {run.total} images
+                          {run.status === 'mapping' 
+                            ? 'Mapping website for products...' 
+                            : `${run.progress} / ${run.total} products scraped`}
                         </p>
                       </div>
                     )}

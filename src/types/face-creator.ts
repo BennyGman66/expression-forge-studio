@@ -4,7 +4,7 @@ export interface FaceScrapeRun {
   start_url: string;
   max_products: number;
   images_per_product: number;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'mapping' | 'running' | 'completed' | 'failed';
   progress: number;
   total: number;
   logs: Array<{ timestamp: string; message: string }>;

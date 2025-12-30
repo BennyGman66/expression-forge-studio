@@ -61,6 +61,12 @@ async function runScrapeJob(runId: string, startUrl: string, maxProducts: number
   const firecrawlApiKey = Deno.env.get('FIRECRAWL_API_KEY');
   
   try {
+    // Update status to mapping
+    await supabase
+      .from('face_scrape_runs')
+      .update({ status: 'mapping' })
+      .eq('id', runId);
+
     // Map the website to find product URLs
     console.log('Mapping website:', startUrl);
     
@@ -79,30 +85,77 @@ async function runScrapeJob(runId: string, startUrl: string, maxProducts: number
     const mapData = await mapResponse.json();
     const allLinks = mapData.links || [];
     
-    // Filter for product-like URLs
-    const productPatterns = ['/product/', '/p/', '/pd/', '/dp/', '/item/', '/products/'];
-    const excludePatterns = ['/cart', '/checkout', '/account', '/login', '/search', '/filter', '.css', '.js', '.json'];
+    console.log(`Found ${allLinks.length} total links`);
+
+    // Broader product URL patterns for different e-commerce sites
+    const productPatterns = [
+      '/product/', '/p/', '/pd/', '/dp/', '/item/', '/products/',
+      '/style/', '/styles/', '/shop/', '-p-', '_p_',
+      '/detail/', '/details/', '/buy/', '/goods/',
+    ];
+    const excludePatterns = [
+      '/cart', '/checkout', '/account', '/login', '/search', '/filter',
+      '.css', '.js', '.json', '/category', '/collection', '/page/',
+      '/help', '/faq', '/contact', '/about', '/blog', '/news',
+      '/wishlist', '/compare', '/review', '/sitemap', '/privacy',
+      '/terms', '/return', '/delivery', '/size-guide',
+    ];
     
-    const productUrls = allLinks.filter((url: string) => {
+    let productUrls = allLinks.filter((url: string) => {
       const lowerUrl = url.toLowerCase();
       const hasProductPattern = productPatterns.some(p => lowerUrl.includes(p));
       const hasExcludePattern = excludePatterns.some(p => lowerUrl.includes(p));
       return hasProductPattern && !hasExcludePattern;
-    }).slice(0, maxProducts);
+    });
 
-    console.log(`Found ${productUrls.length} product URLs`);
+    // If no products found with patterns, try URLs with SKU-like segments
+    if (productUrls.length === 0) {
+      console.log('No products found with patterns, trying SKU detection...');
+      productUrls = allLinks.filter((url: string) => {
+        // Look for URLs with product-like identifiers (alphanumeric codes)
+        const hasSkuPattern = /\/[A-Z0-9]{5,}[_-]?[A-Z0-9]*$/i.test(url);
+        const hasExcludePattern = excludePatterns.some(p => url.toLowerCase().includes(p));
+        return hasSkuPattern && !hasExcludePattern;
+      });
+    }
 
-    // Update total
+    productUrls = productUrls.slice(0, maxProducts);
+    console.log(`Found ${productUrls.length} product URLs after filtering`);
+
+    // Set initial total and switch to running status
+    const estimatedTotal = productUrls.length * imagesPerProduct;
     await supabase
       .from('face_scrape_runs')
-      .update({ total: productUrls.length * imagesPerProduct })
+      .update({ 
+        status: 'running',
+        total: estimatedTotal,
+        progress: 0
+      })
       .eq('id', runId);
+
+    if (productUrls.length === 0) {
+      // No products found, complete with 0
+      await supabase
+        .from('face_scrape_runs')
+        .update({ status: 'completed', total: 0, progress: 0 })
+        .eq('id', runId);
+      console.log('No products found, marking as completed');
+      return;
+    }
 
     let progress = 0;
     const seenHashes = new Set<string>();
 
-    for (const productUrl of productUrls) {
+    for (let pIdx = 0; pIdx < productUrls.length; pIdx++) {
+      const productUrl = productUrls[pIdx];
+      
       try {
+        // Update progress to show which product we're on
+        await supabase
+          .from('face_scrape_runs')
+          .update({ progress: pIdx + 1, total: productUrls.length })
+          .eq('id', runId);
+
         // Scrape the product page
         const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
           method: 'POST',
@@ -144,29 +197,29 @@ async function runScrapeJob(runId: string, startUrl: string, maxProducts: number
               gender: gender,
               gender_source: gender !== 'unknown' ? 'url' : 'unknown',
             });
-
-          progress++;
-          
-          // Update progress periodically
-          if (progress % 10 === 0) {
-            await supabase
-              .from('face_scrape_runs')
-              .update({ progress })
-              .eq('id', runId);
-          }
         }
       } catch (err) {
         console.error('Error scraping product:', productUrl, err);
       }
     }
 
+    // Get final image count
+    const { count } = await supabase
+      .from('face_scrape_images')
+      .select('*', { count: 'exact', head: true })
+      .eq('scrape_run_id', runId);
+
     // Mark as completed
     await supabase
       .from('face_scrape_runs')
-      .update({ status: 'completed', progress })
+      .update({ 
+        status: 'completed', 
+        progress: productUrls.length,
+        total: productUrls.length
+      })
       .eq('id', runId);
 
-    console.log('Face scrape completed:', runId);
+    console.log(`Face scrape completed: ${runId}, ${count || 0} images`);
   } catch (error) {
     console.error('Face scrape job failed:', error);
     await supabase
