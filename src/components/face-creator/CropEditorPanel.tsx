@@ -442,18 +442,30 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
             {selectedImage ? (
               <>
                 <div 
-                  className="bg-muted rounded-lg overflow-hidden"
+                  className="bg-muted rounded-lg overflow-hidden relative"
                   style={{ aspectRatio: aspectRatio === '1:1' ? '1/1' : '4/5' }}
                 >
-                  {selectedImage.crop?.cropped_stored_url ? (
-                    <img
-                      src={selectedImage.crop.cropped_stored_url}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
+                  {selectedImage.crop || cropRect.width > 0 ? (
+                    <div className="w-full h-full overflow-hidden">
+                      <img
+                        src={selectedImage.stored_url || selectedImage.source_url}
+                        alt=""
+                        className="absolute"
+                        style={{
+                          // Scale image so crop area fills the container
+                          // cropRect values are percentages (0-100)
+                          width: `${100 / (cropRect.width / 100)}%`,
+                          height: `${100 / (cropRect.height / 100)}%`,
+                          // Position to show the crop area
+                          left: `${-cropRect.x / (cropRect.width / 100)}%`,
+                          top: `${-cropRect.y / (cropRect.height / 100)}%`,
+                          objectFit: 'cover',
+                        }}
+                      />
+                    </div>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">
-                      No crop generated
+                      No crop defined
                     </div>
                   )}
                 </div>
