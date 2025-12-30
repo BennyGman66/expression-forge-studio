@@ -267,16 +267,54 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         </div>
       </div>
 
-      {/* Progress */}
-      {job && job.status === 'running' && (
-        <Card>
+      {/* Job Status Bar */}
+      {job && (
+        <Card className={`border-l-4 ${
+          job.status === 'running' ? 'border-l-blue-500' :
+          job.status === 'completed' ? 'border-l-green-500' :
+          job.status === 'failed' ? 'border-l-destructive' :
+          'border-l-muted-foreground'
+        }`}>
           <CardContent className="py-4">
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Generating crops...</span>
-                <span>{job.progress} / {job.total}</span>
+            <div className="space-y-3">
+              {/* Status header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {job.status === 'running' && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+                  {job.status === 'completed' && <Check className="h-4 w-4 text-green-500" />}
+                  {job.status === 'failed' && <span className="h-4 w-4 text-destructive">✕</span>}
+                  {job.status === 'pending' && <span className="h-4 w-4 text-muted-foreground">⏳</span>}
+                  <span className="font-medium">
+                    {job.status === 'running' ? 'Generating Crops...' :
+                     job.status === 'completed' ? 'Crop Generation Complete' :
+                     job.status === 'failed' ? 'Crop Generation Failed' :
+                     'Pending'}
+                  </span>
+                </div>
+                <Badge variant={
+                  job.status === 'running' ? 'default' :
+                  job.status === 'completed' ? 'secondary' :
+                  job.status === 'failed' ? 'destructive' :
+                  'outline'
+                }>
+                  {job.progress} / {job.total}
+                </Badge>
               </div>
-              <Progress value={(job.progress / Math.max(job.total, 1)) * 100} />
+              
+              {/* Progress bar */}
+              {(job.status === 'running' || job.status === 'completed') && (
+                <Progress 
+                  value={(job.progress / Math.max(job.total, 1)) * 100} 
+                  className={job.status === 'completed' ? '[&>div]:bg-green-500' : ''}
+                />
+              )}
+              
+              {/* Latest log message */}
+              {job.logs && job.logs.length > 0 && (
+                <p className="text-xs text-muted-foreground truncate">
+                  {job.logs[job.logs.length - 1]?.message}
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
