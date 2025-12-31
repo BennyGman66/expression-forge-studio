@@ -369,14 +369,78 @@ function normalizeImageUrl(src: string, origin: string): string | null {
     url = origin + '/' + url;
   }
   
-  // Remove query params that might be for sizing (keep the URL simpler)
-  // But keep essential params like those with hash/version info
   try {
     const urlObj = new URL(url);
-    return urlObj.origin + urlObj.pathname;
+    const baseUrl = urlObj.origin + urlObj.pathname;
+    
+    // Apply CDN-specific high-resolution transformations
+    return getHighResImageUrl(baseUrl);
   } catch {
     return null;
   }
+}
+
+// Transform image URLs to request highest resolution versions
+function getHighResImageUrl(url: string): string {
+  const lowerUrl = url.toLowerCase();
+  
+  // Scene7 (used by Tommy Hilfiger, Nike, etc.)
+  // Format: /is/image/Namespace/ImageName
+  if (lowerUrl.includes('scene7.com') || lowerUrl.includes('/is/image/')) {
+    // Request 2000x2000 PNG with alpha for best quality
+    return `${url}?wid=2000&hei=2000&fmt=png-alpha&qlt=100`;
+  }
+  
+  // Cloudinary
+  // Format: /upload/[transformations]/image.jpg
+  if (lowerUrl.includes('cloudinary.com')) {
+    // Insert high-res transformation after /upload/
+    if (url.includes('/upload/')) {
+      return url.replace('/upload/', '/upload/w_2000,h_2000,c_limit,q_100,f_png/');
+    }
+    return url;
+  }
+  
+  // Shopify CDN
+  // Format: cdn.shopify.com/.../image_100x.jpg or _small.jpg
+  if (lowerUrl.includes('cdn.shopify.com') || lowerUrl.includes('shopify.com/s/files')) {
+    // Remove size constraints to get original
+    let highResUrl = url
+      .replace(/_\d+x\d*/gi, '')  // Remove _100x100, _500x, etc.
+      .replace(/_pico|_icon|_thumb|_small|_compact|_medium|_large|_grande|_1024x1024|_2048x2048/gi, '');
+    
+    // Ensure .png format for quality
+    if (highResUrl.match(/\.(jpg|jpeg|webp)$/i)) {
+      // Shopify can convert formats via URL
+      highResUrl = highResUrl.replace(/\.(jpg|jpeg|webp)$/i, '.png');
+    }
+    return highResUrl;
+  }
+  
+  // Imgix
+  if (lowerUrl.includes('imgix.net')) {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}w=2000&h=2000&fit=max&q=100&fm=png`;
+  }
+  
+  // Contentful
+  if (lowerUrl.includes('ctfassets.net') || lowerUrl.includes('contentful.com')) {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}w=2000&h=2000&q=100&fm=png`;
+  }
+  
+  // Fastly/Image optimization services with common params
+  if (lowerUrl.includes('fastly') || url.includes('?')) {
+    // For URLs that already have params, try to override with high-res
+    const urlObj = new URL(url);
+    urlObj.searchParams.set('width', '2000');
+    urlObj.searchParams.set('height', '2000');
+    urlObj.searchParams.set('quality', '100');
+    return urlObj.toString();
+  }
+  
+  // Generic: return as-is but try PNG format if applicable
+  return url;
 }
 
 function isExcludedImage(url: string): boolean {
