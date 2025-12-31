@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -6,9 +6,11 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check } from "lucide-react";
+import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useFaceDetector } from "@/hooks/useFaceDetector";
+import { calculateHeadAndShouldersCrop, getBestFaceDetection } from "@/lib/cropCalculation";
 import type { FaceScrapeImage, FaceCrop, FaceJob } from "@/types/face-creator";
 
 interface CropEditorPanelProps {
@@ -21,12 +23,16 @@ interface ImageWithCrop extends FaceScrapeImage {
 
 export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const { toast } = useToast();
+  const { detectFaces, isReady: detectorReady, isLoading: detectorLoading } = useFaceDetector();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+  const hiddenImgRef = useRef<HTMLImageElement | null>(null);
   const [images, setImages] = useState<ImageWithCrop[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [job, setJob] = useState<FaceJob | null>(null);
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '4:5'>('1:1');
   const [cropRect, setCropRect] = useState({ x: 0, y: 0, width: 200, height: 200 });
@@ -167,28 +173,145 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
   };
 
+  // Load image and detect face using MediaPipe
+  const loadImageAndDetect = useCallback(async (imageUrl: string): Promise<{ imageWidth: number; imageHeight: number; faceBbox: any | null }> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = async () => {
+        try {
+          const detections = await detectFaces(img);
+          const faceBbox = getBestFaceDetection(detections);
+          resolve({ 
+            imageWidth: img.naturalWidth, 
+            imageHeight: img.naturalHeight, 
+            faceBbox 
+          });
+        } catch (error) {
+          console.error('Face detection error:', error);
+          resolve({ imageWidth: img.naturalWidth, imageHeight: img.naturalHeight, faceBbox: null });
+        }
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = imageUrl;
+    });
+  }, [detectFaces]);
+
+  // Detect face for current selected image
+  const handleDetectFace = async () => {
+    if (!selectedImage || !detectorReady) return;
+    
+    setDetecting(true);
+    try {
+      const imageUrl = selectedImage.stored_url || selectedImage.source_url;
+      const { imageWidth, imageHeight, faceBbox } = await loadImageAndDetect(imageUrl);
+      
+      // Calculate crop coordinates
+      const cropCoords = calculateHeadAndShouldersCrop(faceBbox, imageWidth, imageHeight, aspectRatio);
+      
+      // Save to database
+      if (selectedImage.crop) {
+        await supabase
+          .from('face_crops')
+          .update({
+            crop_x: Math.round(cropCoords.x),
+            crop_y: Math.round(cropCoords.y),
+            crop_width: Math.round(cropCoords.width),
+            crop_height: Math.round(cropCoords.height),
+            aspect_ratio: aspectRatio,
+            is_auto: true,
+          })
+          .eq('id', selectedImage.crop.id);
+      } else {
+        await supabase
+          .from('face_crops')
+          .insert({
+            scrape_image_id: selectedImage.id,
+            crop_x: Math.round(cropCoords.x),
+            crop_y: Math.round(cropCoords.y),
+            crop_width: Math.round(cropCoords.width),
+            crop_height: Math.round(cropCoords.height),
+            aspect_ratio: aspectRatio,
+            is_auto: true,
+          });
+      }
+      
+      // Update cropRect immediately (convert percentages to pixels)
+      if (imageBounds.width > 0) {
+        setCropRect({
+          x: imageBounds.offsetX + (cropCoords.x / 100) * imageBounds.width,
+          y: imageBounds.offsetY + (cropCoords.y / 100) * imageBounds.height,
+          width: (cropCoords.width / 100) * imageBounds.width,
+          height: (cropCoords.height / 100) * imageBounds.height,
+        });
+      }
+      
+      toast({ title: "Face Detected", description: faceBbox ? "Crop positioned around detected face" : "No face found - using default crop" });
+      fetchImagesWithCrops();
+    } catch (error) {
+      console.error('Error detecting face:', error);
+      toast({ title: "Error", description: "Failed to detect face", variant: "destructive" });
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  // Batch auto-generate crops using MediaPipe (client-side)
   const handleGenerateCrops = async () => {
-    if (!runId) return;
+    if (!runId || !detectorReady || images.length === 0) return;
+    
     setGenerating(true);
-    setJob(null); // Clear stale job display
+    setBatchProgress({ current: 0, total: images.length });
     
     try {
-      const { error } = await supabase.functions.invoke('generate-face-crops', {
-        body: { runId, aspectRatio },
-      });
-
-      if (error) throw error;
-      toast({ title: "Started", description: "Crop generation started" });
+      for (let i = 0; i < images.length; i++) {
+        const image = images[i];
+        setBatchProgress({ current: i + 1, total: images.length });
+        
+        try {
+          const imageUrl = image.stored_url || image.source_url;
+          const { imageWidth, imageHeight, faceBbox } = await loadImageAndDetect(imageUrl);
+          const cropCoords = calculateHeadAndShouldersCrop(faceBbox, imageWidth, imageHeight, aspectRatio);
+          
+          // Upsert crop
+          if (image.crop) {
+            await supabase
+              .from('face_crops')
+              .update({
+                crop_x: Math.round(cropCoords.x),
+                crop_y: Math.round(cropCoords.y),
+                crop_width: Math.round(cropCoords.width),
+                crop_height: Math.round(cropCoords.height),
+                aspect_ratio: aspectRatio,
+                is_auto: true,
+              })
+              .eq('id', image.crop.id);
+          } else {
+            await supabase
+              .from('face_crops')
+              .insert({
+                scrape_image_id: image.id,
+                crop_x: Math.round(cropCoords.x),
+                crop_y: Math.round(cropCoords.y),
+                crop_width: Math.round(cropCoords.width),
+                crop_height: Math.round(cropCoords.height),
+                aspect_ratio: aspectRatio,
+                is_auto: true,
+              });
+          }
+        } catch (imgError) {
+          console.error(`Error processing image ${image.id}:`, imgError);
+        }
+      }
       
-      // Force re-fetch to capture new job
-      setTimeout(() => {
-        fetchJob();
-        fetchImagesWithCrops();
-      }, 1000);
+      toast({ title: "Complete", description: `Generated crops for ${images.length} images` });
+      fetchImagesWithCrops();
     } catch (error) {
       console.error('Error generating crops:', error);
-      toast({ title: "Error", description: "Failed to start crop generation", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to generate crops", variant: "destructive" });
+    } finally {
       setGenerating(false);
+      setBatchProgress({ current: 0, total: 0 });
     }
   };
 
@@ -410,16 +533,38 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           </Button>
           <Button 
             onClick={handleGenerateCrops} 
-            disabled={generating || images.length === 0}
+            disabled={generating || images.length === 0 || !detectorReady}
           >
             {generating ? (
-              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Generating...</>
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> {batchProgress.current}/{batchProgress.total}</>
+            ) : detectorLoading ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading AI...</>
             ) : (
               <><Play className="h-4 w-4 mr-2" /> Auto-Generate Crops</>
             )}
           </Button>
         </div>
       </div>
+
+      {/* Batch progress indicator */}
+      {generating && batchProgress.total > 0 && (
+        <Card className="border-l-4 border-l-blue-500">
+          <CardContent className="py-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                  <span className="font-medium">Detecting Faces...</span>
+                </div>
+                <Badge variant="default">
+                  {batchProgress.current} / {batchProgress.total}
+                </Badge>
+              </div>
+              <Progress value={(batchProgress.current / batchProgress.total) * 100} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Job Status Bar */}
       {job && (
@@ -670,6 +815,23 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                     </div>
                   )}
                 </div>
+
+                {/* Detect Face button */}
+                <Button 
+                  variant="secondary" 
+                  size="sm" 
+                  className="w-full"
+                  onClick={handleDetectFace}
+                  disabled={detecting || !detectorReady}
+                >
+                  {detecting ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Detecting...</>
+                  ) : detectorLoading ? (
+                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading AI...</>
+                  ) : (
+                    <><Scan className="h-4 w-4 mr-2" /> Detect Face</>
+                  )}
+                </Button>
 
                 <div className="flex gap-2">
                   <Button 
