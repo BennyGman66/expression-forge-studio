@@ -53,10 +53,10 @@ export function calculateHeadAndShouldersCrop(
   const faceHeightPercent = (faceBbox.height / imageHeight) * 100;
   const faceWidthPercent = (faceBbox.width / imageWidth) * 100;
 
-  // Expansion factors for head-and-shoulders framing
-  const aboveFaceMultiplier = 0.4;  // 40% of face height above
-  const belowFaceMultiplier = 2.5;   // 250% of face height below (shoulders)
-  const horizontalPadding = 1.8;     // 180% of face width total
+  // Tight expansion factors for head-and-shoulders framing
+  const aboveFaceMultiplier = 0.15;  // 15% of face height above (just hair)
+  const belowFaceMultiplier = 1.5;   // 150% of face height below (to shoulder edge)
+  const horizontalPadding = 1.3;     // 130% of face width total (tighter)
 
   // Calculate vertical extent
   const topY = faceTopPercent - (faceHeightPercent * aboveFaceMultiplier);
