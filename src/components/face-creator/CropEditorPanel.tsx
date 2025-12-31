@@ -582,6 +582,10 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         .delete()
         .in('scrape_image_id', imageIds);
       
+      // Reset the progress bar and job state
+      setBatchProgress({ current: 0, total: 0, failed: 0 });
+      setJob(null);
+      
       toast({ 
         title: "Crops Reset", 
         description: `Deleted crops for ${images.length} images` 
