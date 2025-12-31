@@ -29,8 +29,9 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const [job, setJob] = useState<FaceJob | null>(null);
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '4:5'>('1:1');
   const [cropRect, setCropRect] = useState({ x: 0, y: 0, width: 200, height: 200 });
-  const [isDragging, setIsDragging] = useState(false);
+  const [interactionMode, setInteractionMode] = useState<'none' | 'move' | 'nw' | 'ne' | 'sw' | 'se'>('none');
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [startCrop, setStartCrop] = useState({ x: 0, y: 0, width: 0, height: 0 });
 
   const selectedImage = images[selectedIndex];
 
@@ -222,25 +223,116 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
   };
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setIsDragging(true);
-    setDragStart({
-      x: e.clientX - rect.left - cropRect.x,
-      y: e.clientY - rect.top - cropRect.y,
-    });
+  const getAspectMultiplier = () => aspectRatio === '1:1' ? 1 : 1.25; // height = width * multiplier
+
+  const handleCropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const rect = e.currentTarget.parentElement!.getBoundingClientRect();
+    setInteractionMode('move');
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setStartCrop({ ...cropRect });
+  };
+
+  const handleCornerMouseDown = (e: React.MouseEvent<HTMLDivElement>, corner: 'nw' | 'ne' | 'sw' | 'se') => {
+    e.stopPropagation();
+    setInteractionMode(corner);
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setStartCrop({ ...cropRect });
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDragging) return;
+    if (interactionMode === 'none') return;
+    
     const rect = e.currentTarget.getBoundingClientRect();
-    const newX = Math.max(0, Math.min(e.clientX - rect.left - dragStart.x, rect.width - cropRect.width));
-    const newY = Math.max(0, Math.min(e.clientY - rect.top - dragStart.y, rect.height - cropRect.height));
-    setCropRect(prev => ({ ...prev, x: newX, y: newY }));
+    const containerWidth = rect.width;
+    const containerHeight = rect.height;
+    const aspectMultiplier = getAspectMultiplier();
+    const minSize = 30; // minimum pixel size
+    
+    const deltaX = e.clientX - dragStart.x;
+    const deltaY = e.clientY - dragStart.y;
+
+    if (interactionMode === 'move') {
+      // Move mode - just translate
+      const newX = Math.max(0, Math.min(startCrop.x + deltaX, containerWidth - startCrop.width));
+      const newY = Math.max(0, Math.min(startCrop.y + deltaY, containerHeight - startCrop.height));
+      setCropRect(prev => ({ ...prev, x: newX, y: newY }));
+    } else {
+      // Resize from corner - maintain aspect ratio
+      let newX = startCrop.x;
+      let newY = startCrop.y;
+      let newWidth = startCrop.width;
+      let newHeight = startCrop.height;
+
+      if (interactionMode === 'se') {
+        // SE corner - fixed top-left, grow/shrink bottom-right
+        newWidth = Math.max(minSize, startCrop.width + deltaX);
+        newHeight = newWidth * aspectMultiplier;
+        // Constrain to container
+        if (newX + newWidth > containerWidth) {
+          newWidth = containerWidth - newX;
+          newHeight = newWidth * aspectMultiplier;
+        }
+        if (newY + newHeight > containerHeight) {
+          newHeight = containerHeight - newY;
+          newWidth = newHeight / aspectMultiplier;
+        }
+      } else if (interactionMode === 'sw') {
+        // SW corner - fixed top-right
+        newWidth = Math.max(minSize, startCrop.width - deltaX);
+        newHeight = newWidth * aspectMultiplier;
+        newX = startCrop.x + startCrop.width - newWidth;
+        if (newX < 0) {
+          newX = 0;
+          newWidth = startCrop.x + startCrop.width;
+          newHeight = newWidth * aspectMultiplier;
+        }
+        if (newY + newHeight > containerHeight) {
+          newHeight = containerHeight - newY;
+          newWidth = newHeight / aspectMultiplier;
+          newX = startCrop.x + startCrop.width - newWidth;
+        }
+      } else if (interactionMode === 'ne') {
+        // NE corner - fixed bottom-left
+        newWidth = Math.max(minSize, startCrop.width + deltaX);
+        newHeight = newWidth * aspectMultiplier;
+        newY = startCrop.y + startCrop.height - newHeight;
+        if (newX + newWidth > containerWidth) {
+          newWidth = containerWidth - newX;
+          newHeight = newWidth * aspectMultiplier;
+          newY = startCrop.y + startCrop.height - newHeight;
+        }
+        if (newY < 0) {
+          newY = 0;
+          newHeight = startCrop.y + startCrop.height;
+          newWidth = newHeight / aspectMultiplier;
+        }
+      } else if (interactionMode === 'nw') {
+        // NW corner - fixed bottom-right
+        newWidth = Math.max(minSize, startCrop.width - deltaX);
+        newHeight = newWidth * aspectMultiplier;
+        newX = startCrop.x + startCrop.width - newWidth;
+        newY = startCrop.y + startCrop.height - newHeight;
+        if (newX < 0) {
+          newX = 0;
+          newWidth = startCrop.x + startCrop.width;
+          newHeight = newWidth * aspectMultiplier;
+          newY = startCrop.y + startCrop.height - newHeight;
+        }
+        if (newY < 0) {
+          newY = 0;
+          newHeight = startCrop.y + startCrop.height;
+          newWidth = newHeight / aspectMultiplier;
+          newX = startCrop.x + startCrop.width - newWidth;
+        }
+      }
+
+      setCropRect({ x: newX, y: newY, width: newWidth, height: newHeight });
+    }
   };
 
   const handleMouseUp = () => {
-    setIsDragging(false);
+    setInteractionMode('none');
   };
 
   const croppedCount = images.filter(img => img.crop).length;
@@ -402,9 +494,8 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           <CardContent>
             {selectedImage ? (
               <div 
-                className="relative bg-muted rounded-lg overflow-hidden cursor-move"
+                className="relative bg-muted rounded-lg overflow-hidden"
                 style={{ aspectRatio: '3/4' }}
-                onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
@@ -414,16 +505,42 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                   alt=""
                   className="w-full h-full object-contain"
                 />
-                {/* Crop overlay */}
+                {/* Crop overlay with resize handles */}
                 <div 
-                  className="absolute border-2 border-primary bg-primary/20"
+                  className="absolute border-2 border-primary bg-primary/20 cursor-move"
                   style={{
                     left: cropRect.x,
                     top: cropRect.y,
                     width: cropRect.width,
                     height: cropRect.height,
                   }}
-                />
+                  onMouseDown={handleCropMouseDown}
+                >
+                  {/* NW Corner */}
+                  <div 
+                    className="absolute w-3 h-3 bg-primary border border-background cursor-nw-resize rounded-sm"
+                    style={{ top: -6, left: -6 }}
+                    onMouseDown={(e) => handleCornerMouseDown(e, 'nw')}
+                  />
+                  {/* NE Corner */}
+                  <div 
+                    className="absolute w-3 h-3 bg-primary border border-background cursor-ne-resize rounded-sm"
+                    style={{ top: -6, right: -6 }}
+                    onMouseDown={(e) => handleCornerMouseDown(e, 'ne')}
+                  />
+                  {/* SW Corner */}
+                  <div 
+                    className="absolute w-3 h-3 bg-primary border border-background cursor-sw-resize rounded-sm"
+                    style={{ bottom: -6, left: -6 }}
+                    onMouseDown={(e) => handleCornerMouseDown(e, 'sw')}
+                  />
+                  {/* SE Corner */}
+                  <div 
+                    className="absolute w-3 h-3 bg-primary border border-background cursor-se-resize rounded-sm"
+                    style={{ bottom: -6, right: -6 }}
+                    onMouseDown={(e) => handleCornerMouseDown(e, 'se')}
+                  />
+                </div>
               </div>
             ) : (
               <div className="aspect-[3/4] bg-muted rounded-lg flex items-center justify-center text-muted-foreground">
