@@ -1186,78 +1186,70 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                   )}
                 </div>
 
-                {/* Detection buttons */}
-                <div className="flex gap-2">
-                  <Button 
-                    variant="default" 
-                    size="sm" 
-                    className="flex-1"
-                    onClick={handleAIDetectFace}
-                    disabled={aiDetecting}
-                  >
-                    {aiDetecting ? (
-                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> AI Detecting...</>
-                    ) : (
-                      <><Sparkles className="h-4 w-4 mr-2" /> AI Detect</>
-                    )}
-                  </Button>
-                  <Button 
-                    variant="secondary" 
-                    size="sm" 
-                    className="flex-1"
-                    onClick={handleDetectFace}
-                    disabled={detecting || !detectorReady}
-                  >
-                    {detecting ? (
-                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Detecting...</>
-                    ) : detectorLoading ? (
-                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading...</>
-                    ) : (
-                      <><Scan className="h-4 w-4 mr-2" /> Local Detect</>
-                    )}
-                  </Button>
-                </div>
+                {/* Detection buttons - stacked vertically */}
+                <div className="flex flex-col gap-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button 
+                      variant="default" 
+                      onClick={handleAIDetectFace}
+                      disabled={aiDetecting}
+                    >
+                      {aiDetecting ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> AI Detecting...</>
+                      ) : (
+                        <><Sparkles className="h-4 w-4 mr-2" /> AI Detect</>
+                      )}
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={handleDetectFace}
+                      disabled={detecting || !detectorReady}
+                    >
+                      {detecting ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Detecting...</>
+                      ) : detectorLoading ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading...</>
+                      ) : (
+                        <><Scan className="h-4 w-4 mr-2" /> Local Detect</>
+                      )}
+                    </Button>
+                  </div>
 
-                <div className="flex gap-2">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="flex-1"
-                    onClick={handleRevertCrop}
-                    disabled={!selectedImage.crop}
-                  >
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    Revert
-                  </Button>
-                  <Button 
-                    size="sm" 
-                    className="flex-1"
-                    onClick={handleSaveCrop}
-                  >
-                    <Check className="h-4 w-4 mr-2" />
-                    Apply
-                  </Button>
-                </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={handleRevertCrop}
+                      disabled={!selectedImage.crop}
+                    >
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      Revert
+                    </Button>
+                    <Button 
+                      onClick={handleSaveCrop}
+                    >
+                      <Check className="h-4 w-4 mr-2" />
+                      Apply
+                    </Button>
+                  </div>
 
-                <div className="flex justify-between">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={selectedIndex === 0}
-                    onClick={() => setSelectedIndex(i => i - 1)}
-                  >
-                    <ChevronLeft className="h-4 w-4 mr-2" />
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={selectedIndex === images.length - 1}
-                    onClick={() => setSelectedIndex(i => i + 1)}
-                  >
-                    Next
-                    <ChevronRight className="h-4 w-4 ml-2" />
-                  </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={selectedIndex === 0}
+                      onClick={() => setSelectedIndex(i => i - 1)}
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-2" />
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={selectedIndex === images.length - 1}
+                      onClick={() => setSelectedIndex(i => i + 1)}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4 ml-2" />
+                    </Button>
+                  </div>
                 </div>
               </>
             ) : (
