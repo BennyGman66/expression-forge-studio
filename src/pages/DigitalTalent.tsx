@@ -45,6 +45,18 @@ export default function DigitalTalentPage() {
       return;
     }
 
+    // Fetch all brand associations at once
+    const { data: brandAssociations } = await supabase
+      .from("digital_talent_brands")
+      .select("talent_id, brand_id");
+
+    const brandMap = new Map<string, string[]>();
+    (brandAssociations || []).forEach((assoc) => {
+      const existing = brandMap.get(assoc.talent_id) || [];
+      existing.push(assoc.brand_id);
+      brandMap.set(assoc.talent_id, existing);
+    });
+
     const talentsWithUsage: DigitalTalentWithUsage[] = [];
     
     for (const talent of talentsData || []) {
@@ -62,6 +74,7 @@ export default function DigitalTalentPage() {
         ...talent,
         looks_count: looksCount || 0,
         outputs_count: outputsCount || 0,
+        brand_ids: brandMap.get(talent.id) || [],
       });
     }
 
@@ -173,6 +186,47 @@ export default function DigitalTalentPage() {
 
   const handleDeleteBrand = async (brandId: string) => {
     await deleteBrand(brandId);
+  };
+
+  const handleToggleBrand = async (talentId: string, brandId: string, isCurrentlyAssociated: boolean) => {
+    try {
+      if (isCurrentlyAssociated) {
+        const { error } = await supabase
+          .from("digital_talent_brands")
+          .delete()
+          .eq("talent_id", talentId)
+          .eq("brand_id", brandId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("digital_talent_brands")
+          .insert({ talent_id: talentId, brand_id: brandId });
+        if (error) throw error;
+      }
+      
+      // Update local state
+      setTalents(prev => prev.map(t => {
+        if (t.id !== talentId) return t;
+        const newBrandIds = isCurrentlyAssociated
+          ? t.brand_ids.filter(id => id !== brandId)
+          : [...t.brand_ids, brandId];
+        return { ...t, brand_ids: newBrandIds };
+      }));
+      
+      // Update selected talent if applicable
+      if (selectedTalent?.id === talentId) {
+        setSelectedTalent(prev => {
+          if (!prev) return prev;
+          const newBrandIds = isCurrentlyAssociated
+            ? prev.brand_ids.filter(id => id !== brandId)
+            : [...prev.brand_ids, brandId];
+          return { ...prev, brand_ids: newBrandIds };
+        });
+      }
+    } catch (err) {
+      console.error("Error toggling brand:", err);
+      toast.error("Failed to update brand association");
+    }
   };
 
   return (
@@ -288,6 +342,53 @@ export default function DigitalTalentPage() {
                             </Badge>
                           )}
                         </div>
+                        
+                        {/* Brand selector */}
+                        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                          <Select
+                            value=""
+                            onValueChange={(brandId) => {
+                              const isAssociated = talent.brand_ids.includes(brandId);
+                              handleToggleBrand(talent.id, brandId, isAssociated);
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder={talent.brand_ids.length > 0 ? `${talent.brand_ids.length} brand(s)` : "Add brands..."} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {brands.map((brand) => (
+                                <SelectItem key={brand.id} value={brand.id}>
+                                  <div className="flex items-center gap-2">
+                                    {talent.brand_ids.includes(brand.id) && (
+                                      <span className="text-primary">✓</span>
+                                    )}
+                                    {brand.name}
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        {/* Brand badges */}
+                        {talent.brand_ids.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {talent.brand_ids.slice(0, 2).map((brandId) => {
+                              const brand = brands.find(b => b.id === brandId);
+                              return brand ? (
+                                <Badge key={brandId} variant="outline" className="text-[10px] px-1.5">
+                                  {brand.name}
+                                </Badge>
+                              ) : null;
+                            })}
+                            {talent.brand_ids.length > 2 && (
+                              <Badge variant="outline" className="text-[10px] px-1.5">
+                                +{talent.brand_ids.length - 2}
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+                        
                         <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                           <span>{talent.looks_count} looks</span>
                           <span>{talent.outputs_count} outputs</span>

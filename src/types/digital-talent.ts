@@ -18,4 +18,5 @@ export interface DigitalTalentAsset {
 export interface DigitalTalentWithUsage extends DigitalTalent {
   looks_count: number;
   outputs_count: number;
+  brand_ids: string[];
 }
