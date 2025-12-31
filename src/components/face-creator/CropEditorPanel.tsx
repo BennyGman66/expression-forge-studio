@@ -6,7 +6,7 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan } from "lucide-react";
+import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useFaceDetector } from "@/hooks/useFaceDetector";
@@ -19,6 +19,7 @@ interface CropEditorPanelProps {
 
 interface ImageWithCrop extends FaceScrapeImage {
   crop?: FaceCrop;
+  noFaceDetected?: boolean;
 }
 
 export function CropEditorPanel({ runId }: CropEditorPanelProps) {
@@ -41,6 +42,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const [startCrop, setStartCrop] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
   const [imageBounds, setImageBounds] = useState({ offsetX: 0, offsetY: 0, width: 0, height: 0 });
+  const [imageBoundsReady, setImageBoundsReady] = useState(false);
 
   const selectedImage = images[selectedIndex];
 
@@ -73,6 +75,11 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     };
   }, [runId]);
 
+  // Reset imageBoundsReady when switching images
+  useEffect(() => {
+    setImageBoundsReady(false);
+  }, [selectedIndex]);
+
   // Polling fallback when generating - catches updates if realtime fails
   useEffect(() => {
     if (!generating || !runId) return;
@@ -85,14 +92,16 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     return () => clearInterval(interval);
   }, [generating, runId]);
 
-  // Convert percentage-based crop from DB to pixel coordinates when image/crop changes
-  useEffect(() => {
-    if (selectedImage?.crop && imageBounds.width > 0) {
+  // Apply crop coordinates ONLY after imageBounds is ready
+  const applyCropFromDatabase = useCallback((crop: FaceCrop | undefined, bounds: typeof imageBounds) => {
+    if (bounds.width === 0) return;
+    
+    if (crop) {
       // Convert from percentage (0-100) to pixel coordinates within imageBounds
-      const pixelX = imageBounds.offsetX + (selectedImage.crop.crop_x / 100) * imageBounds.width;
-      const pixelY = imageBounds.offsetY + (selectedImage.crop.crop_y / 100) * imageBounds.height;
-      const pixelWidth = (selectedImage.crop.crop_width / 100) * imageBounds.width;
-      const pixelHeight = (selectedImage.crop.crop_height / 100) * imageBounds.height;
+      const pixelX = bounds.offsetX + (crop.crop_x / 100) * bounds.width;
+      const pixelY = bounds.offsetY + (crop.crop_y / 100) * bounds.height;
+      const pixelWidth = (crop.crop_width / 100) * bounds.width;
+      const pixelHeight = (crop.crop_height / 100) * bounds.height;
       
       setCropRect({
         x: pixelX,
@@ -100,21 +109,21 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         width: pixelWidth,
         height: pixelHeight,
       });
-      setAspectRatio(selectedImage.crop.aspect_ratio);
-    } else if (imageBounds.width > 0 && !selectedImage?.crop) {
+      setAspectRatio(crop.aspect_ratio as '1:1' | '4:5');
+    } else {
       // Set default crop centered on image when no crop exists
       const aspectMultiplier = aspectRatio === '1:1' ? 1 : 1.25;
-      const defaultWidth = imageBounds.width * 0.6;
+      const defaultWidth = bounds.width * 0.6;
       const defaultHeight = defaultWidth * aspectMultiplier;
       
       setCropRect({
-        x: imageBounds.offsetX + (imageBounds.width - defaultWidth) / 2,
-        y: imageBounds.offsetY + imageBounds.height * 0.1, // Position towards top for portrait
+        x: bounds.offsetX + (bounds.width - defaultWidth) / 2,
+        y: bounds.offsetY + bounds.height * 0.1,
         width: defaultWidth,
-        height: Math.min(defaultHeight, imageBounds.height * 0.8),
+        height: Math.min(defaultHeight, bounds.height * 0.8),
       });
     }
-  }, [selectedImage, imageBounds]);
+  }, [aspectRatio]);
 
   const fetchImagesWithCrops = async () => {
     if (!runId) return;
@@ -132,19 +141,23 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
 
     const imageIds = imagesData.map(img => img.id);
-    const { data: cropsData } = await supabase
-      .from('face_crops')
-      .select('*')
-      .in('scrape_image_id', imageIds);
+    
+    const [cropsResult, detectionsResult] = await Promise.all([
+      supabase.from('face_crops').select('*').in('scrape_image_id', imageIds),
+      supabase.from('face_detections').select('*').in('scrape_image_id', imageIds)
+    ]);
 
-    const cropsMap = new Map(
-      (cropsData || []).map(c => [c.scrape_image_id, c])
-    );
+    const cropsMap = new Map((cropsResult.data || []).map(c => [c.scrape_image_id, c]));
+    const detectionsMap = new Map((detectionsResult.data || []).map(d => [d.scrape_image_id, d]));
 
-    const merged = imagesData.map(img => ({
-      ...img,
-      crop: cropsMap.get(img.id),
-    })) as ImageWithCrop[];
+    const merged = imagesData.map(img => {
+      const detection = detectionsMap.get(img.id);
+      return {
+        ...img,
+        crop: cropsMap.get(img.id),
+        noFaceDetected: detection?.status === 'no_face' || (detection?.face_count === 0),
+      };
+    }) as ImageWithCrop[];
 
     setImages(merged);
     setLoading(false);
@@ -164,7 +177,6 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
 
     if (data) {
       setJob(data as unknown as FaceJob);
-      // Reset generating when job is no longer active
       if (data.status === 'completed' || data.status === 'failed') {
         setGenerating(false);
       } else if (data.status === 'running' || data.status === 'pending') {
@@ -209,7 +221,29 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       // Calculate crop coordinates
       const cropCoords = calculateHeadAndShouldersCrop(faceBbox, imageWidth, imageHeight, aspectRatio);
       
-      // Save to database
+      // Save detection result
+      const existingDetection = await supabase
+        .from('face_detections')
+        .select('id')
+        .eq('scrape_image_id', selectedImage.id)
+        .single();
+      
+      if (existingDetection.data) {
+        await supabase.from('face_detections').update({
+          face_count: faceBbox ? 1 : 0,
+          status: faceBbox ? 'detected' : 'no_face',
+          bounding_boxes: faceBbox ? [faceBbox] : [],
+        }).eq('id', existingDetection.data.id);
+      } else {
+        await supabase.from('face_detections').insert({
+          scrape_image_id: selectedImage.id,
+          face_count: faceBbox ? 1 : 0,
+          status: faceBbox ? 'detected' : 'no_face',
+          bounding_boxes: faceBbox ? [faceBbox] : [],
+        });
+      }
+      
+      // Save crop to database
       if (selectedImage.crop) {
         await supabase
           .from('face_crops')
@@ -246,7 +280,11 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         });
       }
       
-      toast({ title: "Face Detected", description: faceBbox ? "Crop positioned around detected face" : "No face found - using default crop" });
+      toast({ 
+        title: faceBbox ? "Face Detected" : "No Face Found", 
+        description: faceBbox ? "Crop positioned around detected face" : "Using default crop - adjust manually if needed",
+        variant: faceBbox ? "default" : "destructive"
+      });
       fetchImagesWithCrops();
     } catch (error) {
       console.error('Error detecting face:', error);
@@ -272,6 +310,28 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           const imageUrl = image.stored_url || image.source_url;
           const { imageWidth, imageHeight, faceBbox } = await loadImageAndDetect(imageUrl);
           const cropCoords = calculateHeadAndShouldersCrop(faceBbox, imageWidth, imageHeight, aspectRatio);
+          
+          // Save detection result
+          const existingDetection = await supabase
+            .from('face_detections')
+            .select('id')
+            .eq('scrape_image_id', image.id)
+            .single();
+          
+          if (existingDetection.data) {
+            await supabase.from('face_detections').update({
+              face_count: faceBbox ? 1 : 0,
+              status: faceBbox ? 'detected' : 'no_face',
+              bounding_boxes: faceBbox ? [faceBbox] : [],
+            }).eq('id', existingDetection.data.id);
+          } else {
+            await supabase.from('face_detections').insert({
+              scrape_image_id: image.id,
+              face_count: faceBbox ? 1 : 0,
+              status: faceBbox ? 'detected' : 'no_face',
+              bounding_boxes: faceBbox ? [faceBbox] : [],
+            });
+          }
           
           // Upsert crop
           if (image.crop) {
@@ -363,24 +423,14 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
   };
 
-  const handleResetCrop = () => {
+  // Revert to last saved crop (doesn't re-detect)
+  const handleRevertCrop = () => {
     if (selectedImage?.crop && imageBounds.width > 0) {
-      // Convert from percentage (0-100) to pixel coordinates
-      const pixelX = imageBounds.offsetX + (selectedImage.crop.crop_x / 100) * imageBounds.width;
-      const pixelY = imageBounds.offsetY + (selectedImage.crop.crop_y / 100) * imageBounds.height;
-      const pixelWidth = (selectedImage.crop.crop_width / 100) * imageBounds.width;
-      const pixelHeight = (selectedImage.crop.crop_height / 100) * imageBounds.height;
-      
-      setCropRect({
-        x: pixelX,
-        y: pixelY,
-        width: pixelWidth,
-        height: pixelHeight,
-      });
+      applyCropFromDatabase(selectedImage.crop, imageBounds);
     }
   };
 
-  const getAspectMultiplier = () => aspectRatio === '1:1' ? 1 : 1.25; // height = width * multiplier
+  const getAspectMultiplier = () => aspectRatio === '1:1' ? 1 : 1.25;
 
   const handleCropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
@@ -404,28 +454,24 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     const containerWidth = rect.width;
     const containerHeight = rect.height;
     const aspectMultiplier = getAspectMultiplier();
-    const minSize = 30; // minimum pixel size
+    const minSize = 30;
     
     const deltaX = e.clientX - dragStart.x;
     const deltaY = e.clientY - dragStart.y;
 
     if (interactionMode === 'move') {
-      // Move mode - just translate
       const newX = Math.max(0, Math.min(startCrop.x + deltaX, containerWidth - startCrop.width));
       const newY = Math.max(0, Math.min(startCrop.y + deltaY, containerHeight - startCrop.height));
       setCropRect(prev => ({ ...prev, x: newX, y: newY }));
     } else {
-      // Resize from corner - maintain aspect ratio
       let newX = startCrop.x;
       let newY = startCrop.y;
       let newWidth = startCrop.width;
       let newHeight = startCrop.height;
 
       if (interactionMode === 'se') {
-        // SE corner - fixed top-left, grow/shrink bottom-right
         newWidth = Math.max(minSize, startCrop.width + deltaX);
         newHeight = newWidth * aspectMultiplier;
-        // Constrain to container
         if (newX + newWidth > containerWidth) {
           newWidth = containerWidth - newX;
           newHeight = newWidth * aspectMultiplier;
@@ -435,7 +481,6 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           newWidth = newHeight / aspectMultiplier;
         }
       } else if (interactionMode === 'sw') {
-        // SW corner - fixed top-right
         newWidth = Math.max(minSize, startCrop.width - deltaX);
         newHeight = newWidth * aspectMultiplier;
         newX = startCrop.x + startCrop.width - newWidth;
@@ -450,7 +495,6 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           newX = startCrop.x + startCrop.width - newWidth;
         }
       } else if (interactionMode === 'ne') {
-        // NE corner - fixed bottom-left
         newWidth = Math.max(minSize, startCrop.width + deltaX);
         newHeight = newWidth * aspectMultiplier;
         newY = startCrop.y + startCrop.height - newHeight;
@@ -465,7 +509,6 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           newWidth = newHeight / aspectMultiplier;
         }
       } else if (interactionMode === 'nw') {
-        // NW corner - fixed bottom-right
         newWidth = Math.max(minSize, startCrop.width - deltaX);
         newHeight = newWidth * aspectMultiplier;
         newX = startCrop.x + startCrop.width - newWidth;
@@ -492,7 +535,45 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     setInteractionMode('none');
   };
 
+  // Handle image load - calculate bounds AND apply crop
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    const container = editorContainerRef.current;
+    if (!container) return;
+    
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    
+    setContainerDimensions({ width: containerWidth, height: containerHeight });
+    
+    // Calculate actual rendered image bounds with object-contain
+    const imgAspect = img.naturalWidth / img.naturalHeight;
+    const containerAspect = containerWidth / containerHeight;
+    
+    let renderedWidth, renderedHeight, offsetX, offsetY;
+    
+    if (imgAspect > containerAspect) {
+      renderedWidth = containerWidth;
+      renderedHeight = containerWidth / imgAspect;
+      offsetX = 0;
+      offsetY = (containerHeight - renderedHeight) / 2;
+    } else {
+      renderedHeight = containerHeight;
+      renderedWidth = containerHeight * imgAspect;
+      offsetX = (containerWidth - renderedWidth) / 2;
+      offsetY = 0;
+    }
+    
+    const newBounds = { offsetX, offsetY, width: renderedWidth, height: renderedHeight };
+    setImageBounds(newBounds);
+    setImageBoundsReady(true);
+    
+    // Apply crop from database NOW that bounds are ready
+    applyCropFromDatabase(selectedImage?.crop, newBounds);
+  };
+
   const croppedCount = images.filter(img => img.crop).length;
+  const noFaceCount = images.filter(img => img.noFaceDetected).length;
 
   if (!runId) {
     return (
@@ -511,6 +592,12 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         <div className="flex items-center gap-4">
           <h2 className="text-lg font-semibold">Crop Editor</h2>
           <Badge variant="outline">{croppedCount} / {images.length} cropped</Badge>
+          {noFaceCount > 0 && (
+            <Badge variant="destructive" className="flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" />
+              {noFaceCount} no face
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <RadioGroup 
@@ -576,7 +663,6 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         }`}>
           <CardContent className="py-4">
             <div className="space-y-3">
-              {/* Status header */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   {job.status === 'running' && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
@@ -600,7 +686,6 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                 </Badge>
               </div>
               
-              {/* Progress bar */}
               {(job.status === 'running' || job.status === 'completed') && (
                 <Progress 
                   value={(job.progress / Math.max(job.total, 1)) * 100} 
@@ -608,7 +693,6 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                 />
               )}
               
-              {/* Latest log message */}
               {job.logs && job.logs.length > 0 && (
                 <p className="text-xs text-muted-foreground truncate">
                   {job.logs[job.logs.length - 1]?.message}
@@ -656,6 +740,11 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                             ✓
                           </Badge>
                         )}
+                        {image.noFaceDetected && (
+                          <Badge className="absolute top-1 left-1 text-[10px] px-1 bg-orange-500" title="No face detected - manual crop needed">
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                          </Badge>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -668,7 +757,15 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         {/* Crop editor */}
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-sm">Original Image</CardTitle>
+            <CardTitle className="text-sm flex items-center gap-2">
+              Original Image
+              {selectedImage?.noFaceDetected && (
+                <Badge variant="outline" className="text-orange-500 border-orange-500">
+                  <AlertTriangle className="h-3 w-3 mr-1" />
+                  No face - manual crop
+                </Badge>
+              )}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {selectedImage ? (
@@ -681,78 +778,50 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                 onMouseLeave={handleMouseUp}
               >
                 <img
+                  key={selectedImage.id}
                   src={selectedImage.stored_url || selectedImage.source_url}
                   alt=""
                   className="w-full h-full object-contain"
-                  onLoad={(e) => {
-                    const img = e.currentTarget;
-                    const container = editorContainerRef.current;
-                    if (!container) return;
-                    
-                    const containerWidth = container.clientWidth;
-                    const containerHeight = container.clientHeight;
-                    
-                    setContainerDimensions({ width: containerWidth, height: containerHeight });
-                    
-                    // Calculate actual rendered image bounds with object-contain
-                    const imgAspect = img.naturalWidth / img.naturalHeight;
-                    const containerAspect = containerWidth / containerHeight;
-                    
-                    let renderedWidth, renderedHeight, offsetX, offsetY;
-                    
-                    if (imgAspect > containerAspect) {
-                      // Image is wider - constrained by width
-                      renderedWidth = containerWidth;
-                      renderedHeight = containerWidth / imgAspect;
-                      offsetX = 0;
-                      offsetY = (containerHeight - renderedHeight) / 2;
-                    } else {
-                      // Image is taller - constrained by height
-                      renderedHeight = containerHeight;
-                      renderedWidth = containerHeight * imgAspect;
-                      offsetX = (containerWidth - renderedWidth) / 2;
-                      offsetY = 0;
-                    }
-                    
-                    setImageBounds({ offsetX, offsetY, width: renderedWidth, height: renderedHeight });
-                  }}
+                  onLoad={handleImageLoad}
                 />
                 {/* Crop overlay with resize handles */}
-                <div 
-                  className="absolute border-2 border-primary bg-primary/20 cursor-move"
-                  style={{
-                    left: cropRect.x,
-                    top: cropRect.y,
-                    width: cropRect.width,
-                    height: cropRect.height,
-                  }}
-                  onMouseDown={handleCropMouseDown}
-                >
-                  {/* NW Corner */}
+                {imageBoundsReady && (
                   <div 
-                    className="absolute w-3 h-3 bg-primary border border-background cursor-nw-resize rounded-sm"
-                    style={{ top: -6, left: -6 }}
-                    onMouseDown={(e) => handleCornerMouseDown(e, 'nw')}
-                  />
-                  {/* NE Corner */}
-                  <div 
-                    className="absolute w-3 h-3 bg-primary border border-background cursor-ne-resize rounded-sm"
-                    style={{ top: -6, right: -6 }}
-                    onMouseDown={(e) => handleCornerMouseDown(e, 'ne')}
-                  />
-                  {/* SW Corner */}
-                  <div 
-                    className="absolute w-3 h-3 bg-primary border border-background cursor-sw-resize rounded-sm"
-                    style={{ bottom: -6, left: -6 }}
-                    onMouseDown={(e) => handleCornerMouseDown(e, 'sw')}
-                  />
-                  {/* SE Corner */}
-                  <div 
-                    className="absolute w-3 h-3 bg-primary border border-background cursor-se-resize rounded-sm"
-                    style={{ bottom: -6, right: -6 }}
-                    onMouseDown={(e) => handleCornerMouseDown(e, 'se')}
-                  />
-                </div>
+                    className="absolute border-2 border-primary bg-primary/20 cursor-move"
+                    style={{
+                      left: cropRect.x,
+                      top: cropRect.y,
+                      width: cropRect.width,
+                      height: cropRect.height,
+                    }}
+                    onMouseDown={handleCropMouseDown}
+                  >
+                    {/* NW Corner */}
+                    <div 
+                      className="absolute w-3 h-3 bg-primary border border-background cursor-nw-resize rounded-sm"
+                      style={{ top: -6, left: -6 }}
+                      onMouseDown={(e) => handleCornerMouseDown(e, 'nw')}
+                    />
+                    {/* NE Corner */}
+                    <div 
+                      className="absolute w-3 h-3 bg-primary border border-background cursor-ne-resize rounded-sm"
+                      style={{ top: -6, right: -6 }}
+                      onMouseDown={(e) => handleCornerMouseDown(e, 'ne')}
+                    />
+                    {/* SW Corner */}
+                    <div 
+                      className="absolute w-3 h-3 bg-primary border border-background cursor-sw-resize rounded-sm"
+                      style={{ bottom: -6, left: -6 }}
+                      onMouseDown={(e) => handleCornerMouseDown(e, 'sw')}
+                    />
+                    {/* SE Corner */}
+                    <div 
+                      className="absolute w-3 h-3 bg-primary border border-background cursor-se-resize rounded-sm"
+                      style={{ bottom: -6, right: -6 }}
+                      onMouseDown={(e) => handleCornerMouseDown(e, 'se')}
+                    />
+                  </div>
+                )}
               </div>
             ) : (
               <div className="aspect-[3/4] bg-muted rounded-lg flex items-center justify-center text-muted-foreground">
@@ -774,49 +843,21 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                   className="bg-muted rounded-lg overflow-hidden relative"
                   style={{ aspectRatio: aspectRatio === '1:1' ? '1/1' : '4/5' }}
                 >
-                  {(selectedImage.crop || cropRect.width > 0) && imageBounds.width > 0 ? (
-                    <div 
-                      className="w-full h-full overflow-hidden relative"
-                    >
-                      {(() => {
-                        // Convert crop coordinates from container-space to image-space
-                        const cropXInImage = cropRect.x - imageBounds.offsetX;
-                        const cropYInImage = cropRect.y - imageBounds.offsetY;
-                        
-                        // Calculate percentages relative to the actual image dimensions
-                        const cropXPercent = (cropXInImage / imageBounds.width) * 100;
-                        const cropYPercent = (cropYInImage / imageBounds.height) * 100;
-                        const cropWidthPercent = (cropRect.width / imageBounds.width) * 100;
-                        const cropHeightPercent = (cropRect.height / imageBounds.height) * 100;
-                        
-                        // Scale factor: use uniform scale to maintain aspect ratio
-                        const scale = 100 / cropWidthPercent;
-                        
-                        return (
-                          <img
-                            src={selectedImage.stored_url || selectedImage.source_url}
-                            alt=""
-                            className="absolute"
-                            style={{
-                              transformOrigin: 'top left',
-                              transform: `scale(${scale})`,
-                              left: `${-cropXPercent * scale}%`,
-                              top: `${-cropYPercent * scale}%`,
-                              width: '100%',
-                              height: 'auto',
-                            }}
-                          />
-                        );
-                      })()}
-                    </div>
+                  {imageBoundsReady && cropRect.width > 0 ? (
+                    <CropPreview
+                      imageUrl={selectedImage.stored_url || selectedImage.source_url}
+                      cropRect={cropRect}
+                      imageBounds={imageBounds}
+                      aspectRatio={aspectRatio}
+                    />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">
-                      No crop defined
+                      Loading preview...
                     </div>
                   )}
                 </div>
 
-                {/* Detect Face button */}
+                {/* Re-detect Face button */}
                 <Button 
                   variant="secondary" 
                   size="sm" 
@@ -829,7 +870,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                   ) : detectorLoading ? (
                     <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading AI...</>
                   ) : (
-                    <><Scan className="h-4 w-4 mr-2" /> Detect Face</>
+                    <><Scan className="h-4 w-4 mr-2" /> Re-detect Face</>
                   )}
                 </Button>
 
@@ -838,10 +879,11 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                     variant="outline" 
                     size="sm" 
                     className="flex-1"
-                    onClick={handleResetCrop}
+                    onClick={handleRevertCrop}
+                    disabled={!selectedImage.crop}
                   >
                     <RotateCcw className="h-4 w-4 mr-2" />
-                    Reset
+                    Revert
                   </Button>
                   <Button 
                     size="sm" 
@@ -882,6 +924,49 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+// Separate component for crop preview with cleaner calculation
+function CropPreview({ 
+  imageUrl, 
+  cropRect, 
+  imageBounds, 
+  aspectRatio 
+}: { 
+  imageUrl: string; 
+  cropRect: { x: number; y: number; width: number; height: number }; 
+  imageBounds: { offsetX: number; offsetY: number; width: number; height: number };
+  aspectRatio: '1:1' | '4:5';
+}) {
+  // Convert crop from container space to image-relative percentages
+  const cropXInImage = cropRect.x - imageBounds.offsetX;
+  const cropYInImage = cropRect.y - imageBounds.offsetY;
+  
+  const cropXPercent = (cropXInImage / imageBounds.width) * 100;
+  const cropYPercent = (cropYInImage / imageBounds.height) * 100;
+  const cropWidthPercent = (cropRect.width / imageBounds.width) * 100;
+  const cropHeightPercent = (cropRect.height / imageBounds.height) * 100;
+  
+  // Calculate scale to fill the preview container
+  const scale = 100 / cropWidthPercent;
+  
+  return (
+    <div className="w-full h-full overflow-hidden relative">
+      <img
+        src={imageUrl}
+        alt=""
+        className="absolute"
+        style={{
+          transformOrigin: 'top left',
+          transform: `scale(${scale})`,
+          left: `${-cropXPercent * scale}%`,
+          top: `${-cropYPercent * scale}%`,
+          width: '100%',
+          height: 'auto',
+        }}
+      />
     </div>
   );
 }

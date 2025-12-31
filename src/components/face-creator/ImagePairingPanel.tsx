@@ -27,6 +27,13 @@ interface CroppedFace {
   identity_name: string | null;
   view: string;
   brand_name: string;
+  crop?: {
+    crop_x: number;
+    crop_y: number;
+    crop_width: number;
+    crop_height: number;
+    aspect_ratio: string;
+  };
 }
 
 export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
@@ -93,7 +100,12 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
         stored_url,
         gender,
         face_crops!inner (
-          id
+          id,
+          crop_x,
+          crop_y,
+          crop_width,
+          crop_height,
+          aspect_ratio
         ),
         face_identity_images (
           identity_id,
@@ -121,6 +133,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
 
     const faces: CroppedFace[] = (images || []).map((img: any) => {
       const identityImage = img.face_identity_images?.[0];
+      const cropData = img.face_crops?.[0];
       return {
         id: img.id,
         source_url: img.source_url,
@@ -129,7 +142,14 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
         identity_id: identityImage?.identity_id || null,
         identity_name: identityImage?.face_identities?.name || null,
         view: identityImage?.view || 'unknown',
-        brand_name: run?.brand_name || 'Unknown'
+        brand_name: run?.brand_name || 'Unknown',
+        crop: cropData ? {
+          crop_x: cropData.crop_x,
+          crop_y: cropData.crop_y,
+          crop_width: cropData.crop_width,
+          crop_height: cropData.crop_height,
+          aspect_ratio: cropData.aspect_ratio,
+        } : undefined
       };
     });
 
@@ -447,11 +467,18 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                           }`}
                           onClick={() => toggleFaceSelection(face.id)}
                         >
-                          <img
-                            src={face.stored_url || face.source_url}
-                            alt=""
-                            className="w-full aspect-square object-cover"
-                          />
+                          {face.crop ? (
+                            <CroppedFacePreview 
+                              imageUrl={face.stored_url || face.source_url}
+                              crop={face.crop}
+                            />
+                          ) : (
+                            <img
+                              src={face.stored_url || face.source_url}
+                              alt=""
+                              className="w-full aspect-square object-cover"
+                            />
+                          )}
                           {selectedFaceIds.has(face.id) && (
                             <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5">
                               <Check className="h-3 w-3" />
@@ -845,6 +872,36 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
           })}
         </div>
       </ScrollArea>
+    </div>
+  );
+}
+
+// Component to show CSS-based cropped face preview
+function CroppedFacePreview({ 
+  imageUrl, 
+  crop 
+}: { 
+  imageUrl: string; 
+  crop: { crop_x: number; crop_y: number; crop_width: number; crop_height: number; aspect_ratio: string };
+}) {
+  // Crop values are stored as percentages (0-100)
+  const scale = 100 / crop.crop_width;
+  
+  return (
+    <div className="w-full aspect-square overflow-hidden relative">
+      <img
+        src={imageUrl}
+        alt=""
+        className="absolute"
+        style={{
+          transformOrigin: 'top left',
+          transform: `scale(${scale})`,
+          left: `${-crop.crop_x * scale}%`,
+          top: `${-crop.crop_y * scale}%`,
+          width: '100%',
+          height: 'auto',
+        }}
+      />
     </div>
   );
 }
