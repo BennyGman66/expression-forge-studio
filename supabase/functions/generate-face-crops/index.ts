@@ -185,12 +185,14 @@ async function processImage(
   }
 }
 
-// Detect face bounding box using Gemini
+// Detect head bounding box using Gemini (includes all hair)
 async function detectFaceBbox(imageUrl: string, apiKey: string): Promise<FaceBbox | null> {
-  const prompt = `Detect the person's face in this fashion image.
-Return the bounding box coordinates around their FACE ONLY (not the whole head, just the face from forehead to chin) as a JSON array: [ymin, xmin, ymax, xmax]
+  const prompt = `Detect the person's HEAD in this fashion image.
+Return the bounding box coordinates around their ENTIRE HEAD including ALL HAIR - from the very top of their hair down to their chin/jaw line.
+Format: JSON array [ymin, xmin, ymax, xmax]
 - Coordinates must be normalized to 0-1000 scale (where 0,0 is top-left and 1000,1000 is bottom-right)
-- If no face is visible (e.g., back view, no person), return exactly: NONE
+- For back views: return the bounding box around the back of their head from hair top to base of skull
+- If no person/head is visible, return exactly: NONE
 - Only return the array like [123, 456, 789, 567] or NONE, nothing else`;
 
   try {
@@ -201,7 +203,7 @@ Return the bounding box coordinates around their FACE ONLY (not the whole head, 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash', // Better model for accurate bounding box detection
+        model: 'google/gemini-2.5-flash',
         messages: [
           {
             role: 'user',
@@ -245,50 +247,48 @@ Return the bounding box coordinates around their FACE ONLY (not the whole head, 
       xmax: parseInt(match[4]) / 10
     };
   } catch (error) {
-    console.error('Face detection error:', error);
+    console.error('Head detection error:', error);
     return null;
   }
 }
 
-// Calculate head + shoulders crop based on detected face position
+// Calculate head + shoulders crop based on detected head position
 function calculateHeadAndShouldersCrop(
-  faceBbox: FaceBbox | null,
+  headBbox: FaceBbox | null,
   aspectRatio: string
 ): { x: number; y: number; width: number; height: number } {
   
-  // No face detected - use center-weighted default
-  if (!faceBbox) {
+  // No head detected - use portrait-focused default in upper portion
+  if (!headBbox) {
     if (aspectRatio === '1:1') {
-      return { x: 20, y: 5, width: 60, height: 60 };
+      return { x: 15, y: 0, width: 70, height: 70 };
     } else {
-      // 4:5 ratio
-      return { x: 15, y: 5, width: 70, height: 87 };
+      // 4:5 ratio - taller crop
+      return { x: 10, y: 0, width: 80, height: 100 };
     }
   }
 
-  // Calculate face dimensions
-  const faceHeight = faceBbox.ymax - faceBbox.ymin;
-  const faceWidth = faceBbox.xmax - faceBbox.xmin;
-  const faceCenterX = (faceBbox.xmin + faceBbox.xmax) / 2;
-  const faceCenterY = (faceBbox.ymin + faceBbox.ymax) / 2;
+  // Calculate head dimensions (now includes full head with hair)
+  const headHeight = headBbox.ymax - headBbox.ymin;
+  const headWidth = headBbox.xmax - headBbox.xmin;
+  const headCenterX = (headBbox.xmin + headBbox.xmax) / 2;
   
-  console.log(`[generate-face-crops] Face: height=${faceHeight.toFixed(1)}%, width=${faceWidth.toFixed(1)}%, center=(${faceCenterX.toFixed(1)}, ${faceCenterY.toFixed(1)})`);
+  console.log(`[generate-face-crops] Head: height=${headHeight.toFixed(1)}%, width=${headWidth.toFixed(1)}%, center=(${headCenterX.toFixed(1)}, ${headBbox.ymin.toFixed(1)})`);
 
   // HEAD + SHOULDERS FRAMING:
-  // - Add ~60% of face height ABOVE the face (for hair/forehead)
-  // - Add ~180% of face height BELOW the face (for neck + shoulders)
-  // - Width should be ~3.5x face width to include shoulders
+  // Since we now detect the FULL head (including hair), we need less padding above
+  // - Add ~15% of head height ABOVE (just a safety margin for very tall hair)
+  // - Add ~150% of head height BELOW (for neck + shoulders + upper chest)
   
-  const paddingAbove = faceHeight * 0.6;   // Space above head for hair
-  const paddingBelow = faceHeight * 1.8;   // Space for neck + top of shoulders
-  const totalHeight = faceHeight + paddingAbove + paddingBelow;
+  const paddingAbove = headHeight * 0.15;  // Small margin above hair
+  const paddingBelow = headHeight * 1.5;   // Space for neck + shoulders
+  const totalHeight = headHeight + paddingAbove + paddingBelow;
   
   // Calculate width based on aspect ratio
   let cropWidth: number;
   let cropHeight: number;
   
   if (aspectRatio === '1:1') {
-    // For 1:1, use the larger of width or height calculation
     cropHeight = totalHeight;
     cropWidth = cropHeight; // Square
   } else {
@@ -297,17 +297,17 @@ function calculateHeadAndShouldersCrop(
     cropWidth = cropHeight / 1.25;
   }
   
-  // Ensure minimum crop size (at least 40% of image)
-  cropWidth = Math.max(cropWidth, 40);
-  cropHeight = Math.max(cropHeight, aspectRatio === '1:1' ? 40 : 50);
+  // Ensure minimum crop size (at least 45% of image for good framing)
+  cropWidth = Math.max(cropWidth, 45);
+  cropHeight = Math.max(cropHeight, aspectRatio === '1:1' ? 45 : 56);
   
-  // Cap at reasonable max (90% of image)
-  cropWidth = Math.min(cropWidth, 90);
-  cropHeight = Math.min(cropHeight, 95);
+  // Cap at reasonable max
+  cropWidth = Math.min(cropWidth, 95);
+  cropHeight = Math.min(cropHeight, 100);
 
-  // Position crop so face is in upper portion, centered horizontally
-  let cropX = faceCenterX - cropWidth / 2;
-  let cropY = faceBbox.ymin - paddingAbove;
+  // Position crop so head is in upper third, centered horizontally
+  let cropX = headCenterX - cropWidth / 2;
+  let cropY = headBbox.ymin - paddingAbove;
   
   // Clamp to image bounds
   cropX = Math.max(0, Math.min(100 - cropWidth, cropX));
