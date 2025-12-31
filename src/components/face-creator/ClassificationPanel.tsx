@@ -19,7 +19,8 @@ import {
   ArrowRight,
   Download,
   Link,
-  Unlink
+  Unlink,
+  Trash2
 } from "lucide-react";
 import {
   Select,
@@ -428,6 +429,55 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     }
   };
 
+  const handleDeleteModel = async (e: React.MouseEvent, identity: Identity) => {
+    e.stopPropagation();
+    
+    if (!confirm(`Delete ${identity.name}? This will also remove all associated images from the scrape.`)) {
+      return;
+    }
+
+    try {
+      // Get all scrape_image_ids linked to this identity
+      const { data: imageLinks } = await supabase
+        .from('face_identity_images')
+        .select('scrape_image_id')
+        .eq('identity_id', identity.id);
+
+      const scrapeImageIds = (imageLinks || []).map(link => link.scrape_image_id);
+
+      // Delete the identity (cascades to face_identity_images)
+      const { error: deleteIdentityError } = await supabase
+        .from('face_identities')
+        .delete()
+        .eq('id', identity.id);
+
+      if (deleteIdentityError) throw deleteIdentityError;
+
+      // Delete the actual scrape images
+      if (scrapeImageIds.length > 0) {
+        const { error: deleteImagesError } = await supabase
+          .from('face_scrape_images')
+          .delete()
+          .in('id', scrapeImageIds);
+
+        if (deleteImagesError) {
+          console.error('Error deleting scrape images:', deleteImagesError);
+        }
+      }
+
+      // Update local state
+      setIdentities(prev => prev.filter(id => id.id !== identity.id));
+      if (selectedIdentity === identity.id) {
+        setSelectedIdentity(null);
+      }
+
+      toast({ title: `${identity.name} deleted`, description: `${scrapeImageIds.length} images removed` });
+    } catch (error) {
+      console.error('Error deleting model:', error);
+      toast({ title: "Failed to delete model", variant: "destructive" });
+    }
+  };
+
   const handleDownloadImage = async (e: React.MouseEvent, imageUrl: string) => {
     e.stopPropagation();
     try {
@@ -601,57 +651,69 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                       <div
                         key={identity.id}
                         onClick={() => handleSelectIdentity(identity.id)}
-                        className={`w-full px-4 py-3 text-left hover:bg-muted/50 cursor-pointer ${
+                        className={`w-full px-4 py-3 text-left hover:bg-muted/50 cursor-pointer group ${
                           selectedIdentity === identity.id && !showUnclassified ? 'bg-muted' : ''
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-8 w-8">
-                              {identity.representative_image_url ? (
-                                <AvatarImage 
-                                  src={identity.representative_image_url} 
-                                  alt={identity.name}
-                                  className="object-cover"
-                                />
-                              ) : null}
-                              <AvatarFallback>
-                                <User className="h-4 w-4" />
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="flex flex-col">
-                              <span className="font-medium">{identity.name}</span>
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10 flex-shrink-0">
+                            {identity.representative_image_url ? (
+                              <AvatarImage 
+                                src={identity.representative_image_url} 
+                                alt={identity.name}
+                                className="object-cover"
+                              />
+                            ) : null}
+                            <AvatarFallback>
+                              <User className="h-4 w-4" />
+                            </AvatarFallback>
+                          </Avatar>
+                          
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium truncate">{identity.name}</span>
                               {identity.talent && (
-                                <span className="text-xs text-primary flex items-center gap-1">
-                                  <Link className="h-3 w-3" />
+                                <Badge variant="outline" className="text-[10px] px-1.5 flex-shrink-0">
                                   {identity.talent.name}
-                                </span>
+                                </Badge>
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          
+                          <div className="flex items-center gap-1 flex-shrink-0">
                             {identity.talent ? (
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-6 w-6"
+                                className="h-7 w-7 opacity-60 hover:opacity-100"
                                 onClick={(e) => handleUnlinkTalent(e, identity)}
                                 title="Unlink talent"
                               >
-                                <Unlink className="h-3 w-3" />
+                                <Unlink className="h-3.5 w-3.5" />
                               </Button>
                             ) : (
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                className="h-6 w-6"
+                                className="h-7 w-7 opacity-60 hover:opacity-100"
                                 onClick={(e) => handleOpenLinkDialog(e, identity)}
                                 title="Link to talent"
                               >
-                                <Link className="h-3 w-3" />
+                                <Link className="h-3.5 w-3.5" />
                               </Button>
                             )}
-                            <Badge variant="secondary">{identity.image_count}</Badge>
+                            <Badge variant="secondary" className="min-w-[28px] justify-center">
+                              {identity.image_count}
+                            </Badge>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={(e) => handleDeleteModel(e, identity)}
+                              title="Delete model and images"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
                             {selectedIdentity === identity.id && !showUnclassified && (
                               <ChevronRight className="h-4 w-4 text-muted-foreground" />
                             )}
