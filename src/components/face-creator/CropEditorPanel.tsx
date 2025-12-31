@@ -79,17 +79,36 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     return () => clearInterval(interval);
   }, [generating, runId]);
 
+  // Convert percentage-based crop from DB to pixel coordinates when image/crop changes
   useEffect(() => {
-    if (selectedImage?.crop) {
+    if (selectedImage?.crop && imageBounds.width > 0) {
+      // Convert from percentage (0-100) to pixel coordinates within imageBounds
+      const pixelX = imageBounds.offsetX + (selectedImage.crop.crop_x / 100) * imageBounds.width;
+      const pixelY = imageBounds.offsetY + (selectedImage.crop.crop_y / 100) * imageBounds.height;
+      const pixelWidth = (selectedImage.crop.crop_width / 100) * imageBounds.width;
+      const pixelHeight = (selectedImage.crop.crop_height / 100) * imageBounds.height;
+      
       setCropRect({
-        x: selectedImage.crop.crop_x,
-        y: selectedImage.crop.crop_y,
-        width: selectedImage.crop.crop_width,
-        height: selectedImage.crop.crop_height,
+        x: pixelX,
+        y: pixelY,
+        width: pixelWidth,
+        height: pixelHeight,
       });
       setAspectRatio(selectedImage.crop.aspect_ratio);
+    } else if (imageBounds.width > 0 && !selectedImage?.crop) {
+      // Set default crop centered on image when no crop exists
+      const aspectMultiplier = aspectRatio === '1:1' ? 1 : 1.25;
+      const defaultWidth = imageBounds.width * 0.6;
+      const defaultHeight = defaultWidth * aspectMultiplier;
+      
+      setCropRect({
+        x: imageBounds.offsetX + (imageBounds.width - defaultWidth) / 2,
+        y: imageBounds.offsetY + imageBounds.height * 0.1, // Position towards top for portrait
+        width: defaultWidth,
+        height: Math.min(defaultHeight, imageBounds.height * 0.8),
+      });
     }
-  }, [selectedImage]);
+  }, [selectedImage, imageBounds]);
 
   const fetchImagesWithCrops = async () => {
     if (!runId) return;
@@ -174,17 +193,23 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   };
 
   const handleSaveCrop = async () => {
-    if (!selectedImage) return;
+    if (!selectedImage || imageBounds.width === 0) return;
+    
+    // Convert from pixel coordinates to percentage (0-100) relative to image bounds
+    const cropXPercent = ((cropRect.x - imageBounds.offsetX) / imageBounds.width) * 100;
+    const cropYPercent = ((cropRect.y - imageBounds.offsetY) / imageBounds.height) * 100;
+    const cropWidthPercent = (cropRect.width / imageBounds.width) * 100;
+    const cropHeightPercent = (cropRect.height / imageBounds.height) * 100;
     
     try {
       if (selectedImage.crop) {
         const { error } = await supabase
           .from('face_crops')
           .update({
-            crop_x: cropRect.x,
-            crop_y: cropRect.y,
-            crop_width: cropRect.width,
-            crop_height: cropRect.height,
+            crop_x: Math.round(cropXPercent),
+            crop_y: Math.round(cropYPercent),
+            crop_width: Math.round(cropWidthPercent),
+            crop_height: Math.round(cropHeightPercent),
             aspect_ratio: aspectRatio,
             is_auto: false,
           })
@@ -196,10 +221,10 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           .from('face_crops')
           .insert({
             scrape_image_id: selectedImage.id,
-            crop_x: cropRect.x,
-            crop_y: cropRect.y,
-            crop_width: cropRect.width,
-            crop_height: cropRect.height,
+            crop_x: Math.round(cropXPercent),
+            crop_y: Math.round(cropYPercent),
+            crop_width: Math.round(cropWidthPercent),
+            crop_height: Math.round(cropHeightPercent),
             aspect_ratio: aspectRatio,
             is_auto: false,
           });
@@ -216,12 +241,18 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   };
 
   const handleResetCrop = () => {
-    if (selectedImage?.crop) {
+    if (selectedImage?.crop && imageBounds.width > 0) {
+      // Convert from percentage (0-100) to pixel coordinates
+      const pixelX = imageBounds.offsetX + (selectedImage.crop.crop_x / 100) * imageBounds.width;
+      const pixelY = imageBounds.offsetY + (selectedImage.crop.crop_y / 100) * imageBounds.height;
+      const pixelWidth = (selectedImage.crop.crop_width / 100) * imageBounds.width;
+      const pixelHeight = (selectedImage.crop.crop_height / 100) * imageBounds.height;
+      
       setCropRect({
-        x: selectedImage.crop.crop_x,
-        y: selectedImage.crop.crop_y,
-        width: selectedImage.crop.crop_width,
-        height: selectedImage.crop.crop_height,
+        x: pixelX,
+        y: pixelY,
+        width: pixelWidth,
+        height: pixelHeight,
       });
     }
   };
