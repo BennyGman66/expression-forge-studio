@@ -125,12 +125,12 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     async function fetchIdentities() {
       setIsLoading(true);
       
+      // First fetch identities with representative images
       let query = supabase
         .from('face_identities')
         .select(`
           *,
-          representative_image:face_scrape_images!face_identities_representative_image_id_fkey(stored_url, source_url),
-          digital_talent:digital_talents(id, name, gender, front_face_url)
+          representative_image:face_scrape_images!face_identities_representative_image_id_fkey(stored_url, source_url)
         `)
         .eq('scrape_run_id', runId)
         .order('image_count', { ascending: false });
@@ -143,17 +143,42 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
 
       if (error) {
         console.error('Error fetching identities:', error);
-      } else {
-        const identitiesWithUrls = (data || []).map((identity: any) => ({
-          ...identity,
-          representative_image_url: identity.representative_image?.stored_url || identity.representative_image?.source_url || null,
-          digital_talent: identity.digital_talent || null,
-        }));
-        setIdentities(identitiesWithUrls);
-        if (identitiesWithUrls.length > 0 && !selectedIdentity && !showUnclassified) {
-          setSelectedIdentity(identitiesWithUrls[0].id);
+        setIsLoading(false);
+        return;
+      }
+
+      // Get talent_ids that are set and fetch corresponding digital talents
+      const talentIds = (data || [])
+        .map((identity: any) => identity.talent_id)
+        .filter((id: string | null) => id !== null);
+
+      let digitalTalentsMap: Record<string, any> = {};
+      
+      if (talentIds.length > 0) {
+        const { data: talentData } = await supabase
+          .from('digital_talents')
+          .select('id, name, gender, front_face_url')
+          .in('id', talentIds);
+        
+        if (talentData) {
+          digitalTalentsMap = talentData.reduce((acc: Record<string, any>, talent: any) => {
+            acc[talent.id] = talent;
+            return acc;
+          }, {});
         }
       }
+
+      const identitiesWithUrls = (data || []).map((identity: any) => ({
+        ...identity,
+        representative_image_url: identity.representative_image?.stored_url || identity.representative_image?.source_url || null,
+        digital_talent: identity.talent_id ? digitalTalentsMap[identity.talent_id] || null : null,
+      }));
+      
+      setIdentities(identitiesWithUrls);
+      if (identitiesWithUrls.length > 0 && !selectedIdentity && !showUnclassified) {
+        setSelectedIdentity(identitiesWithUrls[0].id);
+      }
+      
       setIsLoading(false);
     }
 
