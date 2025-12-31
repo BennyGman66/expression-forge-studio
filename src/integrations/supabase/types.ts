@@ -350,6 +350,42 @@ export type Database = {
           },
         ]
       }
+      digital_talent_brands: {
+        Row: {
+          brand_id: string
+          created_at: string
+          id: string
+          talent_id: string
+        }
+        Insert: {
+          brand_id: string
+          created_at?: string
+          id?: string
+          talent_id: string
+        }
+        Update: {
+          brand_id?: string
+          created_at?: string
+          id?: string
+          talent_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "digital_talent_brands_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "digital_talent_brands_talent_id_fkey"
+            columns: ["talent_id"]
+            isOneToOne: false
+            referencedRelation: "digital_talents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       digital_talents: {
         Row: {
           created_at: string
