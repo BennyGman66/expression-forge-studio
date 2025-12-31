@@ -22,7 +22,7 @@ const apps = [
   {
     id: "avatar-repose",
     title: "Avatar Repose",
-    description: "Scrape brands, generate clay poses, transfer to digital talent.",
+    description: "Ingest brands, generate clay poses, transfer to digital talent.",
     icon: Users,
     path: "/avatar-repose",
     disabled: false,
@@ -46,7 +46,7 @@ const apps = [
   {
     id: "face-creator",
     title: "Face Creator",
-    description: "Scrape & segment model faces for reference datasets.",
+    description: "Collect & segment model faces for reference datasets.",
     icon: Grid3X3,
     path: "/face-creator",
     disabled: false,
