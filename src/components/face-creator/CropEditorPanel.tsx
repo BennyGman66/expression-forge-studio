@@ -34,6 +34,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [startCrop, setStartCrop] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
+  const [imageBounds, setImageBounds] = useState({ offsetX: 0, offsetY: 0, width: 0, height: 0 });
 
   const selectedImage = images[selectedIndex];
 
@@ -507,13 +508,37 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                   src={selectedImage.stored_url || selectedImage.source_url}
                   alt=""
                   className="w-full h-full object-contain"
-                  onLoad={() => {
-                    if (editorContainerRef.current) {
-                      setContainerDimensions({
-                        width: editorContainerRef.current.clientWidth,
-                        height: editorContainerRef.current.clientHeight,
-                      });
+                  onLoad={(e) => {
+                    const img = e.currentTarget;
+                    const container = editorContainerRef.current;
+                    if (!container) return;
+                    
+                    const containerWidth = container.clientWidth;
+                    const containerHeight = container.clientHeight;
+                    
+                    setContainerDimensions({ width: containerWidth, height: containerHeight });
+                    
+                    // Calculate actual rendered image bounds with object-contain
+                    const imgAspect = img.naturalWidth / img.naturalHeight;
+                    const containerAspect = containerWidth / containerHeight;
+                    
+                    let renderedWidth, renderedHeight, offsetX, offsetY;
+                    
+                    if (imgAspect > containerAspect) {
+                      // Image is wider - constrained by width
+                      renderedWidth = containerWidth;
+                      renderedHeight = containerWidth / imgAspect;
+                      offsetX = 0;
+                      offsetY = (containerHeight - renderedHeight) / 2;
+                    } else {
+                      // Image is taller - constrained by height
+                      renderedHeight = containerHeight;
+                      renderedWidth = containerHeight * imgAspect;
+                      offsetX = (containerWidth - renderedWidth) / 2;
+                      offsetY = 0;
                     }
+                    
+                    setImageBounds({ offsetX, offsetY, width: renderedWidth, height: renderedHeight });
                   }}
                 />
                 {/* Crop overlay with resize handles */}
@@ -573,31 +598,34 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                   className="bg-muted rounded-lg overflow-hidden relative"
                   style={{ aspectRatio: aspectRatio === '1:1' ? '1/1' : '4/5' }}
                 >
-                  {(selectedImage.crop || cropRect.width > 0) && containerDimensions.width > 0 ? (
+                  {(selectedImage.crop || cropRect.width > 0) && imageBounds.width > 0 ? (
                     <div 
                       className="w-full h-full overflow-hidden relative"
                     >
                       {(() => {
-                        // Convert pixel values to percentages based on container dimensions
-                        const cropXPercent = (cropRect.x / containerDimensions.width) * 100;
-                        const cropYPercent = (cropRect.y / containerDimensions.height) * 100;
-                        const cropWidthPercent = (cropRect.width / containerDimensions.width) * 100;
-                        const cropHeightPercent = (cropRect.height / containerDimensions.height) * 100;
+                        // Convert crop coordinates from container-space to image-space
+                        const cropXInImage = cropRect.x - imageBounds.offsetX;
+                        const cropYInImage = cropRect.y - imageBounds.offsetY;
                         
-                        // Scale factor: if crop covers 30% of container, scale up by 100/30
-                        const scaleX = 100 / cropWidthPercent;
-                        const scaleY = 100 / cropHeightPercent;
+                        // Calculate percentages relative to the actual image dimensions
+                        const cropXPercent = (cropXInImage / imageBounds.width) * 100;
+                        const cropYPercent = (cropYInImage / imageBounds.height) * 100;
+                        const cropWidthPercent = (cropRect.width / imageBounds.width) * 100;
+                        const cropHeightPercent = (cropRect.height / imageBounds.height) * 100;
+                        
+                        // Scale factor: use uniform scale to maintain aspect ratio
+                        const scale = 100 / cropWidthPercent;
                         
                         return (
                           <img
                             src={selectedImage.stored_url || selectedImage.source_url}
                             alt=""
-                            className="absolute origin-top-left"
+                            className="absolute"
                             style={{
-                              transform: `scale(${scaleX}, ${scaleY})`,
                               transformOrigin: 'top left',
-                              left: `${-cropXPercent * scaleX}%`,
-                              top: `${-cropYPercent * scaleY}%`,
+                              transform: `scale(${scale})`,
+                              left: `${-cropXPercent * scale}%`,
+                              top: `${-cropYPercent * scale}%`,
                               width: '100%',
                               height: 'auto',
                             }}
