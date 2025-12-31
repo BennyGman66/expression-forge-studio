@@ -5,6 +5,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface ReferenceImage {
+  original_image_url: string;
+  cropped_image_url: string;
+  view_type: 'front' | 'back';
+}
+
 interface FaceDetectionResult {
   faceDetected: boolean;
   faceBoundingBox: {
@@ -29,7 +35,7 @@ serve(async (req) => {
   }
 
   try {
-    const { imageUrl, aspectRatio = '1:1' } = await req.json();
+    const { imageUrl, aspectRatio = '1:1', referenceImages = [], baseUrl } = await req.json();
 
     if (!imageUrl) {
       return new Response(
@@ -45,6 +51,104 @@ serve(async (req) => {
 
     console.log(`[detect-face-ai] Processing image: ${imageUrl.substring(0, 100)}...`);
     console.log(`[detect-face-ai] Aspect ratio: ${aspectRatio}`);
+    console.log(`[detect-face-ai] Reference images count: ${referenceImages.length}`);
+    console.log(`[detect-face-ai] Base URL: ${baseUrl}`);
+
+    // Build multi-image content for few-shot learning
+    const userContent: any[] = [];
+    
+    // If we have reference images, include them for few-shot learning
+    if (referenceImages.length > 0 && baseUrl) {
+      userContent.push({
+        type: 'text',
+        text: `I will show you reference examples of EXACTLY how I want images cropped. Study these pairs carefully - the first image is the original, the second shows the CORRECT crop result with a green overlay indicating the crop area.`
+      });
+
+      // Add reference image pairs (limit to 3 to keep token count reasonable)
+      const frontRefs = referenceImages.filter((r: ReferenceImage) => r.view_type === 'front').slice(0, 2);
+      const backRefs = referenceImages.filter((r: ReferenceImage) => r.view_type === 'back').slice(0, 1);
+      const selectedRefs = [...frontRefs, ...backRefs];
+
+      for (let i = 0; i < selectedRefs.length; i++) {
+        const ref = selectedRefs[i];
+        const originalUrl = ref.original_image_url.startsWith('http') 
+          ? ref.original_image_url 
+          : `${baseUrl}${ref.original_image_url}`;
+        const croppedUrl = ref.cropped_image_url.startsWith('http') 
+          ? ref.cropped_image_url 
+          : `${baseUrl}${ref.cropped_image_url}`;
+        
+        console.log(`[detect-face-ai] Reference ${i + 1} original: ${originalUrl}`);
+        console.log(`[detect-face-ai] Reference ${i + 1} cropped: ${croppedUrl}`);
+
+        userContent.push({
+          type: 'image_url',
+          image_url: { url: originalUrl }
+        });
+        userContent.push({
+          type: 'text',
+          text: `Reference ${i + 1} - Original ${ref.view_type === 'back' ? 'BACK VIEW' : 'FRONT VIEW'} image (full body/source)`
+        });
+        userContent.push({
+          type: 'image_url',
+          image_url: { url: croppedUrl }
+        });
+        userContent.push({
+          type: 'text',
+          text: `Reference ${i + 1} - CORRECT crop result. The green rectangle shows the EXACT crop boundaries. Notice:
+- Top edge: just above crown of head (2-5% padding above hair)
+- Bottom edge: at shoulder line/collar level (NOT into chest)
+- Side edges: at outer edges of shoulders (horizontally tight)
+- Person nearly fills the entire frame`
+        });
+      }
+
+      userContent.push({
+        type: 'text',
+        text: `Now analyze this NEW image and provide crop coordinates that EXACTLY match the style shown in the reference examples. Use the ${aspectRatio} aspect ratio.`
+      });
+    } else {
+      userContent.push({
+        type: 'text',
+        text: `Analyze this fashion photograph. Find the primary person's face and return the face bounding box and optimal head-and-shoulders crop coordinates. If this is a back-of-head shot, indicate that. Use the ${aspectRatio} aspect ratio for the suggested crop.`
+      });
+    }
+
+    // Add the target image to analyze
+    userContent.push({
+      type: 'image_url',
+      image_url: { url: imageUrl }
+    });
+
+    // Enhanced system prompt with very specific crop rules learned from reference images
+    const systemPrompt = `You are an expert fashion photo cropper. Your task is to analyze images and suggest TIGHT head-and-shoulders crops that match the reference examples exactly.
+
+CRITICAL CROP RULES - Follow these EXACTLY:
+
+FOR FRONT-FACING IMAGES:
+1. TOP EDGE: Position just above the crown of the head. Maximum 3-5% of the crop height should be empty space above the hair.
+2. BOTTOM EDGE: At the shoulder line where shoulders meet the neck/collar. Include the collar/neckline of clothing but DO NOT go below the shoulders into the chest area.
+3. LEFT/RIGHT EDGES: At the outer edges of the shoulders with minimal padding (0-5%). The person should nearly fill the horizontal frame.
+4. The head should occupy approximately 40-50% of the total crop height.
+5. The crop should feel TIGHT - if in doubt, crop TIGHTER rather than looser.
+
+FOR BACK-OF-HEAD IMAGES:
+1. Same tight framing applies - center on the back of the head
+2. TOP EDGE: Just above the crown of the head (2-5% padding)
+3. BOTTOM EDGE: At the shoulder line (same as front view)
+4. Mark isBackView as TRUE
+5. Even though no face is visible, provide a crop that centers on where the head is
+
+ASPECT RATIO ${aspectRatio}:
+${aspectRatio === '1:1' 
+  ? '- Square crop: Face centered, shoulders cropped to maintain square shape. May need to crop shoulders tighter to keep square.'
+  : '- Portrait 4:5 crop: Slightly more vertical room. Can include a bit more of the shoulders while keeping the tight head framing.'}
+
+Return ALL coordinates as percentages (0-100) of the ORIGINAL image dimensions:
+- x: left edge as percentage of image width
+- y: top edge as percentage of image height
+- width: width as percentage of image width
+- height: height as percentage of image height`;
 
     // Call Gemini 2.5 Flash with tool calling for structured output
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -58,35 +162,11 @@ serve(async (req) => {
         messages: [
           {
             role: 'system',
-            content: `You are an expert at analyzing fashion photography images. Your task is to:
-1. Detect if there is a person's face visible in the image
-2. If a face is visible, provide the precise bounding box coordinates as percentages (0-100) of the image dimensions
-3. Suggest an optimal head-and-shoulders crop that:
-   - Includes just the top of the hair (minimal space above, about 5-10% of face height)
-   - Extends to the edge of the shoulders only (not into the chest area)
-   - Is horizontally tight around the face and shoulders
-4. Identify if the person's back is facing the camera (back view)
-
-Return coordinates as percentages (0-100) where:
-- x: left edge as percentage of image width
-- y: top edge as percentage of image height  
-- width: width as percentage of image width
-- height: height as percentage of image height
-
-For ${aspectRatio} aspect ratio crops, ensure the suggested crop maintains that ratio.`
+            content: systemPrompt
           },
           {
             role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `Analyze this fashion photograph. Find the primary person's face and return the face bounding box and optimal head-and-shoulders crop coordinates. If this is a back-of-head shot, indicate that. Use the ${aspectRatio} aspect ratio for the suggested crop.`
-              },
-              {
-                type: 'image_url',
-                image_url: { url: imageUrl }
-              }
-            ]
+            content: userContent
           }
         ],
         tools: [
@@ -100,11 +180,11 @@ For ${aspectRatio} aspect ratio crops, ensure the suggested crop maintains that 
                 properties: {
                   faceDetected: {
                     type: 'boolean',
-                    description: 'Whether a face was detected in the image'
+                    description: 'Whether a face was detected in the image (true for front-facing, false for back view)'
                   },
                   faceBoundingBox: {
                     type: 'object',
-                    description: 'The bounding box of the detected face as percentages (0-100). Null if no face detected.',
+                    description: 'The bounding box of the detected face as percentages (0-100). Null if no face detected or back view.',
                     properties: {
                       x: { type: 'number', description: 'Left edge as percentage of image width (0-100)' },
                       y: { type: 'number', description: 'Top edge as percentage of image height (0-100)' },
@@ -115,7 +195,7 @@ For ${aspectRatio} aspect ratio crops, ensure the suggested crop maintains that 
                   },
                   suggestedCrop: {
                     type: 'object',
-                    description: 'The suggested head-and-shoulders crop area as percentages (0-100)',
+                    description: 'The suggested TIGHT head-and-shoulders crop area as percentages (0-100). Must match the reference example style.',
                     properties: {
                       x: { type: 'number', description: 'Left edge as percentage of image width (0-100)' },
                       y: { type: 'number', description: 'Top edge as percentage of image height (0-100)' },
