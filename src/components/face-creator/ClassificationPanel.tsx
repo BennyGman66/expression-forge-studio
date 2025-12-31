@@ -47,10 +47,11 @@ interface ClassificationPanelProps {
   runId: string | null;
 }
 
-interface Talent {
+interface DigitalTalent {
   id: string;
   name: string;
   gender: string | null;
+  front_face_url: string | null;
 }
 
 interface Identity {
@@ -61,7 +62,7 @@ interface Identity {
   representative_image_id: string | null;
   representative_image_url?: string | null;
   talent_id?: string | null;
-  talent?: Talent | null;
+  digital_talent?: DigitalTalent | null;
 }
 
 interface IdentityImage {
@@ -108,10 +109,10 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [selectedImageToMove, setSelectedImageToMove] = useState<UnclassifiedImage | null>(null);
   
-  // Link talent dialog
+  // Digital talents for linking
   const [linkTalentDialogOpen, setLinkTalentDialogOpen] = useState(false);
   const [selectedIdentityForLink, setSelectedIdentityForLink] = useState<Identity | null>(null);
-  const [talents, setTalents] = useState<Talent[]>([]);
+  const [digitalTalents, setDigitalTalents] = useState<DigitalTalent[]>([]);
   const [talentsLoading, setTalentsLoading] = useState(false);
 
   // Fetch identities with thumbnails when runId or gender changes
@@ -129,7 +130,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
         .select(`
           *,
           representative_image:face_scrape_images!face_identities_representative_image_id_fkey(stored_url, source_url),
-          talent:talents(id, name, gender)
+          digital_talent:digital_talents(id, name, gender, front_face_url)
         `)
         .eq('scrape_run_id', runId)
         .order('image_count', { ascending: false });
@@ -146,7 +147,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
         const identitiesWithUrls = (data || []).map((identity: any) => ({
           ...identity,
           representative_image_url: identity.representative_image?.stored_url || identity.representative_image?.source_url || null,
-          talent: identity.talent || null,
+          digital_talent: identity.digital_talent || null,
         }));
         setIdentities(identitiesWithUrls);
         if (identitiesWithUrls.length > 0 && !selectedIdentity && !showUnclassified) {
@@ -159,24 +160,24 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     fetchIdentities();
   }, [runId, selectedGender]);
 
-  // Fetch talents for linking
+  // Fetch digital talents for linking
   useEffect(() => {
-    async function fetchTalents() {
+    async function fetchDigitalTalents() {
       setTalentsLoading(true);
       const { data, error } = await supabase
-        .from('talents')
-        .select('id, name, gender')
+        .from('digital_talents')
+        .select('id, name, gender, front_face_url')
         .order('name');
 
       if (error) {
-        console.error('Error fetching talents:', error);
+        console.error('Error fetching digital talents:', error);
       } else {
-        setTalents(data || []);
+        setDigitalTalents(data || []);
       }
       setTalentsLoading(false);
     }
 
-    fetchTalents();
+    fetchDigitalTalents();
   }, []);
 
   // Fetch unclassified images
@@ -392,16 +393,16 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
       .eq('id', selectedIdentityForLink.id);
 
     if (error) {
-      toast({ title: "Failed to link talent", variant: "destructive" });
+      toast({ title: "Failed to link digital talent", variant: "destructive" });
     } else {
-      const linkedTalent = talents.find(t => t.id === talentId);
+      const linkedTalent = digitalTalents.find(t => t.id === talentId);
       setIdentities(prev =>
         prev.map(id => id.id === selectedIdentityForLink.id 
-          ? { ...id, talent_id: talentId, talent: linkedTalent || null } 
+          ? { ...id, talent_id: talentId, digital_talent: linkedTalent || null } 
           : id
         )
       );
-      toast({ title: "Talent linked successfully" });
+      toast({ title: "Digital talent linked successfully" });
     }
 
     setLinkTalentDialogOpen(false);
@@ -417,15 +418,15 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
       .eq('id', identity.id);
 
     if (error) {
-      toast({ title: "Failed to unlink talent", variant: "destructive" });
+      toast({ title: "Failed to unlink digital talent", variant: "destructive" });
     } else {
       setIdentities(prev =>
         prev.map(id => id.id === identity.id 
-          ? { ...id, talent_id: null, talent: null } 
+          ? { ...id, talent_id: null, digital_talent: null } 
           : id
         )
       );
-      toast({ title: "Talent unlinked" });
+      toast({ title: "Digital talent unlinked" });
     }
   };
 
@@ -672,16 +673,16 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="font-medium truncate">{identity.name}</span>
-                              {identity.talent && (
+                              {identity.digital_talent && (
                                 <Badge variant="outline" className="text-[10px] px-1.5 flex-shrink-0">
-                                  {identity.talent.name}
+                                  {identity.digital_talent.name}
                                 </Badge>
                               )}
                             </div>
                           </div>
                           
                           <div className="flex items-center gap-1 flex-shrink-0">
-                            {identity.talent ? (
+                            {identity.digital_talent ? (
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -942,20 +943,23 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                   <Skeleton key={i} className="h-12 w-full" />
                 ))}
               </div>
-            ) : talents.length === 0 ? (
+            ) : digitalTalents.length === 0 ? (
               <div className="py-8 text-center text-muted-foreground">
-                No talents found. Create talents in the Avatar Repose workflow first.
+                No digital talents found. Create them in the Digital Talent hub first.
               </div>
             ) : (
               <div className="space-y-2">
-                {talents.map(talent => (
+                {digitalTalents.map(talent => (
                   <button
                     key={talent.id}
                     onClick={() => handleLinkTalent(talent.id)}
                     className="w-full px-4 py-3 text-left hover:bg-muted/50 rounded-lg flex items-center justify-between border border-border"
                   >
                     <div className="flex items-center gap-3">
-                      <Avatar className="h-8 w-8">
+                      <Avatar className="h-10 w-10">
+                        {talent.front_face_url ? (
+                          <AvatarImage src={talent.front_face_url} alt={talent.name} className="object-cover" />
+                        ) : null}
                         <AvatarFallback>
                           <User className="h-4 w-4" />
                         </AvatarFallback>
