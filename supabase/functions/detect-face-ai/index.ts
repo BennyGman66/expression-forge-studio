@@ -52,13 +52,24 @@ serve(async (req) => {
     console.log(`[detect-face-ai] Processing image: ${imageUrl.substring(0, 100)}...`);
     console.log(`[detect-face-ai] Aspect ratio: ${aspectRatio}`);
     console.log(`[detect-face-ai] Reference images count: ${referenceImages.length}`);
-    console.log(`[detect-face-ai] Base URL: ${baseUrl}`);
+    
+    // Check if reference images are from Supabase storage (publicly accessible)
+    let useReferenceImages = false;
+    if (referenceImages.length > 0) {
+      const firstRef = referenceImages[0] as ReferenceImage;
+      // Only use reference images if they're from Supabase storage (contain 'supabase' in URL)
+      if (firstRef.original_image_url.includes('supabase')) {
+        useReferenceImages = true;
+        console.log(`[detect-face-ai] Using reference images from Supabase storage`);
+      } else {
+        console.log(`[detect-face-ai] Skipping reference images - not from Supabase storage`);
+      }
+    }
 
     // Build multi-image content for few-shot learning
     const userContent: any[] = [];
     
-    // If we have reference images, include them for few-shot learning
-    if (referenceImages.length > 0 && baseUrl) {
+    if (useReferenceImages && referenceImages.length > 0) {
       userContent.push({
         type: 'text',
         text: `I will show you reference examples of EXACTLY how I want images cropped. Study these pairs carefully - the first image is the original, the second shows the CORRECT crop result with a green overlay indicating the crop area.`
@@ -71,19 +82,11 @@ serve(async (req) => {
 
       for (let i = 0; i < selectedRefs.length; i++) {
         const ref = selectedRefs[i];
-        const originalUrl = ref.original_image_url.startsWith('http') 
-          ? ref.original_image_url 
-          : `${baseUrl}${ref.original_image_url}`;
-        const croppedUrl = ref.cropped_image_url.startsWith('http') 
-          ? ref.cropped_image_url 
-          : `${baseUrl}${ref.cropped_image_url}`;
-        
-        console.log(`[detect-face-ai] Reference ${i + 1} original: ${originalUrl}`);
-        console.log(`[detect-face-ai] Reference ${i + 1} cropped: ${croppedUrl}`);
+        console.log(`[detect-face-ai] Reference ${i + 1}: ${ref.original_image_url.substring(0, 80)}...`);
 
         userContent.push({
           type: 'image_url',
-          image_url: { url: originalUrl }
+          image_url: { url: ref.original_image_url }
         });
         userContent.push({
           type: 'text',
@@ -91,7 +94,7 @@ serve(async (req) => {
         });
         userContent.push({
           type: 'image_url',
-          image_url: { url: croppedUrl }
+          image_url: { url: ref.cropped_image_url }
         });
         userContent.push({
           type: 'text',
@@ -120,8 +123,8 @@ serve(async (req) => {
       image_url: { url: imageUrl }
     });
 
-    // Enhanced system prompt with very specific crop rules learned from reference images
-    const systemPrompt = `You are an expert fashion photo cropper. Your task is to analyze images and suggest TIGHT head-and-shoulders crops that match the reference examples exactly.
+    // Enhanced system prompt with very specific crop rules
+    const systemPrompt = `You are an expert fashion photo cropper. Your task is to analyze images and suggest TIGHT head-and-shoulders crops.
 
 CRITICAL CROP RULES - Follow these EXACTLY:
 
@@ -195,7 +198,7 @@ Return ALL coordinates as percentages (0-100) of the ORIGINAL image dimensions:
                   },
                   suggestedCrop: {
                     type: 'object',
-                    description: 'The suggested TIGHT head-and-shoulders crop area as percentages (0-100). Must match the reference example style.',
+                    description: 'The suggested TIGHT head-and-shoulders crop area as percentages (0-100).',
                     properties: {
                       x: { type: 'number', description: 'Left edge as percentage of image width (0-100)' },
                       y: { type: 'number', description: 'Top edge as percentage of image height (0-100)' },
