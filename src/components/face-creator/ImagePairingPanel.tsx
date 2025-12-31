@@ -473,11 +473,13 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                               crop={face.crop}
                             />
                           ) : (
-                            <img
-                              src={face.stored_url || face.source_url}
-                              alt=""
-                              className="w-full aspect-square object-cover"
-                            />
+                            <div className="w-full aspect-square overflow-hidden">
+                              <img
+                                src={face.stored_url || face.source_url}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
                           )}
                           {selectedFaceIds.has(face.id) && (
                             <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5">
@@ -885,21 +887,32 @@ function CroppedFacePreview({
   crop: { crop_x: number; crop_y: number; crop_width: number; crop_height: number; aspect_ratio: string };
 }) {
   // Crop values are stored as percentages (0-100)
-  const scale = 100 / crop.crop_width;
+  // Use object-position to show the cropped region
+  const cropCenterX = crop.crop_x + (crop.crop_width / 2);
+  const cropCenterY = crop.crop_y + (crop.crop_height / 2);
+  
+  // Calculate the scale needed to make the crop fill the container
+  // We scale based on width since container is square
+  const scaleX = 100 / crop.crop_width;
+  const scaleY = 100 / crop.crop_height;
+  const scale = Math.min(scaleX, scaleY);
   
   return (
-    <div className="w-full aspect-square overflow-hidden relative">
+    <div 
+      className="w-full overflow-hidden relative bg-muted"
+      style={{ 
+        aspectRatio: crop.aspect_ratio === '4:5' ? '4/5' : '1/1'
+      }}
+    >
       <img
         src={imageUrl}
         alt=""
-        className="absolute"
+        className="absolute w-full h-auto"
         style={{
           transformOrigin: 'top left',
-          transform: `scale(${scale})`,
-          left: `${-crop.crop_x * scale}%`,
-          top: `${-crop.crop_y * scale}%`,
-          width: '100%',
-          height: 'auto',
+          transform: `scale(${scaleX})`,
+          left: `${-crop.crop_x * scaleX}%`,
+          top: `${-crop.crop_y * scaleX}%`,
         }}
       />
     </div>
