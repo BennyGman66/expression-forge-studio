@@ -550,9 +550,9 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
 
         {/* Gender Filter */}
         <Card>
-          <CardContent className="p-4">
-            <p className="text-sm font-medium mb-3">Gender</p>
-            <div className="flex gap-2">
+          <CardContent className="px-5 py-4">
+            <p className="text-sm font-medium mb-4">Gender</p>
+            <div className="flex gap-3">
               <Button
                 variant={selectedGender === 'all' ? 'default' : 'outline'}
                 size="sm"
@@ -563,6 +563,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                 }}
                 className="flex-1"
               >
+                <Users className="h-4 w-4 mr-1" />
                 All
               </Button>
               <Button
