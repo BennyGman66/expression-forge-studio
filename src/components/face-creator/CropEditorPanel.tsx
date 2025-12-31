@@ -32,6 +32,14 @@ interface AIDetectionResult {
   confidence: number;
 }
 
+interface CropReferenceImage {
+  id: string;
+  original_image_url: string;
+  cropped_image_url: string;
+  view_type: 'front' | 'back';
+  is_active: boolean;
+}
+
 export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const { toast } = useToast();
   const { detectFaces, isReady: detectorReady, isLoading: detectorLoading } = useFaceDetector();
@@ -55,6 +63,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
   const [imageBounds, setImageBounds] = useState({ offsetX: 0, offsetY: 0, width: 0, height: 0 });
   const [imageBoundsReady, setImageBoundsReady] = useState(false);
+  const [referenceImages, setReferenceImages] = useState<CropReferenceImage[]>([]);
 
   const selectedImage = images[selectedIndex];
 
@@ -63,6 +72,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     
     fetchImagesWithCrops();
     fetchJob();
+    fetchReferenceImages();
 
     const channel = supabase
       .channel('crop-editor')
@@ -86,6 +96,19 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       supabase.removeChannel(channel);
     };
   }, [runId]);
+
+  // Fetch reference images for few-shot learning
+  const fetchReferenceImages = async () => {
+    const { data, error } = await supabase
+      .from('crop_reference_images')
+      .select('*')
+      .eq('is_active', true);
+    
+    if (data && !error) {
+      setReferenceImages(data as CropReferenceImage[]);
+      console.log(`[CropEditor] Loaded ${data.length} reference images for AI detection`);
+    }
+  };
 
   // Reset imageBoundsReady when switching images
   useEffect(() => {
@@ -306,11 +329,23 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
   };
 
-  // AI-based face detection using Gemini
+  // AI-based face detection using Gemini with reference images for few-shot learning
   const detectFaceWithAI = async (imageUrl: string): Promise<AIDetectionResult | null> => {
     try {
+      // Get the base URL for reference images
+      const baseUrl = window.location.origin;
+      
       const response = await supabase.functions.invoke('detect-face-ai', {
-        body: { imageUrl, aspectRatio }
+        body: { 
+          imageUrl, 
+          aspectRatio,
+          referenceImages: referenceImages.map(r => ({
+            original_image_url: r.original_image_url,
+            cropped_image_url: r.cropped_image_url,
+            view_type: r.view_type
+          })),
+          baseUrl
+        }
       });
       
       if (response.error) {
