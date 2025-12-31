@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan, AlertTriangle, Sparkles } from "lucide-react";
+import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan, AlertTriangle, Sparkles, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useFaceDetector } from "@/hooks/useFaceDetector";
@@ -559,6 +559,43 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
   };
 
+  // Reset all crops for this run
+  const handleResetAllCrops = async () => {
+    if (!runId || images.length === 0) return;
+    
+    const confirmed = window.confirm(`Are you sure you want to delete all ${images.length} crops? This cannot be undone.`);
+    if (!confirmed) return;
+    
+    setLoading(true);
+    try {
+      const imageIds = images.map(img => img.id);
+      
+      // Delete all crops for these images
+      await supabase
+        .from('face_crops')
+        .delete()
+        .in('scrape_image_id', imageIds);
+      
+      // Delete all detections for these images
+      await supabase
+        .from('face_detections')
+        .delete()
+        .in('scrape_image_id', imageIds);
+      
+      toast({ 
+        title: "Crops Reset", 
+        description: `Deleted crops for ${images.length} images` 
+      });
+      
+      fetchImagesWithCrops();
+    } catch (error) {
+      console.error('Error resetting crops:', error);
+      toast({ title: "Error", description: "Failed to reset crops", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveCrop = async () => {
     if (!selectedImage || imageBounds.width === 0) return;
     
@@ -810,6 +847,15 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
             />
           </div>
           
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleResetAllCrops}
+            disabled={loading || generating || images.length === 0}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Reset All
+          </Button>
           <Button variant="outline" size="sm" onClick={fetchImagesWithCrops}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
