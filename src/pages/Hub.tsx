@@ -22,7 +22,7 @@ const apps = [
   {
     id: "avatar-repose",
     title: "Avatar Repose",
-    description: "Ingest brands, generate clay poses, transfer to digital talent.",
+    description: "Ingest open poses, generate clay poses, transfer to digital talent.",
     icon: Users,
     path: "/avatar-repose",
     disabled: false,
