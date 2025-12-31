@@ -22,6 +22,7 @@ interface ImageWithCrop extends FaceScrapeImage {
 export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const { toast } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
   const [images, setImages] = useState<ImageWithCrop[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -32,6 +33,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const [interactionMode, setInteractionMode] = useState<'none' | 'move' | 'nw' | 'ne' | 'sw' | 'se'>('none');
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [startCrop, setStartCrop] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const [containerDimensions, setContainerDimensions] = useState({ width: 0, height: 0 });
 
   const selectedImage = images[selectedIndex];
 
@@ -494,6 +496,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           <CardContent>
             {selectedImage ? (
               <div 
+                ref={editorContainerRef}
                 className="relative bg-muted rounded-lg overflow-hidden"
                 style={{ aspectRatio: '3/4' }}
                 onMouseMove={handleMouseMove}
@@ -504,6 +507,14 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                   src={selectedImage.stored_url || selectedImage.source_url}
                   alt=""
                   className="w-full h-full object-contain"
+                  onLoad={() => {
+                    if (editorContainerRef.current) {
+                      setContainerDimensions({
+                        width: editorContainerRef.current.clientWidth,
+                        height: editorContainerRef.current.clientHeight,
+                      });
+                    }
+                  }}
                 />
                 {/* Crop overlay with resize handles */}
                 <div 
@@ -562,26 +573,37 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                   className="bg-muted rounded-lg overflow-hidden relative"
                   style={{ aspectRatio: aspectRatio === '1:1' ? '1/1' : '4/5' }}
                 >
-                  {selectedImage.crop || cropRect.width > 0 ? (
+                  {(selectedImage.crop || cropRect.width > 0) && containerDimensions.width > 0 ? (
                     <div 
                       className="w-full h-full overflow-hidden relative"
                     >
-                      <img
-                        src={selectedImage.stored_url || selectedImage.source_url}
-                        alt=""
-                        className="absolute origin-top-left"
-                        style={{
-                          // cropRect values are percentages (0-100)
-                          // Scale: if crop is 60% wide, scale to 100/60 = 166%
-                          transform: `scale(${100 / cropRect.width})`,
-                          transformOrigin: 'top left',
-                          // Position: move by the crop offset scaled
-                          left: `${-cropRect.x * (100 / cropRect.width)}%`,
-                          top: `${-cropRect.y * (100 / cropRect.height)}%`,
-                          width: '100%',
-                          height: 'auto',
-                        }}
-                      />
+                      {(() => {
+                        // Convert pixel values to percentages based on container dimensions
+                        const cropXPercent = (cropRect.x / containerDimensions.width) * 100;
+                        const cropYPercent = (cropRect.y / containerDimensions.height) * 100;
+                        const cropWidthPercent = (cropRect.width / containerDimensions.width) * 100;
+                        const cropHeightPercent = (cropRect.height / containerDimensions.height) * 100;
+                        
+                        // Scale factor: if crop covers 30% of container, scale up by 100/30
+                        const scaleX = 100 / cropWidthPercent;
+                        const scaleY = 100 / cropHeightPercent;
+                        
+                        return (
+                          <img
+                            src={selectedImage.stored_url || selectedImage.source_url}
+                            alt=""
+                            className="absolute origin-top-left"
+                            style={{
+                              transform: `scale(${scaleX}, ${scaleY})`,
+                              transformOrigin: 'top left',
+                              left: `${-cropXPercent * scaleX}%`,
+                              top: `${-cropYPercent * scaleY}%`,
+                              width: '100%',
+                              height: 'auto',
+                            }}
+                          />
+                        );
+                      })()}
                     </div>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">
