@@ -254,6 +254,39 @@ export type Database = {
           },
         ]
       }
+      crop_reference_images: {
+        Row: {
+          created_at: string
+          cropped_image_url: string
+          description: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          original_image_url: string
+          view_type: string
+        }
+        Insert: {
+          created_at?: string
+          cropped_image_url: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          original_image_url: string
+          view_type?: string
+        }
+        Update: {
+          created_at?: string
+          cropped_image_url?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          original_image_url?: string
+          view_type?: string
+        }
+        Relationships: []
+      }
       digital_model_refs: {
         Row: {
           created_at: string
