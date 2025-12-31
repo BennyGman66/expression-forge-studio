@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan, AlertTriangle, Sparkles, Trash2 } from "lucide-react";
+import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan, AlertTriangle, Sparkles, Trash2, Upload } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useFaceDetector } from "@/hooks/useFaceDetector";
@@ -55,6 +55,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const [useAiDetection, setUseAiDetection] = useState(true);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, failed: 0 });
   const [job, setJob] = useState<FaceJob | null>(null);
+  const [uploadingRefs, setUploadingRefs] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '4:5'>('1:1');
   const [cropRect, setCropRect] = useState({ x: 0, y: 0, width: 200, height: 200 });
   const [interactionMode, setInteractionMode] = useState<'none' | 'move' | 'nw' | 'ne' | 'sw' | 'se'>('none');
@@ -107,6 +108,40 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     if (data && !error) {
       setReferenceImages(data as CropReferenceImage[]);
       console.log(`[CropEditor] Loaded ${data.length} reference images for AI detection`);
+    }
+  };
+
+  // Upload reference images to Supabase storage
+  const handleUploadReferenceImages = async () => {
+    setUploadingRefs(true);
+    try {
+      const baseUrl = window.location.origin;
+      console.log(`[CropEditor] Uploading reference images from ${baseUrl}`);
+      
+      const response = await supabase.functions.invoke('upload-crop-references', {
+        body: { sourceBaseUrl: baseUrl }
+      });
+      
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+      
+      toast({ 
+        title: "Reference Images Uploaded", 
+        description: `Uploaded ${response.data.uploaded} reference images to storage` 
+      });
+      
+      // Refresh reference images
+      await fetchReferenceImages();
+    } catch (error) {
+      console.error('Error uploading reference images:', error);
+      toast({ 
+        title: "Upload Failed", 
+        description: error instanceof Error ? error.message : "Failed to upload reference images", 
+        variant: "destructive" 
+      });
+    } finally {
+      setUploadingRefs(false);
     }
   };
 
@@ -856,6 +891,29 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
               checked={useAiDetection}
               onCheckedChange={setUseAiDetection}
             />
+            {useAiDetection && referenceImages.length === 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleUploadReferenceImages}
+                disabled={uploadingRefs}
+                className="ml-1 h-6 px-2 text-xs"
+              >
+                {uploadingRefs ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <>
+                    <Upload className="h-3 w-3 mr-1" />
+                    Setup Refs
+                  </>
+                )}
+              </Button>
+            )}
+            {useAiDetection && referenceImages.length > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">
+                {referenceImages.length} refs
+              </Badge>
+            )}
           </div>
           
           <Button 

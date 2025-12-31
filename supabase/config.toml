@@ -62,3 +62,9 @@ verify_jwt = false
 
 [functions.detect-face-ai]
 verify_jwt = false
+
+[functions.upload-crop-references]
+verify_jwt = false
+
+[functions.upload-reference-images]
+verify_jwt = false

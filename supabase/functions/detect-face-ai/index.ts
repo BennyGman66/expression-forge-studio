@@ -53,16 +53,16 @@ serve(async (req) => {
     console.log(`[detect-face-ai] Aspect ratio: ${aspectRatio}`);
     console.log(`[detect-face-ai] Reference images count: ${referenceImages.length}`);
     
-    // Check if reference images are from Supabase storage (publicly accessible)
+    // Check if reference images are publicly accessible (have valid https URLs)
     let useReferenceImages = false;
     if (referenceImages.length > 0) {
       const firstRef = referenceImages[0] as ReferenceImage;
-      // Only use reference images if they're from Supabase storage (contain 'supabase' in URL)
-      if (firstRef.original_image_url.includes('supabase')) {
+      // Use reference images if they have valid https URLs (publicly accessible)
+      if (firstRef.original_image_url.startsWith('https://')) {
         useReferenceImages = true;
-        console.log(`[detect-face-ai] Using reference images from Supabase storage`);
+        console.log(`[detect-face-ai] Using reference images: ${firstRef.original_image_url.substring(0, 60)}...`);
       } else {
-        console.log(`[detect-face-ai] Skipping reference images - not from Supabase storage`);
+        console.log(`[detect-face-ai] Skipping reference images - not https URLs`);
       }
     }
 
