@@ -582,6 +582,13 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         .delete()
         .in('scrape_image_id', imageIds);
       
+      // Delete the old crop job so it doesn't show stale "completed" status
+      await supabase
+        .from('face_jobs')
+        .delete()
+        .eq('scrape_run_id', runId)
+        .eq('type', 'crop');
+      
       // Reset the progress bar and job state
       setBatchProgress({ current: 0, total: 0, failed: 0 });
       setJob(null);
