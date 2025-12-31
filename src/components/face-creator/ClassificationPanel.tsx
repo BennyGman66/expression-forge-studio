@@ -504,6 +504,43 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     }
   };
 
+  const handleDeleteUnclassifiedImage = async (e: React.MouseEvent, imageId: string) => {
+    e.stopPropagation();
+    
+    const { error } = await supabase
+      .from('face_scrape_images')
+      .delete()
+      .eq('id', imageId);
+
+    if (error) {
+      toast({ title: "Failed to delete image", variant: "destructive" });
+    } else {
+      setUnclassifiedImages(prev => prev.filter(img => img.id !== imageId));
+      toast({ title: "Image deleted" });
+    }
+  };
+
+  const handleDeleteAllUnclassified = async () => {
+    if (!confirm(`Delete all ${unclassifiedImages.length} unclassified images? This cannot be undone.`)) {
+      return;
+    }
+
+    const imageIds = unclassifiedImages.map(img => img.id);
+    
+    const { error } = await supabase
+      .from('face_scrape_images')
+      .delete()
+      .in('id', imageIds);
+
+    if (error) {
+      toast({ title: "Failed to delete images", variant: "destructive" });
+    } else {
+      setUnclassifiedImages([]);
+      setShowUnclassified(false);
+      toast({ title: "All unclassified images deleted", description: `${imageIds.length} images removed` });
+    }
+  };
+
   const handleDownloadImage = async (e: React.MouseEvent, imageUrl: string) => {
     e.stopPropagation();
     try {
@@ -765,7 +802,16 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                 </p>
               )}
             </div>
-            {!showUnclassified && (
+            {showUnclassified ? (
+              <Button 
+                variant="destructive" 
+                size="sm"
+                onClick={handleDeleteAllUnclassified}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete All
+              </Button>
+            ) : (
               <div className="flex items-center gap-2">
                 <Select value={viewFilter} onValueChange={(v) => setViewFilter(v as any)}>
                   <SelectTrigger className="w-32">
@@ -817,6 +863,15 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                           title="Download image"
                         >
                           <Download className="h-4 w-4" />
+                        </button>
+
+                        {/* Delete button */}
+                        <button
+                          onClick={(e) => handleDeleteUnclassifiedImage(e, image.id)}
+                          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-destructive text-destructive-foreground rounded-full p-1.5 hover:bg-destructive/90"
+                          title="Delete image"
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </button>
                         
                         {/* Move indicator */}
