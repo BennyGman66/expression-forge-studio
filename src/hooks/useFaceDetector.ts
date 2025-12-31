@@ -39,11 +39,12 @@ async function initializeDetector(): Promise<FaceDetector> {
     
     detectorInstance = await FaceDetector.createFromOptions(vision, {
       baseOptions: {
-        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+        // Use full-range model for faces at distance (full-body fashion shots)
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/1/blaze_face_full_range.tflite',
         delegate: 'GPU'
       },
       runningMode: 'IMAGE',
-      minDetectionConfidence: 0.5,
+      minDetectionConfidence: 0.3, // Lower threshold for challenging angles/distances
     });
     
     return detectorInstance;
