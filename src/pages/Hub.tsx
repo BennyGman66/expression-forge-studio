@@ -1,8 +1,16 @@
 import { useNavigate } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
-import { Grid3X3, Users, ExternalLink, User } from "lucide-react";
+import { Grid3X3, Users, ExternalLink, User, Flag } from "lucide-react";
 
 const apps = [
+  {
+    id: "tommy-hilfiger",
+    title: "Tommy Hilfiger - Self Serve Beta Test",
+    description: "Self serve beta testing workspace.",
+    icon: Flag,
+    path: "/tommy-hilfiger",
+    disabled: false,
+  },
   {
     id: "expression-map",
     title: "Expression Map",
