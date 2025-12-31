@@ -550,10 +550,8 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
 
         {/* Gender Filter */}
         <Card>
-          <CardHeader className="py-3">
-            <CardTitle className="text-sm font-medium">Gender</CardTitle>
-          </CardHeader>
-          <CardContent className="py-2">
+          <CardContent className="p-4">
+            <p className="text-sm font-medium mb-3">Gender</p>
             <div className="flex gap-2">
               <Button
                 variant={selectedGender === 'all' ? 'default' : 'outline'}
@@ -599,13 +597,13 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
 
         {/* Models List */}
         <Card className="flex-1">
-          <CardHeader className="py-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              Models ({identities.length})
-            </CardTitle>
-          </CardHeader>
           <CardContent className="p-0">
+            <div className="px-4 py-3 border-b border-border">
+              <p className="text-sm font-medium flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Models ({identities.length})
+              </p>
+            </div>
             <ScrollArea className="h-[400px]">
               {isLoading ? (
                 <div className="p-4 space-y-2">
