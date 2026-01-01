@@ -8,10 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, User, Upload, Trash2, Building2, ExternalLink, X } from "lucide-react";
+import { Plus, User, Upload, Trash2, Building2, ExternalLink, X, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useBrands } from "@/hooks/useBrands";
+import { TwinCard } from "@/components/digital-twins/TwinCard";
+import { TwinDetailPanel } from "@/components/digital-twins/TwinDetailPanel";
 import type { DigitalTalent, DigitalTalentWithUsage } from "@/types/digital-talent";
+import type { DigitalTwinWithBrand } from "@/types/digital-twin";
 
 export default function DigitalTalentPage() {
   const [activeTab, setActiveTab] = useState("talents");
@@ -24,6 +27,11 @@ export default function DigitalTalentPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Twins state
+  const [twins, setTwins] = useState<DigitalTwinWithBrand[]>([]);
+  const [selectedTwin, setSelectedTwin] = useState<DigitalTwinWithBrand | null>(null);
+  const [twinsLoading, setTwinsLoading] = useState(false);
+
   // Brands state
   const { brands, loading: brandsLoading, createBrand, deleteBrand } = useBrands();
   const [newBrandName, setNewBrandName] = useState("");
@@ -32,6 +40,7 @@ export default function DigitalTalentPage() {
 
   useEffect(() => {
     fetchTalents();
+    fetchTwins();
   }, []);
 
   const fetchTalents = async () => {
@@ -79,6 +88,27 @@ export default function DigitalTalentPage() {
     }
 
     setTalents(talentsWithUsage);
+  };
+
+  const fetchTwins = async () => {
+    setTwinsLoading(true);
+    const { data, error } = await supabase
+      .from("digital_twins")
+      .select(`
+        *,
+        brand:brands(id, name)
+      `)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching twins:", error);
+    } else {
+      setTwins((data || []).map((t: any) => ({
+        ...t,
+        brand: t.brand || null,
+      })));
+    }
+    setTwinsLoading(false);
   };
 
   const handleCreateTalent = async () => {
@@ -259,9 +289,9 @@ export default function DigitalTalentPage() {
       <main className="p-6">
         <div className="max-w-7xl mx-auto">
           <div className="mb-6">
-            <h1 className="text-3xl font-serif">Digital Talent & Brands</h1>
+            <h1 className="text-3xl font-serif">Digital Talent & Twins</h1>
             <p className="text-muted-foreground mt-1">
-              Manage your digital talent identities and brands across the platform
+              Manage your digital talent identities, twins, and brands across the platform
             </p>
           </div>
 
@@ -269,8 +299,13 @@ export default function DigitalTalentPage() {
             <TabsList className="mb-6">
               <TabsTrigger value="talents" className="flex items-center gap-2">
                 <User className="w-4 h-4" />
-                Talents
+                Digital Talents
                 <Badge variant="secondary" className="ml-1">{talents.length}</Badge>
+              </TabsTrigger>
+              <TabsTrigger value="twins" className="flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                Digital Twins
+                <Badge variant="secondary" className="ml-1">{twins.length}</Badge>
               </TabsTrigger>
               <TabsTrigger value="brands" className="flex items-center gap-2">
                 <Building2 className="w-4 h-4" />
@@ -452,21 +487,21 @@ export default function DigitalTalentPage() {
                 </div>
 
                 {/* Right: Detail Panel */}
-                <div>
+                <div className="col-span-1">
                   {selectedTalent ? (
-                    <Card className="p-6 sticky top-6">
-                      <div className="flex items-start justify-between mb-4">
-                        <h3 className="text-lg font-medium">{selectedTalent.name}</h3>
+                    <Card className="p-6 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-medium">{selectedTalent.name}</h3>
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => handleDeleteTalent(selectedTalent.id)}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-4 h-4 text-destructive" />
                         </Button>
                       </div>
 
-                      <div className="aspect-square rounded-lg bg-muted mb-4 overflow-hidden">
+                      <div className="aspect-square rounded-lg bg-muted overflow-hidden">
                         {selectedTalent.front_face_url ? (
                           <img
                             src={selectedTalent.front_face_url}
@@ -474,38 +509,9 @@ export default function DigitalTalentPage() {
                             className="w-full h-full object-cover"
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <User className="w-16 h-16 text-muted-foreground" />
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="space-y-4">
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Gender</Label>
-                          <p className="capitalize">{selectedTalent.gender || "Not specified"}</p>
-                        </div>
-
-                        <div className="border-t pt-4">
-                          <h4 className="font-medium mb-2">Usage Statistics</h4>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-muted/50 rounded-lg p-3 text-center">
-                              <p className="text-2xl font-bold">{selectedTalent.looks_count}</p>
-                              <p className="text-xs text-muted-foreground">Looks</p>
-                            </div>
-                            <div className="bg-muted/50 rounded-lg p-3 text-center">
-                              <p className="text-2xl font-bold">{selectedTalent.outputs_count}</p>
-                              <p className="text-xs text-muted-foreground">Outputs</p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="border-t pt-4">
-                          <label className="block">
-                            <Button variant="outline" className="w-full" disabled={isUploading}>
-                              <Upload className="w-4 h-4 mr-2" />
-                              {isUploading ? "Uploading..." : "Upload Front Face"}
-                            </Button>
+                          <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-muted/80 transition-colors">
+                            <Upload className="w-8 h-8 text-muted-foreground mb-2" />
+                            <span className="text-sm text-muted-foreground">Upload front face</span>
                             <input
                               type="file"
                               accept="image/*"
@@ -516,13 +522,83 @@ export default function DigitalTalentPage() {
                               }}
                             />
                           </label>
+                        )}
+                      </div>
+
+                      {selectedTalent.gender && (
+                        <Badge variant="secondary" className="capitalize">
+                          {selectedTalent.gender}
+                        </Badge>
+                      )}
+
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Looks</span>
+                          <span>{selectedTalent.looks_count}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Outputs</span>
+                          <span>{selectedTalent.outputs_count}</span>
                         </div>
                       </div>
                     </Card>
                   ) : (
                     <Card className="p-6 text-center text-muted-foreground">
-                      <User className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                      <p>Select a talent to view details</p>
+                      Select a talent to view details
+                    </Card>
+                  )}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Twins Tab */}
+            <TabsContent value="twins">
+              <div className="grid grid-cols-3 gap-6">
+                {/* Left: Twin Grid */}
+                <div className="col-span-2">
+                  {twinsLoading ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      Loading twins...
+                    </div>
+                  ) : twins.length === 0 ? (
+                    <Card className="p-12 text-center">
+                      <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                      <h3 className="font-medium text-lg mb-2">No Digital Twins Yet</h3>
+                      <p className="text-muted-foreground text-sm">
+                        Promote scraped models from Face Creator to create Digital Twins.
+                        Look for the "+" button on model cards.
+                      </p>
+                    </Card>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-4">
+                      {twins.map((twin) => (
+                        <TwinCard
+                          key={twin.id}
+                          twin={twin}
+                          isSelected={selectedTwin?.id === twin.id}
+                          onClick={() => setSelectedTwin(twin)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: Detail Panel */}
+                <div className="col-span-1">
+                  {selectedTwin ? (
+                    <Card className="h-[600px] overflow-hidden">
+                      <TwinDetailPanel
+                        twin={selectedTwin}
+                        onUpdate={fetchTwins}
+                        onDelete={() => {
+                          setSelectedTwin(null);
+                          fetchTwins();
+                        }}
+                      />
+                    </Card>
+                  ) : (
+                    <Card className="p-6 text-center text-muted-foreground">
+                      Select a twin to view details
                     </Card>
                   )}
                 </div>
@@ -541,15 +617,15 @@ export default function DigitalTalentPage() {
                       <Input
                         value={newBrandName}
                         onChange={(e) => setNewBrandName(e.target.value)}
-                        placeholder="e.g., Tommy Hilfiger"
+                        placeholder="e.g. Tommy Hilfiger"
                       />
                     </div>
-                    <div className="col-span-2 space-y-2">
+                    <div className="space-y-2 col-span-2">
                       <Label>Website URL (optional)</Label>
                       <Input
                         value={newBrandUrl}
                         onChange={(e) => setNewBrandUrl(e.target.value)}
-                        placeholder="https://example.com"
+                        placeholder="https://..."
                       />
                     </div>
                     <div className="flex items-end">
@@ -569,40 +645,35 @@ export default function DigitalTalentPage() {
                 <div className="grid grid-cols-4 gap-4">
                   {brands.map((brand) => (
                     <Card key={brand.id} className="p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <Building2 className="w-6 h-6 text-primary" />
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h4 className="font-medium">{brand.name}</h4>
+                          {brand.start_url && (
+                            <a
+                              href={brand.start_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 mt-1"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              Website
+                            </a>
+                          )}
                         </div>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8"
                           onClick={() => handleDeleteBrand(brand.id)}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-4 h-4 text-destructive" />
                         </Button>
                       </div>
-                      <h4 className="font-medium">{brand.name}</h4>
-                      {brand.start_url && (
-                        <a
-                          href={brand.start_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 mt-1"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                          {new URL(brand.start_url).hostname}
-                        </a>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Added {new Date(brand.created_at).toLocaleDateString()}
-                      </p>
                     </Card>
                   ))}
 
                   {brands.length === 0 && !brandsLoading && (
                     <div className="col-span-4 text-center py-12 text-muted-foreground">
-                      No brands yet. Create one above to use across the platform.
+                      No brands yet. Create one above.
                     </div>
                   )}
                 </div>
