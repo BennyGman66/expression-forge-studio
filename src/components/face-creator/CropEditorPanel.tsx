@@ -766,6 +766,33 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
             await supabase.from('face_detections').insert({ scrape_image_id: image.id, ...detectionData });
           }
           
+          // Generate crop ID (reuse imageUrl from above)
+          const cropId = image.crop?.id || crypto.randomUUID();
+          
+          // Generate and store the actual cropped image file
+          let croppedStoredUrl: string | null = null;
+          try {
+            const { data: cropResult, error: cropFnError } = await supabase.functions.invoke('crop-and-store-image', {
+              body: {
+                imageUrl,
+                cropX: cropCoords.x,
+                cropY: cropCoords.y,
+                cropWidth: cropCoords.width,
+                cropHeight: cropCoords.height,
+                cropId,
+              }
+            });
+            
+            if (!cropFnError && cropResult?.success) {
+              croppedStoredUrl = cropResult.croppedUrl;
+              console.log(`[CropEditor] Batch: Generated crop file for ${image.id}`);
+            } else {
+              console.warn(`[CropEditor] Batch: Could not generate crop file for ${image.id}:`, cropFnError || cropResult?.error);
+            }
+          } catch (cropErr) {
+            console.warn(`[CropEditor] Batch: Crop file generation failed for ${image.id}:`, cropErr);
+          }
+          
           // Upsert crop
           if (image.crop) {
             await supabase
@@ -777,12 +804,14 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                 crop_height: Math.round(cropCoords.height),
                 aspect_ratio: aspectRatio,
                 is_auto: true,
+                cropped_stored_url: croppedStoredUrl,
               })
               .eq('id', image.crop.id);
           } else {
             await supabase
               .from('face_crops')
               .insert({
+                id: cropId,
                 scrape_image_id: image.id,
                 crop_x: Math.round(cropCoords.x),
                 crop_y: Math.round(cropCoords.y),
@@ -790,6 +819,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                 crop_height: Math.round(cropCoords.height),
                 aspect_ratio: aspectRatio,
                 is_auto: true,
+                cropped_stored_url: croppedStoredUrl,
               });
           }
         } catch (imgError) {
@@ -870,6 +900,8 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     const cropWidthPercent = (cropRect.width / imageBounds.width) * 100;
     const cropHeightPercent = (cropRect.height / imageBounds.height) * 100;
     
+    setLoading(true);
+    
     try {
       // Check if this is a correction of an AI suggestion (for learning)
       if (aiLastSuggestion && aiLastSuggestion.imageId === selectedImage.id) {
@@ -915,6 +947,43 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         setAiLastSuggestion(null);
       }
       
+      // Determine the crop ID (existing or new UUID)
+      let cropId = selectedImage.crop?.id;
+      
+      // If no existing crop, generate a new UUID for the crop
+      if (!cropId) {
+        cropId = crypto.randomUUID();
+      }
+      
+      // Generate and store the actual cropped image file
+      const imageUrl = selectedImage.stored_url || selectedImage.source_url;
+      
+      console.log(`[CropEditor] Generating cropped file for crop ${cropId}...`);
+      
+      const { data: cropResult, error: cropError } = await supabase.functions.invoke('crop-and-store-image', {
+        body: {
+          imageUrl,
+          cropX: cropXPercent,
+          cropY: cropYPercent,
+          cropWidth: cropWidthPercent,
+          cropHeight: cropHeightPercent,
+          cropId,
+        }
+      });
+      
+      if (cropError) {
+        console.error('[CropEditor] Edge function error:', cropError);
+        throw new Error(`Failed to crop image: ${cropError.message}`);
+      }
+      
+      if (!cropResult?.success) {
+        console.error('[CropEditor] Crop failed:', cropResult?.error);
+        throw new Error(`Failed to crop image: ${cropResult?.error || 'Unknown error'}`);
+      }
+      
+      const croppedStoredUrl = cropResult.croppedUrl;
+      console.log(`[CropEditor] Cropped image stored at: ${croppedStoredUrl}`);
+      
       if (selectedImage.crop) {
         const { error } = await supabase
           .from('face_crops')
@@ -925,6 +994,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
             crop_height: Math.round(cropHeightPercent),
             aspect_ratio: aspectRatio,
             is_auto: false,
+            cropped_stored_url: croppedStoredUrl,
           })
           .eq('id', selectedImage.crop.id);
 
@@ -933,6 +1003,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         const { error } = await supabase
           .from('face_crops')
           .insert({
+            id: cropId,
             scrape_image_id: selectedImage.id,
             crop_x: Math.round(cropXPercent),
             crop_y: Math.round(cropYPercent),
@@ -940,6 +1011,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
             crop_height: Math.round(cropHeightPercent),
             aspect_ratio: aspectRatio,
             is_auto: false,
+            cropped_stored_url: croppedStoredUrl,
           });
 
         if (error) throw error;
@@ -949,7 +1021,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
       const scrollTop = scrollContainer?.scrollTop || 0;
 
-      toast({ title: "Saved", description: "Crop saved" });
+      toast({ title: "Saved", description: "Crop saved with file" });
       await fetchImagesWithCrops();
 
       // Restore scroll position after re-fetch
@@ -962,6 +1034,8 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     } catch (error) {
       console.error('Error saving crop:', error);
       toast({ title: "Error", description: "Failed to save crop", variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
   };
 
