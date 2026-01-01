@@ -11,9 +11,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
-import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users } from "lucide-react";
+import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users, UserPlus } from "lucide-react";
 import type { FacePairingJob } from "@/types/face-pairing";
 import type { DigitalTalent } from "@/types/digital-talent";
+import { PromoteToTwinDialog } from "@/components/shared/PromoteToTwinDialog";
 
 interface ImagePairingPanelProps {
   runId: string | null;
@@ -71,6 +72,40 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   const [currentJob, setCurrentJob] = useState<FacePairingJob | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
+
+  // Promote to twin dialog state
+  const [promoteDialogOpen, setPromoteDialogOpen] = useState(false);
+  const [selectedIdentityForPromote, setSelectedIdentityForPromote] = useState<{
+    id: string;
+    name: string;
+    gender: string;
+    representativeImageUrl: string | null;
+  } | null>(null);
+
+  const handlePromoteClick = (e: React.MouseEvent, identity: IdentityForPairing) => {
+    e.stopPropagation();
+    setSelectedIdentityForPromote({
+      id: identity.id,
+      name: identity.name,
+      gender: identity.gender,
+      representativeImageUrl: identity.representativeImageUrl,
+    });
+    setPromoteDialogOpen(true);
+  };
+
+  const handlePromoteSuccess = () => {
+    // Remove the promoted identity from the list
+    if (selectedIdentityForPromote) {
+      setIdentities(prev => prev.filter(i => i.id !== selectedIdentityForPromote.id));
+      setSelectedIdentityIds(prev => {
+        const next = new Set(prev);
+        next.delete(selectedIdentityForPromote.id);
+        return next;
+      });
+    }
+    setPromoteDialogOpen(false);
+    setSelectedIdentityForPromote(null);
+  };
   
   // Load data
   useEffect(() => {
@@ -517,7 +552,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                       {filteredIdentities.map(identity => (
                         <div
                           key={identity.id}
-                          className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                          className={`group relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
                             selectedIdentityIds.has(identity.id)
                               ? 'border-primary ring-2 ring-primary/20'
                               : 'border-transparent hover:border-muted-foreground/30'
@@ -544,6 +579,17 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                               <Check className="h-3 w-3" />
                             </div>
                           )}
+
+                          {/* Promote to Twin button */}
+                          <Button
+                            size="icon"
+                            variant="secondary"
+                            className="absolute top-2 left-2 h-7 w-7 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity shadow-md"
+                            onClick={(e) => handlePromoteClick(e, identity)}
+                            title="Promote to Digital Twin"
+                          >
+                            <UserPlus className="h-3.5 w-3.5" />
+                          </Button>
                           
                           {/* Info */}
                           <div className="p-2 bg-background">
@@ -861,6 +907,17 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
           />
         </TabsContent>
       </Tabs>
+
+      {/* Promote to Twin Dialog */}
+      <PromoteToTwinDialog
+        open={promoteDialogOpen}
+        onOpenChange={setPromoteDialogOpen}
+        identityId={selectedIdentityForPromote?.id || ''}
+        defaultName={selectedIdentityForPromote?.name || ''}
+        defaultGender={selectedIdentityForPromote?.gender || null}
+        representativeImageUrl={selectedIdentityForPromote?.representativeImageUrl || null}
+        onSuccess={handlePromoteSuccess}
+      />
     </div>
   );
 }
