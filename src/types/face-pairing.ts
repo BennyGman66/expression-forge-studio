@@ -2,11 +2,12 @@ export interface FacePairingJob {
   id: string;
   scrape_run_id: string | null;
   name: string;
-  pairing_mode: 'one-to-one' | 'one-to-many' | 'many-to-one' | 'many-to-many';
+  pairing_mode: 'one-to-one' | 'one-to-many' | 'many-to-one' | 'many-to-many' | 'identity';
   status: 'pending' | 'describing' | 'generating' | 'completed' | 'failed';
   total_pairings: number;
   progress: number;
   attempts_per_pairing: number;
+  model: string | null;
   logs: Array<{ timestamp: string; message: string }>;
   created_at: string;
   updated_at: string;
