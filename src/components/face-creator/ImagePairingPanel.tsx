@@ -526,9 +526,9 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                         >
                           {/* Representative Image - use first cropped face */}
                           <div className="aspect-[4/5] bg-muted">
-                            {identity.images.length > 0 && identity.images[0].stored_url ? (
+                          {identity.images.length > 0 && (identity.images[0].stored_url || identity.images[0].source_url) ? (
                               <CroppedFacePreview
-                                imageUrl={identity.images[0].stored_url}
+                                imageUrl={identity.images[0].stored_url || identity.images[0].source_url}
                                 crop={identity.images[0].crop}
                               />
                             ) : (
