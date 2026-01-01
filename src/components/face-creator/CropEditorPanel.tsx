@@ -65,6 +65,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const hiddenImgRef = useRef<HTMLImageElement | null>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [images, setImages] = useState<ImageWithCrop[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -944,8 +945,20 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         if (error) throw error;
       }
 
+      // Capture scroll position before re-fetching
+      const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+      const scrollTop = scrollContainer?.scrollTop || 0;
+
       toast({ title: "Saved", description: "Crop saved" });
-      fetchImagesWithCrops();
+      await fetchImagesWithCrops();
+
+      // Restore scroll position after re-fetch
+      requestAnimationFrame(() => {
+        const container = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+        if (container) {
+          container.scrollTop = scrollTop;
+        }
+      });
     } catch (error) {
       console.error('Error saving crop:', error);
       toast({ title: "Error", description: "Failed to save crop", variant: "destructive" });
@@ -1305,7 +1318,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
             <CardTitle className="text-sm">Images</CardTitle>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="h-[500px]">
+            <ScrollArea className="h-[500px]" ref={scrollAreaRef}>
               {loading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-6 w-6 animate-spin" />
@@ -1330,7 +1343,12 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                           loading="lazy"
                         />
                         {image.crop && (
-                          <Badge className="absolute top-1 right-1 text-[10px] px-1 bg-green-500">
+                          <Badge 
+                            className={`absolute top-1 right-1 text-[10px] px-1 ${
+                              image.crop.is_auto ? 'bg-gray-400' : 'bg-green-500'
+                            }`}
+                            title={image.crop.is_auto ? 'AI-applied crop' : 'Manually applied crop'}
+                          >
                             ✓
                           </Badge>
                         )}
