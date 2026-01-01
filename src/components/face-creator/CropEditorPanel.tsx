@@ -527,11 +527,35 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       }
       
       const imageUrl = selectedImage.stored_url || selectedImage.source_url;
-      const result = await detectFaceWithAI(imageUrl);
+      let result = await detectFaceWithAI(imageUrl);
       
       if (!result) {
         toast({ title: "Error", description: "AI detection failed", variant: "destructive" });
         return;
+      }
+
+      // CLIENT-SIDE VALIDATION: Enforce max 50% crop size
+      if (result.suggestedCrop.width > 55 || result.suggestedCrop.height > 55) {
+        console.warn(`[CropEditor] AI returned oversized crop (${result.suggestedCrop.width.toFixed(1)}% x ${result.suggestedCrop.height.toFixed(1)}%), reducing...`);
+        
+        const maxSize = 48;
+        const centerX = result.suggestedCrop.x + result.suggestedCrop.width / 2;
+        const centerY = result.suggestedCrop.y + result.suggestedCrop.height / 2;
+        
+        result = {
+          ...result,
+          suggestedCrop: {
+            x: Math.max(0, Math.min(100 - maxSize, centerX - maxSize / 2)),
+            y: Math.max(0, Math.min(100 - maxSize, centerY - maxSize / 2)),
+            width: maxSize,
+            height: maxSize
+          }
+        };
+        
+        toast({
+          title: "Crop adjusted",
+          description: "AI crop was too large, reduced for tighter framing"
+        });
       }
 
       const cropCoords = result.suggestedCrop;
