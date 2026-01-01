@@ -10,8 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { Play, Check, Loader2, User } from "lucide-react";
-import type { PairingMode, FacePairingJob } from "@/types/face-pairing";
+import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2 } from "lucide-react";
+import type { FacePairingJob } from "@/types/face-pairing";
 import type { DigitalTalent } from "@/types/digital-talent";
 
 interface ImagePairingPanelProps {
@@ -36,6 +36,12 @@ interface CroppedFace {
   };
 }
 
+interface QueuedPairing {
+  id: string; // temporary local ID
+  face: CroppedFace;
+  talent: DigitalTalent;
+}
+
 export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   const [activeSubTab, setActiveSubTab] = useState<'select' | 'review'>('select');
   
@@ -50,8 +56,8 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   const [identityFilter, setIdentityFilter] = useState<string>('all');
   const [viewFilter, setViewFilter] = useState<string>('all');
   
-  // Pairing config
-  const [pairingMode, setPairingMode] = useState<PairingMode>('one-to-one');
+  // Pairing queue (new approach)
+  const [pairingQueue, setPairingQueue] = useState<QueuedPairing[]>([]);
   const [attemptsPerPairing, setAttemptsPerPairing] = useState('1');
   const [batchName, setBatchName] = useState('');
   
@@ -191,25 +197,6 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     return Array.from(identities.entries());
   }, [croppedFaces]);
 
-  // Calculate total pairings
-  const totalPairings = useMemo(() => {
-    const faceCount = selectedFaceIds.size;
-    const talentCount = selectedTalentIds.size;
-    
-    if (faceCount === 0 || talentCount === 0) return 0;
-    
-    switch (pairingMode) {
-      case 'one-to-one':
-        return Math.min(faceCount, talentCount);
-      case 'one-to-many':
-      case 'many-to-one':
-      case 'many-to-many':
-        return faceCount * talentCount;
-      default:
-        return 0;
-    }
-  }, [selectedFaceIds.size, selectedTalentIds.size, pairingMode]);
-
   const toggleFaceSelection = (faceId: string) => {
     const newSelected = new Set(selectedFaceIds);
     if (newSelected.has(faceId)) {
@@ -246,9 +233,62 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setSelectedTalentIds(new Set());
   };
 
+  // Add pairings to queue
+  const addPairingsToQueue = () => {
+    const selectedFaces = croppedFaces.filter(f => selectedFaceIds.has(f.id));
+    const selectedTalents = digitalTalents.filter(t => selectedTalentIds.has(t.id));
+
+    if (selectedFaces.length === 0 || selectedTalents.length === 0) {
+      toast.error('Select at least one face and one talent');
+      return;
+    }
+
+    const newPairings: QueuedPairing[] = [];
+    
+    // Create cross-product of all selected faces × talents
+    for (const face of selectedFaces) {
+      for (const talent of selectedTalents) {
+        // Check if this pairing already exists in queue
+        const exists = pairingQueue.some(
+          p => p.face.id === face.id && p.talent.id === talent.id
+        );
+        if (!exists) {
+          newPairings.push({
+            id: `${face.id}-${talent.id}-${Date.now()}`,
+            face,
+            talent
+          });
+        }
+      }
+    }
+
+    if (newPairings.length === 0) {
+      toast.info('All selected pairings already in queue');
+      return;
+    }
+
+    setPairingQueue(prev => [...prev, ...newPairings]);
+    setSelectedFaceIds(new Set());
+    setSelectedTalentIds(new Set());
+    toast.success(`Added ${newPairings.length} pairing${newPairings.length > 1 ? 's' : ''} to queue`);
+  };
+
+  const removePairingFromQueue = (pairingId: string) => {
+    setPairingQueue(prev => prev.filter(p => p.id !== pairingId));
+  };
+
+  const clearQueue = () => {
+    setPairingQueue([]);
+  };
+
+  // Calculate how many pairings would be added
+  const potentialPairings = useMemo(() => {
+    return selectedFaceIds.size * selectedTalentIds.size;
+  }, [selectedFaceIds.size, selectedTalentIds.size]);
+
   const startGeneration = async () => {
-    if (selectedFaceIds.size === 0 || selectedTalentIds.size === 0) {
-      toast.error('Please select at least one cropped face and one digital talent');
+    if (pairingQueue.length === 0) {
+      toast.error('Add pairings to the queue first');
       return;
     }
 
@@ -261,8 +301,8 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
         .insert({
           scrape_run_id: runId,
           name: batchName || `Batch ${new Date().toLocaleString()}`,
-          pairing_mode: pairingMode,
-          total_pairings: totalPairings,
+          pairing_mode: 'explicit', // New mode for explicit queue-based pairings
+          total_pairings: pairingQueue.length,
           attempts_per_pairing: parseInt(attemptsPerPairing) || 1,
           status: 'pending'
         })
@@ -271,43 +311,14 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
 
       if (jobError) throw jobError;
 
-      // Create pairings based on mode
-      const faceIds = Array.from(selectedFaceIds);
-      const talentIds = Array.from(selectedTalentIds);
-
-      const pairings: Array<{
-        job_id: string;
-        cropped_face_id: string;
-        talent_id: string;
-        talent_image_id: string;
-        digital_talent_id: string;
-      }> = [];
-
-      if (pairingMode === 'one-to-one') {
-        const count = Math.min(faceIds.length, talentIds.length);
-        for (let i = 0; i < count; i++) {
-          pairings.push({
-            job_id: job.id,
-            cropped_face_id: faceIds[i],
-            talent_id: talentIds[i],
-            talent_image_id: talentIds[i], // Using talent_id as placeholder
-            digital_talent_id: talentIds[i]
-          });
-        }
-      } else {
-        // Cross-product for all other modes
-        for (const faceId of faceIds) {
-          for (const talentId of talentIds) {
-            pairings.push({
-              job_id: job.id,
-              cropped_face_id: faceId,
-              talent_id: talentId,
-              talent_image_id: talentId, // Using talent_id as placeholder
-              digital_talent_id: talentId
-            });
-          }
-        }
-      }
+      // Create pairings from queue
+      const pairings = pairingQueue.map(qp => ({
+        job_id: job.id,
+        cropped_face_id: qp.face.id,
+        talent_id: qp.talent.id,
+        talent_image_id: qp.talent.id, // placeholder
+        digital_talent_id: qp.talent.id
+      }));
 
       // Insert pairings
       const { error: pairingError } = await supabase
@@ -324,6 +335,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
       if (fnError) throw fnError;
 
       setCurrentJob(job as FacePairingJob);
+      setPairingQueue([]);
       toast.success(`Started generation for ${pairings.length} pairings`);
       
       // Switch to review tab
@@ -352,6 +364,8 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
       toast.error('Failed to start image generation');
     }
   };
+
+  const totalOutputs = pairingQueue.length * (parseInt(attemptsPerPairing) || 1);
 
   return (
     <div className="space-y-6">
@@ -387,7 +401,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
             </Card>
           )}
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-[1fr_auto_1fr] gap-4">
             {/* Left: Cropped Faces */}
             <Card>
               <CardHeader className="pb-3">
@@ -446,7 +460,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
               </CardHeader>
               
               <CardContent>
-                <ScrollArea className="h-[400px]">
+                <ScrollArea className="h-[350px]">
                   {!runId ? (
                     <p className="text-sm text-muted-foreground text-center py-8">
                       Select a scrape run to see cropped faces
@@ -497,6 +511,29 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
               </CardContent>
             </Card>
 
+            {/* Center: Add Pairings Button */}
+            <div className="flex flex-col items-center justify-center gap-2 py-8">
+              <Button
+                size="lg"
+                onClick={addPairingsToQueue}
+                disabled={selectedFaceIds.size === 0 || selectedTalentIds.size === 0}
+                className="flex flex-col h-auto py-4 px-6"
+              >
+                <Plus className="h-6 w-6 mb-1" />
+                <span className="text-sm font-medium">
+                  {potentialPairings > 0 
+                    ? `Add ${potentialPairings} Pairing${potentialPairings > 1 ? 's' : ''}` 
+                    : 'Add Pairings'
+                  }
+                </span>
+              </Button>
+              {potentialPairings > 0 && (
+                <p className="text-xs text-muted-foreground text-center">
+                  {selectedFaceIds.size} face{selectedFaceIds.size > 1 ? 's' : ''} × {selectedTalentIds.size} talent{selectedTalentIds.size > 1 ? 's' : ''}
+                </p>
+              )}
+            </div>
+
             {/* Right: Digital Talents */}
             <Card>
               <CardHeader className="pb-3">
@@ -515,7 +552,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
               </CardHeader>
               
               <CardContent>
-                <ScrollArea className="h-[450px]">
+                <ScrollArea className="h-[400px]">
                   {digitalTalents.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-8">
                       No digital talents found. Create them in the Digital Talent app.
@@ -567,76 +604,148 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
             </Card>
           </div>
 
-          {/* Pairing Configuration */}
+          {/* Pairing Queue */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Pairing Configuration</CardTitle>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base">Pairing Queue</CardTitle>
+                  {pairingQueue.length > 0 && (
+                    <Badge>{pairingQueue.length}</Badge>
+                  )}
+                </div>
+                {pairingQueue.length > 0 && (
+                  <Button size="sm" variant="ghost" onClick={clearQueue}>
+                    <Trash2 className="h-4 w-4 mr-1" />
+                    Clear All
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-4 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-xs">Batch Name</Label>
-                  <Input
-                    value={batchName}
-                    onChange={(e) => setBatchName(e.target.value)}
-                    placeholder="Untitled Batch"
-                    className="h-9"
-                  />
+              {pairingQueue.length === 0 ? (
+                <div className="py-8 text-center text-muted-foreground">
+                  <p className="text-sm">No pairings in queue</p>
+                  <p className="text-xs mt-1">Select faces and talents above, then click "Add Pairings"</p>
                 </div>
-                
-                <div className="space-y-2">
-                  <Label className="text-xs">Pairing Mode</Label>
-                  <Select value={pairingMode} onValueChange={(v) => setPairingMode(v as PairingMode)}>
-                    <SelectTrigger className="h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="one-to-one">One-to-One</SelectItem>
-                      <SelectItem value="one-to-many">One-to-Many</SelectItem>
-                      <SelectItem value="many-to-one">Many-to-One</SelectItem>
-                      <SelectItem value="many-to-many">Many-to-Many (Cross)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label className="text-xs">Attempts per Pairing</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    max="5"
-                    value={attemptsPerPairing}
-                    onChange={(e) => setAttemptsPerPairing(e.target.value)}
-                    className="h-9"
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label className="text-xs">Total Pairings</Label>
-                  <div className="h-9 flex items-center px-3 rounded-md bg-muted text-sm font-medium">
-                    {totalPairings} pairings × {attemptsPerPairing || 1} = {totalPairings * (parseInt(attemptsPerPairing) || 1)} outputs
+              ) : (
+                <>
+                  {/* Horizontal scrolling pairing cards */}
+                  <ScrollArea className="w-full">
+                    <div className="flex gap-3 pb-4">
+                      {pairingQueue.map(pairing => (
+                        <div
+                          key={pairing.id}
+                          className="relative flex-shrink-0 w-[160px] p-3 bg-muted/50 rounded-lg border border-border"
+                        >
+                          {/* Remove button */}
+                          <button
+                            onClick={() => removePairingFromQueue(pairing.id)}
+                            className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 hover:bg-destructive/80 transition-colors"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                          
+                          {/* Face preview */}
+                          <div className="w-full aspect-[4/5] rounded-md overflow-hidden mb-2">
+                            {pairing.face.crop ? (
+                              <CroppedFacePreview
+                                imageUrl={pairing.face.stored_url || pairing.face.source_url}
+                                crop={pairing.face.crop}
+                              />
+                            ) : (
+                              <img
+                                src={pairing.face.stored_url || pairing.face.source_url}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
+                            )}
+                          </div>
+                          
+                          {/* Arrow */}
+                          <div className="flex justify-center my-1">
+                            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                          
+                          {/* Talent preview */}
+                          <div className="w-full aspect-square rounded-md overflow-hidden bg-muted">
+                            {pairing.talent.front_face_url ? (
+                              <img
+                                src={pairing.talent.front_face_url}
+                                alt={pairing.talent.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <User className="w-6 h-6 text-muted-foreground" />
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Labels */}
+                          <div className="mt-2 text-center">
+                            <p className="text-[10px] text-muted-foreground truncate">
+                              {pairing.face.identity_name || pairing.face.gender}
+                            </p>
+                            <p className="text-xs font-medium truncate">{pairing.talent.name}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+
+                  {/* Configuration row */}
+                  <div className="flex items-center justify-between pt-4 border-t border-border">
+                    <div className="flex items-center gap-4">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Batch Name</Label>
+                        <Input
+                          value={batchName}
+                          onChange={(e) => setBatchName(e.target.value)}
+                          placeholder="Untitled Batch"
+                          className="h-8 w-40"
+                        />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <Label className="text-xs">Attempts per Pairing</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={attemptsPerPairing}
+                          onChange={(e) => setAttemptsPerPairing(e.target.value)}
+                          className="h-8 w-20"
+                        />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <Label className="text-xs">Total Outputs</Label>
+                        <div className="h-8 flex items-center px-3 rounded-md bg-muted text-sm font-medium">
+                          {pairingQueue.length} × {attemptsPerPairing || 1} = {totalOutputs}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <Button
+                      onClick={startGeneration}
+                      disabled={isLoading || pairingQueue.length === 0}
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Starting...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-4 w-4 mr-2" />
+                          Start Generation
+                        </>
+                      )}
+                    </Button>
                   </div>
-                </div>
-              </div>
-              
-              <div className="flex justify-end mt-4">
-                <Button
-                  onClick={startGeneration}
-                  disabled={isLoading || selectedFaceIds.size === 0 || selectedTalentIds.size === 0}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Starting...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="h-4 w-4 mr-2" />
-                      Start Generation
-                    </>
-                  )}
-                </Button>
-              </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -888,14 +997,7 @@ function CroppedFacePreview({
 }) {
   // Crop values are stored as percentages (0-100)
   // Use object-position to show the cropped region
-  const cropCenterX = crop.crop_x + (crop.crop_width / 2);
-  const cropCenterY = crop.crop_y + (crop.crop_height / 2);
-  
-  // Calculate the scale needed to make the crop fill the container
-  // We scale based on width since container is square
   const scaleX = 100 / crop.crop_width;
-  const scaleY = 100 / crop.crop_height;
-  const scale = Math.min(scaleX, scaleY);
   
   return (
     <div 
