@@ -161,8 +161,18 @@ async function processPairedGeneration(
         continue;
       }
 
-      const image1Url = faceImage.stored_url || faceImage.source_url;
+      // Try to get the cropped image URL from face_crops table
+      const { data: cropData } = await supabase
+        .from('face_crops')
+        .select('cropped_stored_url')
+        .eq('scrape_image_id', faceImage.id)
+        .single();
+      
+      // Prioritize cropped image, then fall back to original
+      const image1Url = cropData?.cropped_stored_url || faceImage.stored_url || faceImage.source_url;
       const image2Url = talentImage.stored_url;
+      
+      console.log(`[generate-paired-images] Using image1: ${image1Url.substring(0, 80)}...`);
       const outfitDescription = pairing.outfit_description || 'A fashionable outfit';
 
       // Build the final prompt
