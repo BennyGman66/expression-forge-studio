@@ -524,13 +524,12 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                           }`}
                           onClick={() => toggleIdentitySelection(identity.id)}
                         >
-                          {/* Representative Image */}
+                          {/* Representative Image - use first cropped face */}
                           <div className="aspect-[4/5] bg-muted">
-                            {identity.representativeImageUrl ? (
-                              <img
-                                src={identity.representativeImageUrl}
-                                alt={identity.name}
-                                className="w-full h-full object-cover"
+                            {identity.images.length > 0 && identity.images[0].stored_url ? (
+                              <CroppedFacePreview
+                                imageUrl={identity.images[0].stored_url}
+                                crop={identity.images[0].crop}
                               />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center">
