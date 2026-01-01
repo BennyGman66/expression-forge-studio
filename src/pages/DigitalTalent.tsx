@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, User, Upload, Trash2, Building2, ExternalLink } from "lucide-react";
+import { Plus, User, Upload, Trash2, Building2, ExternalLink, X } from "lucide-react";
 import { toast } from "sonner";
 import { useBrands } from "@/hooks/useBrands";
 import type { DigitalTalent, DigitalTalentWithUsage } from "@/types/digital-talent";
@@ -171,6 +171,29 @@ export default function DigitalTalentPage() {
     }
   };
 
+  const handleDeleteFrontFace = async (talentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    try {
+      const { error } = await supabase
+        .from("digital_talents")
+        .update({ front_face_url: null })
+        .eq("id", talentId);
+
+      if (error) throw error;
+
+      toast.success("Image removed");
+      fetchTalents();
+      
+      if (selectedTalent?.id === talentId) {
+        setSelectedTalent(prev => prev ? { ...prev, front_face_url: null } : null);
+      }
+    } catch (err) {
+      console.error("Error deleting image:", err);
+      toast.error("Failed to remove image");
+    }
+  };
+
   const handleCreateBrand = async () => {
     if (!newBrandName.trim()) {
       toast.error("Please enter a brand name");
@@ -311,28 +334,52 @@ export default function DigitalTalentPage() {
                       >
                         <div className="aspect-square rounded-lg bg-muted mb-3 overflow-hidden relative group">
                           {talent.front_face_url ? (
-                            <img
-                              src={talent.front_face_url}
-                              alt={talent.name}
-                              className="w-full h-full object-cover"
-                            />
+                            <>
+                              <img
+                                src={talent.front_face_url}
+                                alt={talent.name}
+                                className="w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                <label className="p-2 rounded-full bg-white/20 hover:bg-white/30 cursor-pointer transition-colors">
+                                  <Upload className="w-5 h-5 text-white" />
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) handleUploadFrontFace(talent.id, file);
+                                    }}
+                                  />
+                                </label>
+                                <button
+                                  onClick={(e) => handleDeleteFrontFace(talent.id, e)}
+                                  className="p-2 rounded-full bg-white/20 hover:bg-destructive/80 cursor-pointer transition-colors"
+                                >
+                                  <X className="w-5 h-5 text-white" />
+                                </button>
+                              </div>
+                            </>
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <User className="w-12 h-12 text-muted-foreground" />
-                            </div>
+                            <>
+                              <div className="w-full h-full flex items-center justify-center">
+                                <User className="w-12 h-12 text-muted-foreground" />
+                              </div>
+                              <label className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                                <Upload className="w-6 h-6 text-white" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) handleUploadFrontFace(talent.id, file);
+                                  }}
+                                />
+                              </label>
+                            </>
                           )}
-                          <label className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                            <Upload className="w-6 h-6 text-white" />
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) handleUploadFrontFace(talent.id, file);
-                              }}
-                            />
-                          </label>
                         </div>
                         <h4 className="font-medium truncate">{talent.name}</h4>
                         <div className="flex items-center gap-2 mt-1">
