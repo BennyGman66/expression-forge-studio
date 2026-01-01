@@ -9,8 +9,9 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
-import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2 } from "lucide-react";
+import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users } from "lucide-react";
 import type { FacePairingJob } from "@/types/face-pairing";
 import type { DigitalTalent } from "@/types/digital-talent";
 
@@ -20,13 +21,10 @@ interface ImagePairingPanelProps {
 
 interface CroppedFace {
   id: string;
+  scrape_image_id: string;
   source_url: string;
   stored_url: string | null;
-  gender: string;
-  identity_id: string | null;
-  identity_name: string | null;
   view: string;
-  brand_name: string;
   crop?: {
     crop_x: number;
     crop_y: number;
@@ -36,39 +34,48 @@ interface CroppedFace {
   };
 }
 
-interface QueuedPairing {
-  id: string; // temporary local ID
-  face: CroppedFace;
+interface IdentityForPairing {
+  id: string;
+  name: string;
+  gender: string;
+  imageCount: number;
+  representativeImageUrl: string | null;
+  images: CroppedFace[];
+}
+
+interface QueuedIdentityPairing {
+  id: string;
+  identity: IdentityForPairing;
   talent: DigitalTalent;
 }
 
 export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   const [activeSubTab, setActiveSubTab] = useState<'select' | 'review'>('select');
   
-  // Selection state
-  const [croppedFaces, setCroppedFaces] = useState<CroppedFace[]>([]);
+  // Identity-level selection
+  const [identities, setIdentities] = useState<IdentityForPairing[]>([]);
   const [digitalTalents, setDigitalTalents] = useState<DigitalTalent[]>([]);
-  const [selectedFaceIds, setSelectedFaceIds] = useState<Set<string>>(new Set());
+  const [selectedIdentityIds, setSelectedIdentityIds] = useState<Set<string>>(new Set());
   const [selectedTalentIds, setSelectedTalentIds] = useState<Set<string>>(new Set());
   
   // Filters
   const [genderFilter, setGenderFilter] = useState<string>('all');
-  const [identityFilter, setIdentityFilter] = useState<string>('all');
-  const [viewFilter, setViewFilter] = useState<string>('all');
   
-  // Pairing queue (new approach)
-  const [pairingQueue, setPairingQueue] = useState<QueuedPairing[]>([]);
+  // Pairing queue (identity-level)
+  const [pairingQueue, setPairingQueue] = useState<QueuedIdentityPairing[]>([]);
+  const [expandedPairings, setExpandedPairings] = useState<Set<string>>(new Set());
   const [attemptsPerPairing, setAttemptsPerPairing] = useState('1');
   const [batchName, setBatchName] = useState('');
   
   // Job state
   const [currentJob, setCurrentJob] = useState<FacePairingJob | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingData, setIsLoadingData] = useState(false);
   
-  // Load cropped faces and digital talents
+  // Load data
   useEffect(() => {
     if (runId) {
-      loadCroppedFaces();
+      loadIdentitiesWithImages();
     }
     loadDigitalTalents();
   }, [runId]);
@@ -95,71 +102,106 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     return () => clearInterval(interval);
   }, [currentJob]);
 
-  const loadCroppedFaces = async () => {
+  const loadIdentitiesWithImages = async () => {
     if (!runId) return;
+    setIsLoadingData(true);
 
-    const { data: images, error } = await supabase
-      .from('face_scrape_images')
-      .select(`
-        id,
-        source_url,
-        stored_url,
-        gender,
-        face_crops!inner (
+    try {
+      // Load identities with their representative images
+      const { data: identitiesData, error: identitiesError } = await supabase
+        .from('face_identities')
+        .select(`
           id,
-          crop_x,
-          crop_y,
-          crop_width,
-          crop_height,
-          aspect_ratio
-        ),
-        face_identity_images (
-          identity_id,
-          view,
-          face_identities (
-            id,
-            name,
-            gender
+          name,
+          gender,
+          image_count,
+          representative_image_id,
+          face_scrape_images!face_identities_representative_image_id_fkey (
+            stored_url
           )
-        )
-      `)
-      .eq('scrape_run_id', runId)
-      .not('face_crops', 'is', null);
+        `)
+        .eq('scrape_run_id', runId)
+        .order('name');
 
-    if (error) {
-      console.error('Error loading cropped faces:', error);
-      return;
+      if (identitiesError) throw identitiesError;
+
+      // For each identity, load its cropped images
+      const identitiesWithImages: IdentityForPairing[] = [];
+
+      for (const identity of identitiesData || []) {
+        // Get all images for this identity that have crops
+        const { data: imagesData, error: imagesError } = await supabase
+          .from('face_identity_images')
+          .select(`
+            id,
+            view,
+            scrape_image_id,
+            face_scrape_images!inner (
+              id,
+              stored_url,
+              source_url,
+              face_crops (
+                id,
+                crop_x,
+                crop_y,
+                crop_width,
+                crop_height,
+                aspect_ratio
+              )
+            )
+          `)
+          .eq('identity_id', identity.id)
+          .eq('is_ignored', false);
+
+        if (imagesError) {
+          console.error('Error loading identity images:', imagesError);
+          continue;
+        }
+
+        // Filter to only images with crops
+        const croppedImages: CroppedFace[] = [];
+        for (const img of imagesData || []) {
+          const scrapeImg = img.face_scrape_images as any;
+          const crops = scrapeImg?.face_crops;
+          if (crops && crops.length > 0) {
+            const crop = crops[0];
+            croppedImages.push({
+              id: crop.id,
+              scrape_image_id: scrapeImg.id,
+              source_url: scrapeImg.source_url,
+              stored_url: scrapeImg.stored_url,
+              view: img.view || 'unknown',
+              crop: {
+                crop_x: crop.crop_x,
+                crop_y: crop.crop_y,
+                crop_width: crop.crop_width,
+                crop_height: crop.crop_height,
+                aspect_ratio: crop.aspect_ratio,
+              },
+            });
+          }
+        }
+
+        if (croppedImages.length > 0) {
+          const repImage = identity.face_scrape_images as any;
+          identitiesWithImages.push({
+            id: identity.id,
+            name: identity.name,
+            gender: identity.gender,
+            imageCount: croppedImages.length,
+            representativeImageUrl: repImage?.stored_url || croppedImages[0]?.stored_url || null,
+            images: croppedImages,
+          });
+        }
+      }
+
+      setIdentities(identitiesWithImages);
+    } catch (error) {
+      console.error('Error loading identities:', error);
+      toast.error('Failed to load model identities');
+    } finally {
+      setIsLoadingData(false);
     }
-
-    const { data: run } = await supabase
-      .from('face_scrape_runs')
-      .select('brand_name')
-      .eq('id', runId)
-      .single();
-
-    const faces: CroppedFace[] = (images || []).map((img: any) => {
-      const identityImage = img.face_identity_images?.[0];
-      const cropData = img.face_crops?.[0];
-      return {
-        id: img.id,
-        source_url: img.source_url,
-        stored_url: img.stored_url,
-        gender: img.gender || 'unknown',
-        identity_id: identityImage?.identity_id || null,
-        identity_name: identityImage?.face_identities?.name || null,
-        view: identityImage?.view || 'unknown',
-        brand_name: run?.brand_name || 'Unknown',
-        crop: cropData ? {
-          crop_x: cropData.crop_x,
-          crop_y: cropData.crop_y,
-          crop_width: cropData.crop_width,
-          crop_height: cropData.crop_height,
-          aspect_ratio: cropData.aspect_ratio,
-        } : undefined
-      };
-    });
-
-    setCroppedFaces(faces);
   };
 
   const loadDigitalTalents = async () => {
@@ -176,53 +218,44 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setDigitalTalents(data || []);
   };
 
-  // Filter cropped faces
-  const filteredFaces = useMemo(() => {
-    return croppedFaces.filter(face => {
-      if (genderFilter !== 'all' && face.gender !== genderFilter) return false;
-      if (identityFilter !== 'all' && face.identity_id !== identityFilter) return false;
-      if (viewFilter !== 'all' && face.view !== viewFilter) return false;
+  // Filter identities
+  const filteredIdentities = useMemo(() => {
+    return identities.filter(identity => {
+      if (genderFilter !== 'all' && identity.gender !== genderFilter) return false;
       return true;
     });
-  }, [croppedFaces, genderFilter, identityFilter, viewFilter]);
+  }, [identities, genderFilter]);
 
-  // Get unique identities for filter
-  const uniqueIdentities = useMemo(() => {
-    const identities = new Map<string, string>();
-    croppedFaces.forEach(face => {
-      if (face.identity_id && face.identity_name) {
-        identities.set(face.identity_id, face.identity_name);
+  const toggleIdentitySelection = (identityId: string) => {
+    setSelectedIdentityIds(prev => {
+      const next = new Set(prev);
+      if (next.has(identityId)) {
+        next.delete(identityId);
+      } else {
+        next.add(identityId);
       }
+      return next;
     });
-    return Array.from(identities.entries());
-  }, [croppedFaces]);
-
-  const toggleFaceSelection = (faceId: string) => {
-    const newSelected = new Set(selectedFaceIds);
-    if (newSelected.has(faceId)) {
-      newSelected.delete(faceId);
-    } else {
-      newSelected.add(faceId);
-    }
-    setSelectedFaceIds(newSelected);
   };
 
   const toggleTalentSelection = (talentId: string) => {
-    const newSelected = new Set(selectedTalentIds);
-    if (newSelected.has(talentId)) {
-      newSelected.delete(talentId);
-    } else {
-      newSelected.add(talentId);
-    }
-    setSelectedTalentIds(newSelected);
+    setSelectedTalentIds(prev => {
+      const next = new Set(prev);
+      if (next.has(talentId)) {
+        next.delete(talentId);
+      } else {
+        next.add(talentId);
+      }
+      return next;
+    });
   };
 
-  const selectAllFilteredFaces = () => {
-    setSelectedFaceIds(new Set(filteredFaces.map(f => f.id)));
+  const selectAllFilteredIdentities = () => {
+    setSelectedIdentityIds(new Set(filteredIdentities.map(i => i.id)));
   };
 
-  const clearFaceSelection = () => {
-    setSelectedFaceIds(new Set());
+  const clearIdentitySelection = () => {
+    setSelectedIdentityIds(new Set());
   };
 
   const selectAllTalents = () => {
@@ -233,29 +266,28 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setSelectedTalentIds(new Set());
   };
 
-  // Add pairings to queue
+  // Add identity-level pairings to queue
   const addPairingsToQueue = () => {
-    const selectedFaces = croppedFaces.filter(f => selectedFaceIds.has(f.id));
+    const selectedIdentities = identities.filter(i => selectedIdentityIds.has(i.id));
     const selectedTalents = digitalTalents.filter(t => selectedTalentIds.has(t.id));
 
-    if (selectedFaces.length === 0 || selectedTalents.length === 0) {
-      toast.error('Select at least one face and one talent');
+    if (selectedIdentities.length === 0 || selectedTalents.length === 0) {
+      toast.error('Select at least one model and one talent');
       return;
     }
 
-    const newPairings: QueuedPairing[] = [];
+    const newPairings: QueuedIdentityPairing[] = [];
     
-    // Create cross-product of all selected faces × talents
-    for (const face of selectedFaces) {
+    for (const identity of selectedIdentities) {
       for (const talent of selectedTalents) {
         // Check if this pairing already exists in queue
         const exists = pairingQueue.some(
-          p => p.face.id === face.id && p.talent.id === talent.id
+          p => p.identity.id === identity.id && p.talent.id === talent.id
         );
         if (!exists) {
           newPairings.push({
-            id: `${face.id}-${talent.id}-${Date.now()}`,
-            face,
+            id: `${identity.id}-${talent.id}-${Date.now()}`,
+            identity,
             talent
           });
         }
@@ -268,23 +300,41 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     }
 
     setPairingQueue(prev => [...prev, ...newPairings]);
-    setSelectedFaceIds(new Set());
+    setSelectedIdentityIds(new Set());
     setSelectedTalentIds(new Set());
     toast.success(`Added ${newPairings.length} pairing${newPairings.length > 1 ? 's' : ''} to queue`);
   };
 
   const removePairingFromQueue = (pairingId: string) => {
     setPairingQueue(prev => prev.filter(p => p.id !== pairingId));
+    setExpandedPairings(prev => {
+      const next = new Set(prev);
+      next.delete(pairingId);
+      return next;
+    });
   };
 
   const clearQueue = () => {
     setPairingQueue([]);
+    setExpandedPairings(new Set());
   };
 
-  // Calculate how many pairings would be added
-  const potentialPairings = useMemo(() => {
-    return selectedFaceIds.size * selectedTalentIds.size;
-  }, [selectedFaceIds.size, selectedTalentIds.size]);
+  const togglePairingExpanded = (pairingId: string) => {
+    setExpandedPairings(prev => {
+      const next = new Set(prev);
+      if (next.has(pairingId)) {
+        next.delete(pairingId);
+      } else {
+        next.add(pairingId);
+      }
+      return next;
+    });
+  };
+
+  // Calculate totals
+  const potentialPairings = selectedIdentityIds.size * selectedTalentIds.size;
+  const totalImages = pairingQueue.reduce((sum, p) => sum + p.identity.images.length, 0);
+  const totalOutputs = totalImages * (parseInt(attemptsPerPairing) || 1);
 
   const startGeneration = async () => {
     if (pairingQueue.length === 0) {
@@ -301,8 +351,8 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
         .insert({
           scrape_run_id: runId,
           name: batchName || `Batch ${new Date().toLocaleString()}`,
-          pairing_mode: 'explicit', // New mode for explicit queue-based pairings
-          total_pairings: pairingQueue.length,
+          pairing_mode: 'identity',
+          total_pairings: totalImages,
           attempts_per_pairing: parseInt(attemptsPerPairing) || 1,
           status: 'pending'
         })
@@ -311,19 +361,32 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
 
       if (jobError) throw jobError;
 
-      // Create pairings from queue
-      const pairings = pairingQueue.map(qp => ({
-        job_id: job.id,
-        cropped_face_id: qp.face.id,
-        talent_id: qp.talent.id,
-        talent_image_id: qp.talent.id, // placeholder
-        digital_talent_id: qp.talent.id
-      }));
+      // Create individual pairings for each image in each identity
+      const pairingsToInsert = [];
 
-      // Insert pairings
+      for (const queuedPairing of pairingQueue) {
+        for (const image of queuedPairing.identity.images) {
+          // Get the talent_id from face_identities for backward compatibility
+          const { data: identityData } = await supabase
+            .from('face_identities')
+            .select('talent_id')
+            .eq('id', queuedPairing.identity.id)
+            .maybeSingle();
+
+          pairingsToInsert.push({
+            job_id: job.id,
+            cropped_face_id: image.scrape_image_id,
+            digital_talent_id: queuedPairing.talent.id,
+            talent_id: identityData?.talent_id || queuedPairing.identity.id,
+            talent_image_id: image.scrape_image_id,
+            status: 'pending'
+          });
+        }
+      }
+
       const { error: pairingError } = await supabase
         .from('face_pairings')
-        .insert(pairings);
+        .insert(pairingsToInsert);
 
       if (pairingError) throw pairingError;
 
@@ -335,8 +398,8 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
       if (fnError) throw fnError;
 
       setCurrentJob(job as FacePairingJob);
-      setPairingQueue([]);
-      toast.success(`Started generation for ${pairings.length} pairings`);
+      clearQueue();
+      toast.success(`Started generation for ${pairingsToInsert.length} image pairings`);
       
       // Switch to review tab
       setActiveSubTab('review');
@@ -364,8 +427,6 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
       toast.error('Failed to start image generation');
     }
   };
-
-  const totalOutputs = pairingQueue.length * (parseInt(attemptsPerPairing) || 1);
 
   return (
     <div className="space-y-6">
@@ -402,16 +463,19 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
           )}
 
           <div className="grid grid-cols-[1fr_auto_1fr] gap-4">
-            {/* Left: Cropped Faces */}
+            {/* Left: Model Identities */}
             <Card>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Cropped Model Faces</CardTitle>
-                  <Badge variant="outline">{selectedFaceIds.size} selected</Badge>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Model Identities
+                  </CardTitle>
+                  <Badge variant="outline">{selectedIdentityIds.size} selected</Badge>
                 </div>
                 
                 {/* Filters */}
-                <div className="grid grid-cols-3 gap-2 pt-2">
+                <div className="grid grid-cols-2 gap-2 pt-2">
                   <Select value={genderFilter} onValueChange={setGenderFilter}>
                     <SelectTrigger className="h-8 text-xs">
                       <SelectValue placeholder="Gender" />
@@ -420,88 +484,79 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                       <SelectItem value="all">All Genders</SelectItem>
                       <SelectItem value="men">Men</SelectItem>
                       <SelectItem value="women">Women</SelectItem>
-                      <SelectItem value="unknown">Unknown</SelectItem>
                     </SelectContent>
                   </Select>
                   
-                  <Select value={identityFilter} onValueChange={setIdentityFilter}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="Identity" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Identities</SelectItem>
-                      {uniqueIdentities.map(([id, name]) => (
-                        <SelectItem key={id} value={id}>{name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  
-                  <Select value={viewFilter} onValueChange={setViewFilter}>
-                    <SelectTrigger className="h-8 text-xs">
-                      <SelectValue placeholder="View" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Views</SelectItem>
-                      <SelectItem value="front">Front</SelectItem>
-                      <SelectItem value="side">Side</SelectItem>
-                      <SelectItem value="back">Back</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="flex gap-2 pt-2">
-                  <Button size="sm" variant="outline" onClick={selectAllFilteredFaces}>
-                    Select All ({filteredFaces.length})
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={clearFaceSelection}>
-                    Clear
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="outline" className="h-8 text-xs flex-1" onClick={selectAllFilteredIdentities}>
+                      All ({filteredIdentities.length})
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={clearIdentitySelection}>
+                      Clear
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               
               <CardContent>
-                <ScrollArea className="h-[350px]">
+                <ScrollArea className="h-[400px]">
                   {!runId ? (
                     <p className="text-sm text-muted-foreground text-center py-8">
-                      Select a scrape run to see cropped faces
+                      Select a scrape run to see models
                     </p>
-                  ) : filteredFaces.length === 0 ? (
+                  ) : isLoadingData ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : filteredIdentities.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-8">
-                      No cropped faces found. Run the Crop tool first.
+                      No cropped models found. Run Classify & Crop first.
                     </p>
                   ) : (
-                    <div className="grid grid-cols-4 gap-2">
-                      {filteredFaces.map(face => (
+                    <div className="grid grid-cols-2 gap-3 pr-4">
+                      {filteredIdentities.map(identity => (
                         <div
-                          key={face.id}
-                          className={`relative cursor-pointer rounded-md overflow-hidden border-2 transition-all ${
-                            selectedFaceIds.has(face.id)
+                          key={identity.id}
+                          className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                            selectedIdentityIds.has(identity.id)
                               ? 'border-primary ring-2 ring-primary/20'
                               : 'border-transparent hover:border-muted-foreground/30'
                           }`}
-                          onClick={() => toggleFaceSelection(face.id)}
+                          onClick={() => toggleIdentitySelection(identity.id)}
                         >
-                          {face.crop ? (
-                            <CroppedFacePreview 
-                              imageUrl={face.stored_url || face.source_url}
-                              crop={face.crop}
-                            />
-                          ) : (
-                            <div className="w-full aspect-square overflow-hidden">
+                          {/* Representative Image */}
+                          <div className="aspect-[4/5] bg-muted">
+                            {identity.representativeImageUrl ? (
                               <img
-                                src={face.stored_url || face.source_url}
-                                alt=""
+                                src={identity.representativeImageUrl}
+                                alt={identity.name}
                                 className="w-full h-full object-cover"
                               />
-                            </div>
-                          )}
-                          {selectedFaceIds.has(face.id) && (
-                            <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5">
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <User className="w-8 h-8 text-muted-foreground" />
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Selection indicator */}
+                          {selectedIdentityIds.has(identity.id) && (
+                            <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-0.5">
                               <Check className="h-3 w-3" />
                             </div>
                           )}
-                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] p-1 truncate">
-                            {face.identity_name || face.gender}
+                          
+                          {/* Info */}
+                          <div className="p-2 bg-background">
+                            <p className="font-medium text-sm truncate">{identity.name}</p>
+                            <div className="flex items-center gap-1 mt-1">
+                              <Badge variant="secondary" className="text-xs">
+                                {identity.imageCount} images
+                              </Badge>
+                              <Badge variant="outline" className="text-xs capitalize">
+                                {identity.gender}
+                              </Badge>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -516,7 +571,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
               <Button
                 size="lg"
                 onClick={addPairingsToQueue}
-                disabled={selectedFaceIds.size === 0 || selectedTalentIds.size === 0}
+                disabled={selectedIdentityIds.size === 0 || selectedTalentIds.size === 0}
                 className="flex flex-col h-auto py-4 px-6"
               >
                 <Plus className="h-6 w-6 mb-1" />
@@ -529,7 +584,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
               </Button>
               {potentialPairings > 0 && (
                 <p className="text-xs text-muted-foreground text-center">
-                  {selectedFaceIds.size} face{selectedFaceIds.size > 1 ? 's' : ''} × {selectedTalentIds.size} talent{selectedTalentIds.size > 1 ? 's' : ''}
+                  {selectedIdentityIds.size} model{selectedIdentityIds.size > 1 ? 's' : ''} × {selectedTalentIds.size} talent{selectedTalentIds.size > 1 ? 's' : ''}
                 </p>
               )}
             </div>
@@ -558,7 +613,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                       No digital talents found. Create them in the Digital Talent app.
                     </p>
                   ) : (
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-2 gap-3 pr-4">
                       {digitalTalents.map(talent => (
                         <div
                           key={talent.id}
@@ -583,7 +638,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                             )}
                           </div>
                           {selectedTalentIds.has(talent.id) && (
-                            <div className="absolute top-1 right-1 bg-primary text-primary-foreground rounded-full p-0.5">
+                            <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-0.5">
                               <Check className="h-3 w-3" />
                             </div>
                           )}
@@ -611,7 +666,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                 <div className="flex items-center gap-2">
                   <CardTitle className="text-base">Pairing Queue</CardTitle>
                   {pairingQueue.length > 0 && (
-                    <Badge>{pairingQueue.length}</Badge>
+                    <Badge>{pairingQueue.length} pairings • {totalImages} images</Badge>
                   )}
                 </div>
                 {pairingQueue.length > 0 && (
@@ -626,73 +681,123 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
               {pairingQueue.length === 0 ? (
                 <div className="py-8 text-center text-muted-foreground">
                   <p className="text-sm">No pairings in queue</p>
-                  <p className="text-xs mt-1">Select faces and talents above, then click "Add Pairings"</p>
+                  <p className="text-xs mt-1">Select models and talents above, then click "Add Pairings"</p>
                 </div>
               ) : (
                 <>
-                  {/* Horizontal scrolling pairing cards */}
-                  <ScrollArea className="w-full">
-                    <div className="flex gap-3 pb-4">
-                      {pairingQueue.map(pairing => (
-                        <div
-                          key={pairing.id}
-                          className="relative flex-shrink-0 w-[160px] p-3 bg-muted/50 rounded-lg border border-border"
-                        >
-                          {/* Remove button */}
-                          <button
-                            onClick={() => removePairingFromQueue(pairing.id)}
-                            className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 hover:bg-destructive/80 transition-colors"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                          
-                          {/* Face preview */}
-                          <div className="w-full aspect-[4/5] rounded-md overflow-hidden mb-2">
-                            {pairing.face.crop ? (
-                              <CroppedFacePreview
-                                imageUrl={pairing.face.stored_url || pairing.face.source_url}
-                                crop={pairing.face.crop}
-                              />
-                            ) : (
-                              <img
-                                src={pairing.face.stored_url || pairing.face.source_url}
-                                alt=""
-                                className="w-full h-full object-cover"
-                              />
-                            )}
+                  {/* Queue items with expandable details */}
+                  <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 mb-4">
+                    {pairingQueue.map(pairing => (
+                      <Collapsible
+                        key={pairing.id}
+                        open={expandedPairings.has(pairing.id)}
+                        onOpenChange={() => togglePairingExpanded(pairing.id)}
+                      >
+                        <div className="border rounded-lg p-3">
+                          <div className="flex items-center gap-3">
+                            {/* Identity thumbnail */}
+                            <div className="w-12 h-14 rounded overflow-hidden bg-muted flex-shrink-0">
+                              {pairing.identity.representativeImageUrl ? (
+                                <img
+                                  src={pairing.identity.representativeImageUrl}
+                                  alt={pairing.identity.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <User className="w-5 h-5 text-muted-foreground" />
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Identity info */}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm truncate">{pairing.identity.name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {pairing.identity.imageCount} images
+                              </p>
+                            </div>
+
+                            <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+
+                            {/* Talent thumbnail */}
+                            <div className="w-10 h-10 rounded-full overflow-hidden bg-muted flex-shrink-0">
+                              {pairing.talent.front_face_url ? (
+                                <img
+                                  src={pairing.talent.front_face_url}
+                                  alt={pairing.talent.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <User className="w-4 h-4 text-muted-foreground" />
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Talent info */}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm truncate">{pairing.talent.name}</p>
+                            </div>
+
+                            {/* Expand/collapse button */}
+                            <CollapsibleTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                {expandedPairings.has(pairing.id) ? (
+                                  <ChevronUp className="h-4 w-4" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </CollapsibleTrigger>
+
+                            {/* Remove button */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removePairingFromQueue(pairing.id);
+                              }}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
                           </div>
-                          
-                          {/* Arrow */}
-                          <div className="flex justify-center my-1">
-                            <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                          </div>
-                          
-                          {/* Talent preview */}
-                          <div className="w-full aspect-square rounded-md overflow-hidden bg-muted">
-                            {pairing.talent.front_face_url ? (
-                              <img
-                                src={pairing.talent.front_face_url}
-                                alt={pairing.talent.name}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <User className="w-6 h-6 text-muted-foreground" />
+
+                          {/* Expanded image grid */}
+                          <CollapsibleContent>
+                            <div className="mt-3 pt-3 border-t">
+                              <p className="text-xs text-muted-foreground mb-2">
+                                Images to be paired:
+                              </p>
+                              <div className="grid grid-cols-8 gap-2">
+                                {pairing.identity.images.map((image) => (
+                                  <div
+                                    key={image.id}
+                                    className="aspect-[4/5] rounded overflow-hidden bg-muted"
+                                  >
+                                    {image.crop ? (
+                                      <CroppedFacePreview
+                                        imageUrl={image.stored_url || image.source_url}
+                                        crop={image.crop}
+                                      />
+                                    ) : (
+                                      <img
+                                        src={image.stored_url || image.source_url}
+                                        alt=""
+                                        className="w-full h-full object-cover"
+                                      />
+                                    )}
+                                  </div>
+                                ))}
                               </div>
-                            )}
-                          </div>
-                          
-                          {/* Labels */}
-                          <div className="mt-2 text-center">
-                            <p className="text-[10px] text-muted-foreground truncate">
-                              {pairing.face.identity_name || pairing.face.gender}
-                            </p>
-                            <p className="text-xs font-medium truncate">{pairing.talent.name}</p>
-                          </div>
+                            </div>
+                          </CollapsibleContent>
                         </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
+                      </Collapsible>
+                    ))}
+                  </div>
 
                   {/* Configuration row */}
                   <div className="flex items-center justify-between pt-4 border-t border-border">
@@ -708,7 +813,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                       </div>
                       
                       <div className="space-y-1">
-                        <Label className="text-xs">Attempts per Pairing</Label>
+                        <Label className="text-xs">Attempts per Image</Label>
                         <Input
                           type="number"
                           min="1"
@@ -722,7 +827,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                       <div className="space-y-1">
                         <Label className="text-xs">Total Outputs</Label>
                         <div className="h-8 flex items-center px-3 rounded-md bg-muted text-sm font-medium">
-                          {pairingQueue.length} × {attemptsPerPairing || 1} = {totalOutputs}
+                          {totalImages} × {attemptsPerPairing || 1} = {totalOutputs}
                         </div>
                       </div>
                     </div>
@@ -996,7 +1101,6 @@ function CroppedFacePreview({
   crop: { crop_x: number; crop_y: number; crop_width: number; crop_height: number; aspect_ratio: string };
 }) {
   // Crop values are stored as percentages (0-100)
-  // Use object-position to show the cropped region
   const scaleX = 100 / crop.crop_width;
   
   return (
