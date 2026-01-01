@@ -10,6 +10,11 @@ interface PromoteToTwinParams {
   brandId: string | null;
 }
 
+interface LinkToExistingTwinParams {
+  identityId: string;
+  twinId: string;
+}
+
 export function usePromoteToTwin() {
   const [isPromoting, setIsPromoting] = useState(false);
 
@@ -122,5 +127,107 @@ export function usePromoteToTwin() {
     }
   };
 
-  return { promoteIdentityToTwin, isPromoting };
+  const linkIdentityToExistingTwin = async ({
+    identityId,
+    twinId,
+  }: LinkToExistingTwinParams): Promise<{ twinId: string; twinName: string } | null> => {
+    setIsPromoting(true);
+    try {
+      // 1. Fetch the twin to get its name
+      const { data: twin, error: twinError } = await supabase
+        .from("digital_twins")
+        .select("id, name, image_count")
+        .eq("id", twinId)
+        .single();
+
+      if (twinError) throw twinError;
+
+      // 2. Fetch identity with its images
+      const { data: identity, error: identityError } = await supabase
+        .from("face_identities")
+        .select(`
+          *,
+          face_identity_images(
+            id,
+            scrape_image_id,
+            view,
+            is_ignored,
+            face_scrape_images(
+              id,
+              source_url,
+              stored_url,
+              face_crops(
+                crop_x,
+                crop_y,
+                crop_width,
+                crop_height,
+                cropped_stored_url
+              )
+            )
+          )
+        `)
+        .eq("id", identityId)
+        .single();
+
+      if (identityError) throw identityError;
+
+      // 3. Copy images to digital_twin_images
+      const newImages = identity.face_identity_images
+        ?.filter((img: any) => !img.is_ignored)
+        .map((img: any) => ({
+          twin_id: twinId,
+          source_url: img.face_scrape_images.source_url,
+          stored_url: img.face_scrape_images.stored_url,
+          view: img.view || "unknown",
+          crop_data: img.face_scrape_images.face_crops?.[0]
+            ? {
+                crop_x: img.face_scrape_images.face_crops[0].crop_x,
+                crop_y: img.face_scrape_images.face_crops[0].crop_y,
+                crop_width: img.face_scrape_images.face_crops[0].crop_width,
+                crop_height: img.face_scrape_images.face_crops[0].crop_height,
+              }
+            : null,
+        })) || [];
+
+      if (newImages.length > 0) {
+        const { error: imagesError } = await supabase
+          .from("digital_twin_images")
+          .insert(newImages);
+
+        if (imagesError) throw imagesError;
+      }
+
+      // 4. Update face_identities with linked_twin_id and name
+      const { error: linkError } = await supabase
+        .from("face_identities")
+        .update({
+          linked_twin_id: twinId,
+          name: twin.name,
+        })
+        .eq("id", identityId);
+
+      if (linkError) throw linkError;
+
+      // 5. Update twin's image_count
+      const { error: countError } = await supabase
+        .from("digital_twins")
+        .update({
+          image_count: (twin.image_count || 0) + newImages.length,
+        })
+        .eq("id", twinId);
+
+      if (countError) throw countError;
+
+      toast.success(`Linked to Digital Twin: ${twin.name}`);
+      return { twinId: twin.id, twinName: twin.name };
+    } catch (error) {
+      console.error("Error linking to twin:", error);
+      toast.error("Failed to link to Digital Twin");
+      return null;
+    } finally {
+      setIsPromoting(false);
+    }
+  };
+
+  return { promoteIdentityToTwin, linkIdentityToExistingTwin, isPromoting };
 }
