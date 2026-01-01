@@ -98,6 +98,15 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     };
   }, [runId]);
 
+  // Check if reference images have valid HTTPS URLs
+  const hasValidReferenceUrls = useCallback(() => {
+    return referenceImages.length > 0 && 
+      referenceImages.every(r => 
+        r.original_image_url?.startsWith('https://') && 
+        r.cropped_image_url?.startsWith('https://')
+      );
+  }, [referenceImages]);
+
   // Fetch reference images for few-shot learning
   const fetchReferenceImages = async () => {
     const { data, error } = await supabase
@@ -107,7 +116,11 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     
     if (data && !error) {
       setReferenceImages(data as CropReferenceImage[]);
-      console.log(`[CropEditor] Loaded ${data.length} reference images for AI detection`);
+      const validCount = data.filter(r => 
+        r.original_image_url?.startsWith('https://') && 
+        r.cropped_image_url?.startsWith('https://')
+      ).length;
+      console.log(`[CropEditor] Loaded ${data.length} reference images (${validCount} with valid HTTPS URLs)`);
     }
   };
 
@@ -453,6 +466,14 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     
     setAiDetecting(true);
     try {
+      // Auto-upload reference images if they don't have valid HTTPS URLs
+      if (!hasValidReferenceUrls()) {
+        console.log('[CropEditor] Reference images missing or invalid, uploading first...');
+        toast({ title: "Setting up reference images...", description: "Uploading reference images for AI detection" });
+        await handleUploadReferenceImages();
+        await fetchReferenceImages();
+      }
+      
       const imageUrl = selectedImage.stored_url || selectedImage.source_url;
       const result = await detectFaceWithAI(imageUrl);
       
@@ -549,6 +570,13 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     let failedCount = 0;
     
     try {
+      // Auto-upload reference images if using AI and they don't have valid URLs
+      if (useAiDetection && !hasValidReferenceUrls()) {
+        console.log('[CropEditor] Reference images missing or invalid, uploading first...');
+        toast({ title: "Setting up reference images...", description: "Uploading for AI detection" });
+        await handleUploadReferenceImages();
+        await fetchReferenceImages();
+      }
       for (let i = 0; i < images.length; i++) {
         const image = images[i];
         setBatchProgress({ current: i + 1, total: images.length, failed: failedCount });
@@ -943,7 +971,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
               checked={useAiDetection}
               onCheckedChange={setUseAiDetection}
             />
-            {useAiDetection && referenceImages.length === 0 && (
+            {useAiDetection && !hasValidReferenceUrls() && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -961,9 +989,14 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                 )}
               </Button>
             )}
-            {useAiDetection && referenceImages.length > 0 && (
-              <Badge variant="secondary" className="ml-1 text-xs">
-                {referenceImages.length} refs
+            {useAiDetection && hasValidReferenceUrls() && (
+              <Badge variant="default" className="ml-1 text-xs bg-green-600">
+                {referenceImages.length} refs ready
+              </Badge>
+            )}
+            {useAiDetection && referenceImages.length > 0 && !hasValidReferenceUrls() && (
+              <Badge variant="destructive" className="ml-1 text-xs">
+                refs need upload
               </Badge>
             )}
           </div>
