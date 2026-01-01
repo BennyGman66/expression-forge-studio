@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
-import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users, UserPlus } from "lucide-react";
+import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users, UserPlus, UserCheck } from "lucide-react";
 import type { FacePairingJob } from "@/types/face-pairing";
 import type { DigitalTalent } from "@/types/digital-talent";
 import { PromoteToTwinDialog } from "@/components/shared/PromoteToTwinDialog";
@@ -42,6 +42,7 @@ interface IdentityForPairing {
   imageCount: number;
   representativeImageUrl: string | null;
   images: CroppedFace[];
+  linkedTwinId: string | null;
 }
 
 interface QueuedIdentityPairing {
@@ -93,8 +94,15 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setPromoteDialogOpen(true);
   };
 
-  const handlePromoteSuccess = () => {
-    // Just close the dialog - keep the identity visible for pairing
+  const handlePromoteSuccess = (twinId: string) => {
+    // Update the identity in local state to show it's linked to a twin
+    if (selectedIdentityForPromote) {
+      setIdentities(prev => prev.map(i => 
+        i.id === selectedIdentityForPromote.id 
+          ? { ...i, linkedTwinId: twinId }
+          : i
+      ));
+    }
     setPromoteDialogOpen(false);
     setSelectedIdentityForPromote(null);
   };
@@ -143,6 +151,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
           gender,
           image_count,
           representative_image_id,
+          linked_twin_id,
           face_scrape_images!face_identities_representative_image_id_fkey (
             stored_url
           )
@@ -218,6 +227,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
             imageCount: croppedImages.length,
             representativeImageUrl: repImage?.stored_url || croppedImages[0]?.stored_url || null,
             images: croppedImages,
+            linkedTwinId: (identity as any).linked_twin_id || null,
           });
         }
       }
@@ -572,16 +582,25 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                             </div>
                           )}
 
-                          {/* Promote to Twin button */}
-                          <Button
-                            size="icon"
-                            variant="secondary"
-                            className="absolute top-2 left-2 h-7 w-7 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity shadow-md"
-                            onClick={(e) => handlePromoteClick(e, identity)}
-                            title="Promote to Digital Twin"
-                          >
-                            <UserPlus className="h-3.5 w-3.5" />
-                          </Button>
+                          {/* Promote to Twin button - only show if not already linked */}
+                          {!identity.linkedTwinId && (
+                            <Button
+                              size="icon"
+                              variant="secondary"
+                              className="absolute top-2 left-2 h-7 w-7 opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity shadow-md"
+                              onClick={(e) => handlePromoteClick(e, identity)}
+                              title="Promote to Digital Twin"
+                            >
+                              <UserPlus className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+
+                          {/* Twin linked indicator */}
+                          {identity.linkedTwinId && (
+                            <div className="absolute top-2 left-2 bg-emerald-500 text-white rounded-full p-1 shadow-md" title="Linked to Digital Twin">
+                              <UserCheck className="h-3.5 w-3.5" />
+                            </div>
+                          )}
                           
                           {/* Info */}
                           <div className="p-2 bg-background">
