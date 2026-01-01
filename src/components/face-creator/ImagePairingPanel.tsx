@@ -68,6 +68,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   const [expandedPairings, setExpandedPairings] = useState<Set<string>>(new Set());
   const [attemptsPerPairing, setAttemptsPerPairing] = useState('1');
   const [batchName, setBatchName] = useState('');
+  const [selectedModel, setSelectedModel] = useState('google/gemini-2.5-flash-image-preview');
   
   // Job state
   const [currentJob, setCurrentJob] = useState<FacePairingJob | null>(null);
@@ -391,6 +392,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
           pairing_mode: 'identity',
           total_pairings: totalImages,
           attempts_per_pairing: parseInt(attemptsPerPairing) || 1,
+          model: selectedModel,
           status: 'pending'
         })
         .select()
@@ -403,19 +405,12 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
 
       for (const queuedPairing of pairingQueue) {
         for (const image of queuedPairing.identity.images) {
-          // Get the talent_id from face_identities for backward compatibility
-          const { data: identityData } = await supabase
-            .from('face_identities')
-            .select('talent_id')
-            .eq('id', queuedPairing.identity.id)
-            .maybeSingle();
-
           pairingsToInsert.push({
             job_id: job.id,
             cropped_face_id: image.scrape_image_id,
             digital_talent_id: queuedPairing.talent.id,
-            talent_id: identityData?.talent_id || queuedPairing.identity.id,
-            talent_image_id: image.scrape_image_id,
+            talent_id: null,
+            talent_image_id: null,
             status: 'pending'
           });
         }
@@ -878,6 +873,19 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                           onChange={(e) => setAttemptsPerPairing(e.target.value)}
                           className="h-8 w-20"
                         />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-xs">AI Model</Label>
+                        <Select value={selectedModel} onValueChange={setSelectedModel}>
+                          <SelectTrigger className="h-8 w-40">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="google/gemini-2.5-flash-image-preview">Nano (Fast)</SelectItem>
+                            <SelectItem value="google/gemini-3-pro-image-preview">Nano Pro (Quality)</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       
                       <div className="space-y-1">

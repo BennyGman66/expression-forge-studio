@@ -66,7 +66,13 @@ serve(async (req) => {
       })
       .eq('id', jobId);
 
-    // Start background processing
+    // Start background processing - pass model from job
+    const { data: jobData } = await supabase
+      .from('face_pairing_jobs')
+      .select('model')
+      .eq('id', jobId)
+      .single();
+    
     EdgeRuntime.waitUntil(processPairedGeneration(supabase, jobId, supabaseUrl, lovableApiKey));
 
     return new Response(JSON.stringify({ success: true }), {
@@ -91,13 +97,14 @@ async function processPairedGeneration(
     // Get job details
     const { data: job, error: jobError } = await supabase
       .from('face_pairing_jobs')
-      .select('attempts_per_pairing')
+      .select('attempts_per_pairing, model')
       .eq('id', jobId)
       .single();
 
     if (jobError) throw new Error(`Failed to fetch job: ${jobError.message}`);
 
     const attemptsPerPairing = job?.attempts_per_pairing || 1;
+    const model = job?.model || 'google/gemini-2.5-flash-image-preview';
 
     // Get all pairings with their related data
     const { data: pairings, error: pairingsError } = await supabase
@@ -182,12 +189,13 @@ async function processPairedGeneration(
             continue;
           }
 
-          // Call Nano Banana Pro for image generation
+          // Call AI for image generation
           const generatedImageUrl = await generatePairedImage(
             image1Url,
             image2Url,
             finalPrompt,
-            lovableApiKey
+            lovableApiKey,
+            model
           );
 
           if (generatedImageUrl) {
@@ -269,7 +277,8 @@ async function generatePairedImage(
   image1Url: string,
   image2Url: string,
   prompt: string,
-  apiKey: string
+  apiKey: string,
+  model: string
 ): Promise<string | null> {
   try {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -279,7 +288,7 @@ async function generatePairedImage(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-3-pro-image-preview',
+        model: model,
         messages: [
           {
             role: 'user',

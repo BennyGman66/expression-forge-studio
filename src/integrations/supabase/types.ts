@@ -1001,6 +1001,7 @@ export type Database = {
           created_at: string
           id: string
           logs: Json | null
+          model: string | null
           name: string
           pairing_mode: string
           progress: number | null
@@ -1014,6 +1015,7 @@ export type Database = {
           created_at?: string
           id?: string
           logs?: Json | null
+          model?: string | null
           name?: string
           pairing_mode?: string
           progress?: number | null
@@ -1027,6 +1029,7 @@ export type Database = {
           created_at?: string
           id?: string
           logs?: Json | null
+          model?: string | null
           name?: string
           pairing_mode?: string
           progress?: number | null
@@ -1096,8 +1099,8 @@ export type Database = {
           outfit_description: string | null
           outfit_description_status: string | null
           status: string
-          talent_id: string
-          talent_image_id: string
+          talent_id: string | null
+          talent_image_id: string | null
         }
         Insert: {
           created_at?: string
@@ -1108,8 +1111,8 @@ export type Database = {
           outfit_description?: string | null
           outfit_description_status?: string | null
           status?: string
-          talent_id: string
-          talent_image_id: string
+          talent_id?: string | null
+          talent_image_id?: string | null
         }
         Update: {
           created_at?: string
@@ -1120,8 +1123,8 @@ export type Database = {
           outfit_description?: string | null
           outfit_description_status?: string | null
           status?: string
-          talent_id?: string
-          talent_image_id?: string
+          talent_id?: string | null
+          talent_image_id?: string | null
         }
         Relationships: [
           {
