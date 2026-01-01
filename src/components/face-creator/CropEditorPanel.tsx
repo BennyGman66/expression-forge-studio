@@ -1193,24 +1193,41 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                       variant="default" 
                       onClick={handleAIDetectFace}
                       disabled={aiDetecting}
+                      className="min-w-0 overflow-hidden"
                     >
                       {aiDetecting ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> AI Detecting...</>
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 flex-shrink-0 animate-spin" />
+                          <span className="truncate">Detecting...</span>
+                        </>
                       ) : (
-                        <><Sparkles className="h-4 w-4 mr-2" /> AI Detect</>
+                        <>
+                          <Sparkles className="h-4 w-4 mr-2 flex-shrink-0" />
+                          <span className="truncate">AI Detect</span>
+                        </>
                       )}
                     </Button>
                     <Button 
                       variant="outline" 
                       onClick={handleDetectFace}
                       disabled={detecting || !detectorReady}
+                      className="min-w-0 overflow-hidden"
                     >
                       {detecting ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Detecting...</>
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 flex-shrink-0 animate-spin" />
+                          <span className="truncate">Detecting...</span>
+                        </>
                       ) : detectorLoading ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading...</>
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 flex-shrink-0 animate-spin" />
+                          <span className="truncate">Loading...</span>
+                        </>
                       ) : (
-                        <><Scan className="h-4 w-4 mr-2" /> Local Detect</>
+                        <>
+                          <Scan className="h-4 w-4 mr-2 flex-shrink-0" />
+                          <span className="truncate">Local Detect</span>
+                        </>
                       )}
                     </Button>
                   </div>
@@ -1220,15 +1237,17 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                       variant="outline" 
                       onClick={handleRevertCrop}
                       disabled={!selectedImage.crop}
+                      className="min-w-0 overflow-hidden"
                     >
-                      <RotateCcw className="h-4 w-4 mr-2" />
-                      Revert
+                      <RotateCcw className="h-4 w-4 mr-2 flex-shrink-0" />
+                      <span className="truncate">Revert</span>
                     </Button>
                     <Button 
                       onClick={handleSaveCrop}
+                      className="min-w-0 overflow-hidden"
                     >
-                      <Check className="h-4 w-4 mr-2" />
-                      Apply
+                      <Check className="h-4 w-4 mr-2 flex-shrink-0" />
+                      <span className="truncate">Apply</span>
                     </Button>
                   </div>
 
@@ -1237,17 +1256,19 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                       variant="outline"
                       disabled={selectedIndex === 0}
                       onClick={() => setSelectedIndex(i => i - 1)}
+                      className="min-w-0 overflow-hidden"
                     >
-                      <ChevronLeft className="h-4 w-4 mr-2" />
-                      Previous
+                      <ChevronLeft className="h-4 w-4 mr-2 flex-shrink-0" />
+                      <span className="truncate">Previous</span>
                     </Button>
                     <Button
                       variant="outline"
                       disabled={selectedIndex === images.length - 1}
                       onClick={() => setSelectedIndex(i => i + 1)}
+                      className="min-w-0 overflow-hidden"
                     >
-                      Next
-                      <ChevronRight className="h-4 w-4 ml-2" />
+                      <span className="truncate">Next</span>
+                      <ChevronRight className="h-4 w-4 ml-2 flex-shrink-0" />
                     </Button>
                   </div>
                 </div>
