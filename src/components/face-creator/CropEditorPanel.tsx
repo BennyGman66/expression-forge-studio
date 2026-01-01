@@ -975,21 +975,36 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   // Delete a specific crop
   const handleDeleteCrop = async (imageId: string, cropId: string) => {
     try {
-      // Capture scroll position before re-fetching
+      // Capture scroll position before any updates
       const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
       const scrollTop = scrollContainer?.scrollTop || 0;
+
+      // OPTIMISTIC UPDATE: Remove crop from local state immediately
+      setImages(prev => prev.map(img => 
+        img.id === imageId 
+          ? { ...img, crop: undefined } 
+          : img
+      ));
+
+      // Also clear aiLastSuggestion if it was for this image
+      if (aiLastSuggestion?.imageId === imageId) {
+        setAiLastSuggestion(null);
+      }
 
       const { error } = await supabase
         .from('face_crops')
         .delete()
         .eq('id', cropId);
 
-      if (error) throw error;
+      if (error) {
+        // ROLLBACK: If delete fails, re-fetch to restore correct state
+        await fetchImagesWithCrops();
+        throw error;
+      }
 
       toast({ title: "Deleted", description: "Crop removed" });
-      await fetchImagesWithCrops();
 
-      // Restore scroll position after re-fetch
+      // Restore scroll position
       requestAnimationFrame(() => {
         const container = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
         if (container) {
@@ -1387,7 +1402,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                                 e.stopPropagation();
                                 handleDeleteCrop(image.id, image.crop!.id);
                               }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity bg-destructive hover:bg-destructive/80 text-destructive-foreground rounded p-0.5"
+                              className="bg-destructive/80 hover:bg-destructive text-destructive-foreground rounded p-0.5"
                               title="Delete crop"
                             >
                               <Trash2 className="h-3 w-3" />
