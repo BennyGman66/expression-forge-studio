@@ -72,7 +72,9 @@ serve(async (req) => {
     if (useReferenceImages && referenceImages.length > 0) {
       userContent.push({
         type: 'text',
-        text: `I will show you reference examples of EXACTLY how I want images cropped. Study these pairs carefully - the first image is the original, the second shows the CORRECT crop result with a green overlay indicating the crop area.`
+        text: `I will show you reference examples of EXACTLY how I want images cropped. Study these pairs carefully.
+
+CRITICAL: The crop size should be approximately 35-45% of the original image width and height. NEVER exceed 50%.`
       });
 
       // Add reference image pairs (limit to 3 to keep token count reasonable)
@@ -90,7 +92,7 @@ serve(async (req) => {
         });
         userContent.push({
           type: 'text',
-          text: `Reference ${i + 1} - Original ${ref.view_type === 'back' ? 'BACK VIEW' : 'FRONT VIEW'} image (full body/source)`
+          text: `Reference ${i + 1} - Original ${ref.view_type === 'back' ? 'BACK VIEW' : 'FRONT VIEW'} full-body image`
         });
         userContent.push({
           type: 'image_url',
@@ -98,22 +100,28 @@ serve(async (req) => {
         });
         userContent.push({
           type: 'text',
-          text: `Reference ${i + 1} - CORRECT crop result. The green rectangle shows the EXACT crop boundaries. Notice:
-- Top edge: just above crown of head (2-5% padding above hair)
-- Bottom edge: at shoulder line/collar level (NOT into chest)
-- Side edges: at outer edges of shoulders (horizontally tight)
-- Person nearly fills the entire frame`
+          text: `Reference ${i + 1} - CORRECT crop (35-45% of original). Key measurements:
+- Crop WIDTH: ~40% of original image width (TIGHT around head)
+- Crop HEIGHT: ~40% of original image height
+- TOP: 2-3% gap above hair crown
+- BOTTOM: at COLLAR/NECKLINE level - NOT shoulders, NOT chest
+- SIDES: tight around head with 5% padding
+The face fills MOST of the crop frame.`
         });
       }
 
       userContent.push({
         type: 'text',
-        text: `Now analyze this NEW image and provide crop coordinates that EXACTLY match the style shown in the reference examples. Use the ${aspectRatio} aspect ratio.`
+        text: `Now analyze this NEW image. Provide crop coordinates that:
+1. Are 35-45% of image dimensions (NEVER exceed 50%)
+2. Cut off at the COLLAR LINE (where shirt meets neck), NOT at shoulders
+3. Match the tight framing in the reference examples
+Use ${aspectRatio} aspect ratio.`
       });
     } else {
       userContent.push({
         type: 'text',
-        text: `Analyze this fashion photograph. Find the primary person's face and return the face bounding box and optimal head-and-shoulders crop coordinates. If this is a back-of-head shot, indicate that. Use the ${aspectRatio} aspect ratio for the suggested crop.`
+        text: `Analyze this fashion photograph. Provide a TIGHT head crop (35-45% of image dimensions). Bottom edge at collar line, NOT shoulders.`
       });
     }
 
@@ -123,35 +131,44 @@ serve(async (req) => {
       image_url: { url: imageUrl }
     });
 
-    // Enhanced system prompt with very specific crop rules
-    const systemPrompt = `You are an expert fashion photo cropper. Your task is to analyze images and suggest TIGHT head-and-shoulders crops.
+    // Enhanced system prompt with HARD SIZE CONSTRAINTS
+    const systemPrompt = `You are an expert fashion photo cropper. Suggest TIGHT head-and-shoulders crops.
 
-CRITICAL CROP RULES - Follow these EXACTLY:
+=== MANDATORY SIZE CONSTRAINTS ===
+- Crop WIDTH: MUST be 30-50% of image width. NEVER exceed 50%.
+- Crop HEIGHT: MUST be 30-50% of image height. NEVER exceed 50%.
+- If your calculation exceeds 50%, REDUCE IT until it fits within 30-50%.
+- Target: 38-45% for most images.
 
-FOR FRONT-FACING IMAGES:
-1. TOP EDGE: Position just above the crown of the head. Maximum 3-5% of the crop height should be empty space above the hair.
-2. BOTTOM EDGE: At the shoulder line where shoulders meet the neck/collar. Include the collar/neckline of clothing but DO NOT go below the shoulders into the chest area.
-3. LEFT/RIGHT EDGES: At the outer edges of the shoulders with minimal padding (0-5%). The person should nearly fill the horizontal frame.
-4. The head should occupy approximately 40-50% of the total crop height.
-5. The crop should feel TIGHT - if in doubt, crop TIGHTER rather than looser.
+=== BOTTOM EDGE DEFINITION (CRITICAL) ===
+The bottom edge is at the COLLAR LINE / NECKLINE:
+- Where the shirt collar meets the base of the neck
+- Just below the chin, at the top of the clothing
+- NOT the full shoulders
+- NOT the chest or torso
+- Think "passport photo" framing
 
-FOR BACK-OF-HEAD IMAGES:
-1. Same tight framing applies - center on the back of the head
-2. TOP EDGE: Just above the crown of the head (2-5% padding)
-3. BOTTOM EDGE: At the shoulder line (same as front view)
-4. Mark isBackView as TRUE
-5. Even though no face is visible, provide a crop that centers on where the head is
+=== CROP RULES ===
+FRONT-FACING:
+- TOP: 2-5% padding above hair crown
+- BOTTOM: At COLLAR LINE (NOT shoulders)
+- SIDES: Tight around head (5-10% padding each side)
+- The HEAD should fill 60-70% of the crop height
 
-ASPECT RATIO ${aspectRatio}:
-${aspectRatio === '1:1' 
-  ? '- Square crop: Face centered, shoulders cropped to maintain square shape. May need to crop shoulders tighter to keep square.'
-  : '- Portrait 4:5 crop: Slightly more vertical room. Can include a bit more of the shoulders while keeping the tight head framing.'}
+BACK-OF-HEAD:
+- Same tight framing centered on back of head
+- Mark isBackView as TRUE
+- Bottom edge still at collar/neckline level
 
-Return ALL coordinates as percentages (0-100) of the ORIGINAL image dimensions:
-- x: left edge as percentage of image width
-- y: top edge as percentage of image height
-- width: width as percentage of image width
-- height: height as percentage of image height`;
+=== EXAMPLE OUTPUT ===
+For a typical full-body front-facing image:
+{ "x": 27, "y": 4, "width": 44, "height": 44 }
+
+For a back view:
+{ "x": 26, "y": 2, "width": 48, "height": 48 }
+
+ASPECT RATIO: ${aspectRatio}
+Return coordinates as percentages (0-100) of original image dimensions.`;
 
     // Call Gemini 2.5 Flash with tool calling for structured output
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
