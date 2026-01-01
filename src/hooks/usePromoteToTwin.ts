@@ -100,11 +100,12 @@ export function usePromoteToTwin() {
         if (imagesError) throw imagesError;
       }
 
-      // 4. Link the face identity to the twin (without archiving - keeps it visible for pairing)
+      // 4. Link the face identity to the twin and update its name
       const { error: linkError } = await supabase
         .from("face_identities")
         .update({
           linked_twin_id: twin.id,
+          name: name, // Sync the name with the twin
         })
         .eq("id", identityId);
 

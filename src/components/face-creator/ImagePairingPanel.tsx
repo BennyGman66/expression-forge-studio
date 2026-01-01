@@ -94,12 +94,12 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setPromoteDialogOpen(true);
   };
 
-  const handlePromoteSuccess = (twinId: string) => {
-    // Update the identity in local state to show it's linked to a twin
+  const handlePromoteSuccess = (twinId: string, twinName: string) => {
+    // Update the identity in local state to show it's linked to a twin and update name
     if (selectedIdentityForPromote) {
       setIdentities(prev => prev.map(i => 
         i.id === selectedIdentityForPromote.id 
-          ? { ...i, linkedTwinId: twinId }
+          ? { ...i, linkedTwinId: twinId, name: twinName }
           : i
       ));
     }

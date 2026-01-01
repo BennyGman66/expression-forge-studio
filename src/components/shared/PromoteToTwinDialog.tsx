@@ -27,7 +27,7 @@ interface PromoteToTwinDialogProps {
   defaultName: string;
   defaultGender: string | null;
   representativeImageUrl?: string | null;
-  onSuccess?: (twinId: string) => void;
+  onSuccess?: (twinId: string, twinName: string) => void;
 }
 
 export function PromoteToTwinDialog({
@@ -64,7 +64,7 @@ export function PromoteToTwinDialog({
 
     if (twin) {
       onOpenChange(false);
-      onSuccess?.(twin.id);
+      onSuccess?.(twin.id, name);
     }
   };
 
