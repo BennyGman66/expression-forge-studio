@@ -952,6 +952,7 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
   const [outputs, setOutputs] = useState<Record<string, any[]>>({});
   const [job, setJob] = useState<FacePairingJob | null>(null);
   const [groupBy, setGroupBy] = useState<'talent' | 'identity'>('talent');
+  const [totalOutputs, setTotalOutputs] = useState({ completed: 0, failed: 0, pending: 0, total: 0 });
 
   useEffect(() => {
     if (jobId) {
@@ -959,15 +960,44 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
     }
   }, [jobId]);
 
+  // Realtime subscription for outputs
   useEffect(() => {
-    if (!job || ['completed', 'failed'].includes(job.status)) return;
+    if (!jobId) return;
 
-    const interval = setInterval(() => {
-      loadJobData();
-    }, 3000);
+    const channel = supabase
+      .channel(`pairing-outputs-${jobId}`)
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'face_pairing_outputs'
+        },
+        (payload) => {
+          // Reload outputs when they change
+          loadOutputs();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'face_pairing_jobs',
+          filter: `id=eq.${jobId}`
+        },
+        (payload) => {
+          if (payload.new) {
+            setJob(payload.new as FacePairingJob);
+          }
+        }
+      )
+      .subscribe();
 
-    return () => clearInterval(interval);
-  }, [job]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [jobId]);
 
   const loadJobData = async () => {
     if (!jobId) return;
@@ -983,7 +1013,7 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
       setJob(jobData as FacePairingJob);
     }
 
-    // Load pairings with related data
+    // Load pairings with related data including face_crops
     const { data: pairingsData } = await supabase
       .from('face_pairings')
       .select(`
@@ -992,6 +1022,14 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
           id,
           stored_url,
           source_url,
+          face_crops (
+            cropped_stored_url,
+            crop_x,
+            crop_y,
+            crop_width,
+            crop_height,
+            aspect_ratio
+          ),
           face_identity_images (
             face_identities (
               name
@@ -1008,20 +1046,56 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
 
     if (pairingsData) {
       setPairings(pairingsData);
+    }
 
-      // Load outputs for each pairing
+    await loadOutputs();
+  };
+
+  const loadOutputs = async () => {
+    if (!jobId) return;
+
+    // Load all outputs for this job
+    const { data: allOutputs } = await supabase
+      .from('face_pairing_outputs')
+      .select('*, face_pairings!inner(job_id)')
+      .eq('face_pairings.job_id', jobId);
+
+    if (allOutputs) {
+      // Group by pairing_id
       const outputsMap: Record<string, any[]> = {};
-      for (const pairing of pairingsData) {
-        const { data: outputData } = await supabase
-          .from('face_pairing_outputs')
-          .select('*')
-          .eq('pairing_id', pairing.id);
+      let completed = 0, failed = 0, pending = 0;
 
-        if (outputData) {
-          outputsMap[pairing.id] = outputData;
+      for (const output of allOutputs) {
+        if (!outputsMap[output.pairing_id]) {
+          outputsMap[output.pairing_id] = [];
         }
+        outputsMap[output.pairing_id].push(output);
+
+        if (output.status === 'completed') completed++;
+        else if (output.status === 'failed') failed++;
+        else pending++;
       }
+
       setOutputs(outputsMap);
+      setTotalOutputs({ completed, failed, pending, total: allOutputs.length });
+    }
+  };
+
+  // Get status label and color
+  const getStatusInfo = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return { label: 'Pending', color: 'text-muted-foreground' };
+      case 'describing':
+        return { label: 'Analyzing Outfits', color: 'text-blue-500' };
+      case 'generating':
+        return { label: 'Generating Images', color: 'text-amber-500' };
+      case 'completed':
+        return { label: 'Completed', color: 'text-green-500' };
+      case 'failed':
+        return { label: 'Failed', color: 'text-destructive' };
+      default:
+        return { label: status, color: 'text-muted-foreground' };
     }
   };
 
@@ -1033,6 +1107,8 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
     );
   }
 
+  const statusInfo = job ? getStatusInfo(job.status) : null;
+
   return (
     <div className="space-y-4">
       {/* Job Status */}
@@ -1041,21 +1117,48 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-medium">{job.name}</h3>
-              <p className="text-sm text-muted-foreground capitalize">
-                Status: {job.status} • {job.progress}/{job.total_pairings} pairings
-              </p>
+              <div className="flex items-center gap-3 text-sm">
+                <span className={statusInfo?.color}>
+                  {statusInfo?.label}
+                </span>
+                {job.status === 'describing' && (
+                  <span className="text-muted-foreground">
+                    {job.progress}/{job.total_pairings} outfits analyzed
+                  </span>
+                )}
+                {job.status === 'generating' && (
+                  <span className="text-muted-foreground">
+                    {totalOutputs.completed} of {totalOutputs.total} images generated
+                    {totalOutputs.failed > 0 && ` (${totalOutputs.failed} failed)`}
+                  </span>
+                )}
+                {job.status === 'completed' && (
+                  <span className="text-muted-foreground">
+                    {totalOutputs.completed} images • {pairings.length} pairings
+                  </span>
+                )}
+              </div>
             </div>
+            {job.status === 'generating' && (
+              <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
+            )}
             {job.status === 'describing' && (
-              <Button onClick={onStartGeneration}>
-                <Play className="h-4 w-4 mr-2" />
-                Start Image Generation
-              </Button>
+              <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+            )}
+            {job.status === 'completed' && (
+              <Check className="h-5 w-5 text-green-500" />
             )}
           </div>
           {!['completed', 'failed'].includes(job.status) && (
             <Progress 
               className="mt-3"
-              value={job.total_pairings > 0 ? (job.progress / job.total_pairings) * 100 : 0} 
+              value={
+                job.status === 'generating' && totalOutputs.total > 0
+                  ? ((totalOutputs.completed + totalOutputs.failed) / totalOutputs.total) * 100
+                  : job.total_pairings > 0 
+                    ? (job.progress / job.total_pairings) * 100 
+                    : 0
+              } 
             />
           )}
         </Card>
@@ -1087,21 +1190,37 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
             const sourceImage = pairing.face_scrape_images;
             const talent = pairing.digital_talents;
             const identityName = sourceImage?.face_identity_images?.[0]?.face_identities?.name || 'Unknown';
+            
+            // Get the cropped image URL if available
+            const faceCrop = sourceImage?.face_crops?.[0];
+            const croppedUrl = faceCrop?.cropped_stored_url;
+            const originalUrl = sourceImage?.stored_url || sourceImage?.source_url;
 
             return (
               <Card key={pairing.id} className="p-4">
                 <div className="grid grid-cols-6 gap-4">
-                  {/* Source Image */}
+                  {/* Source Image - use cropped version if available */}
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">Source</p>
                     <div className="aspect-[3/4] rounded-md overflow-hidden bg-muted">
-                      {sourceImage && (
+                      {croppedUrl ? (
                         <img 
-                          src={sourceImage.stored_url || sourceImage.source_url} 
+                          src={croppedUrl} 
                           alt="" 
                           className="w-full h-full object-cover"
                         />
-                      )}
+                      ) : faceCrop ? (
+                        <CroppedFacePreview
+                          imageUrl={originalUrl}
+                          crop={faceCrop}
+                        />
+                      ) : sourceImage ? (
+                        <img 
+                          src={originalUrl} 
+                          alt="" 
+                          className="w-full h-full object-cover"
+                        />
+                      ) : null}
                     </div>
                     <p className="text-xs truncate">{identityName}</p>
                   </div>
@@ -1141,16 +1260,25 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
                     <p className="text-xs text-muted-foreground">Outputs ({pairingOutputs.length})</p>
                     <div className="grid grid-cols-2 gap-2">
                       {pairingOutputs.map(output => (
-                        <div key={output.id} className="aspect-[3/4] rounded-md overflow-hidden bg-muted">
+                        <div key={output.id} className="aspect-[3/4] rounded-md overflow-hidden bg-muted relative">
                           {output.stored_url ? (
                             <img 
                               src={output.stored_url} 
                               alt="" 
                               className="w-full h-full object-cover"
                             />
+                          ) : output.status === 'failed' ? (
+                            <div className="w-full h-full flex items-center justify-center text-destructive">
+                              <X className="w-4 h-4" />
+                            </div>
                           ) : (
                             <div className="w-full h-full flex items-center justify-center">
                               <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                            </div>
+                          )}
+                          {output.status === 'completed' && (
+                            <div className="absolute top-1 right-1">
+                              <Check className="w-3 h-3 text-green-500" />
                             </div>
                           )}
                         </div>

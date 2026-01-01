@@ -159,7 +159,7 @@ async function processOutfitDescriptions(
 
     console.log(`[generate-outfit-description] Completed: ${processed}/${uniqueFaces.size}`);
     
-    // Update job status - ready for generation
+    // Update job status - ready for generation, then auto-start
     await supabase
       .from('face_pairing_jobs')
       .update({ 
@@ -167,6 +167,27 @@ async function processOutfitDescriptions(
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
+    
+    // Auto-start image generation by calling the edge function
+    console.log(`[generate-outfit-description] Auto-starting image generation for job ${jobId}`);
+    
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    
+    const genResponse = await fetch(`${supabaseUrl}/functions/v1/generate-paired-images`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify({ jobId })
+    });
+    
+    if (!genResponse.ok) {
+      console.error(`[generate-outfit-description] Failed to start generation:`, await genResponse.text());
+    } else {
+      console.log(`[generate-outfit-description] Image generation started successfully`);
+    }
 
   } catch (error) {
     console.error('[generate-outfit-description] Background error:', error);
