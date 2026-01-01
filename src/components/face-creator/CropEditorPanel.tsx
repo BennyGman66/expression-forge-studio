@@ -124,29 +124,44 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
   };
 
-  // Convert image URL to base64
+  // Convert image URL to base64 with detailed error handling
   const fetchImageAsBase64 = async (url: string): Promise<string> => {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        // Remove data:image/png;base64, prefix
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    console.log(`[CropEditor] Fetching ${url}...`);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const blob = await response.blob();
+      console.log(`[CropEditor] Got blob for ${url}: ${blob.size} bytes, type: ${blob.type}`);
+      
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result as string;
+          const base64 = result.split(',')[1];
+          if (!base64) {
+            reject(new Error(`Failed to extract base64 from ${url}`));
+            return;
+          }
+          console.log(`[CropEditor] Converted ${url} to base64: ${base64.length} chars`);
+          resolve(base64);
+        };
+        reader.onerror = () => reject(new Error(`FileReader error for ${url}`));
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      console.error(`[CropEditor] Error fetching ${url}:`, error);
+      throw error;
+    }
   };
 
   // Upload reference images to Supabase storage
-  const handleUploadReferenceImages = async () => {
+  const handleUploadReferenceImages = async (): Promise<boolean> => {
     setUploadingRefs(true);
+    console.log('[CropEditor] === STARTING REFERENCE IMAGE UPLOAD ===');
+    
     try {
-      console.log(`[CropEditor] Fetching and uploading reference images as base64...`);
-      
       // Reference images configuration
       const referenceConfigs = [
         { localPath: 'front/original-1.png', storagePath: 'front/original-1.png', viewType: 'front' as const, isCropped: false },
@@ -165,46 +180,70 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
         { localPath: 'back/cropped-3.png', storagePath: 'back/cropped-3.png', viewType: 'back' as const, isCropped: true },
       ];
       
-      // Fetch all images as base64
-      const images = await Promise.all(
-        referenceConfigs.map(async (config) => {
+      // Fetch each image individually with error handling
+      const images: Array<{
+        name: string;
+        storagePath: string;
+        viewType: 'front' | 'back';
+        isCropped: boolean;
+        base64Data: string;
+      }> = [];
+      
+      for (const config of referenceConfigs) {
+        try {
           const url = `/reference-crops/${config.localPath}`;
-          console.log(`[CropEditor] Fetching ${url}...`);
           const base64Data = await fetchImageAsBase64(url);
-          return {
+          images.push({
             name: config.localPath,
             storagePath: config.storagePath,
             viewType: config.viewType,
             isCropped: config.isCropped,
             base64Data
-          };
-        })
-      );
+          });
+        } catch (err) {
+          console.error(`[CropEditor] Failed to fetch ${config.localPath}:`, err);
+          // Continue with other images
+        }
+      }
       
-      console.log(`[CropEditor] Fetched ${images.length} images, sending to edge function...`);
+      if (images.length === 0) {
+        throw new Error('Failed to fetch any reference images from public folder');
+      }
+      
+      console.log(`[CropEditor] Successfully fetched ${images.length}/${referenceConfigs.length} images, sending to edge function...`);
       
       const response = await supabase.functions.invoke('upload-crop-references', {
         body: { images }
       });
       
+      console.log('[CropEditor] Edge function response:', response);
+      
       if (response.error) {
         throw new Error(response.error.message);
       }
       
+      const uploaded = response.data?.uploaded || 0;
+      const errors = response.data?.errors || [];
+      
+      if (errors.length > 0) {
+        console.warn('[CropEditor] Upload had some errors:', errors);
+      }
+      
       toast({ 
         title: "Reference Images Uploaded", 
-        description: `Uploaded ${response.data.uploaded} reference images to storage` 
+        description: `Successfully uploaded ${uploaded} reference images` 
       });
       
-      // Refresh reference images
-      await fetchReferenceImages();
+      console.log('[CropEditor] === UPLOAD COMPLETE ===');
+      return true;
     } catch (error) {
-      console.error('Error uploading reference images:', error);
+      console.error('[CropEditor] === UPLOAD FAILED ===', error);
       toast({ 
         title: "Upload Failed", 
         description: error instanceof Error ? error.message : "Failed to upload reference images", 
         variant: "destructive" 
       });
+      return false;
     } finally {
       setUploadingRefs(false);
     }
@@ -469,9 +508,22 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       // Auto-upload reference images if they don't have valid HTTPS URLs
       if (!hasValidReferenceUrls()) {
         console.log('[CropEditor] Reference images missing or invalid, uploading first...');
-        toast({ title: "Setting up reference images...", description: "Uploading reference images for AI detection" });
-        await handleUploadReferenceImages();
-        await fetchReferenceImages();
+        toast({ title: "Setting up reference images...", description: "This may take a moment" });
+        const uploadSuccess = await handleUploadReferenceImages();
+        if (uploadSuccess) {
+          await new Promise(resolve => setTimeout(resolve, 500)); // Wait for DB
+          await fetchReferenceImages();
+        }
+        
+        // Verify upload worked
+        if (!hasValidReferenceUrls()) {
+          toast({ 
+            title: "Reference Upload Failed", 
+            description: "Please try clicking 'Setup Refs' manually", 
+            variant: "destructive" 
+          });
+          return;
+        }
       }
       
       const imageUrl = selectedImage.stored_url || selectedImage.source_url;
@@ -573,9 +625,23 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       // Auto-upload reference images if using AI and they don't have valid URLs
       if (useAiDetection && !hasValidReferenceUrls()) {
         console.log('[CropEditor] Reference images missing or invalid, uploading first...');
-        toast({ title: "Setting up reference images...", description: "Uploading for AI detection" });
-        await handleUploadReferenceImages();
-        await fetchReferenceImages();
+        toast({ title: "Setting up reference images...", description: "This may take a moment" });
+        const uploadSuccess = await handleUploadReferenceImages();
+        if (uploadSuccess) {
+          await new Promise(resolve => setTimeout(resolve, 500)); // Wait for DB
+          await fetchReferenceImages();
+        }
+        
+        // Verify upload worked
+        if (!hasValidReferenceUrls()) {
+          toast({ 
+            title: "Reference Upload Failed", 
+            description: "Please try clicking 'Setup Refs' manually", 
+            variant: "destructive" 
+          });
+          setGenerating(false);
+          return;
+        }
       }
       for (let i = 0; i < images.length; i++) {
         const image = images[i];
@@ -973,20 +1039,18 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
             />
             {useAiDetection && !hasValidReferenceUrls() && (
               <Button
-                variant="ghost"
+                variant="default"
                 size="sm"
-                onClick={handleUploadReferenceImages}
+                onClick={() => handleUploadReferenceImages()}
                 disabled={uploadingRefs}
-                className="ml-1 h-6 px-2 text-xs"
+                className="ml-1 h-6 px-2 text-xs animate-pulse"
               >
                 {uploadingRefs ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
                 ) : (
-                  <>
-                    <Upload className="h-3 w-3 mr-1" />
-                    Setup Refs
-                  </>
+                  <Upload className="h-3 w-3 mr-1" />
                 )}
+                {uploadingRefs ? "Uploading..." : "Setup Refs (Required)"}
               </Button>
             )}
             {useAiDetection && hasValidReferenceUrls() && (
