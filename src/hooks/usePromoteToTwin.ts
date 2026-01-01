@@ -100,16 +100,15 @@ export function usePromoteToTwin() {
         if (imagesError) throw imagesError;
       }
 
-      // 4. Archive the face identity
-      const { error: archiveError } = await supabase
+      // 4. Link the face identity to the twin (without archiving - keeps it visible for pairing)
+      const { error: linkError } = await supabase
         .from("face_identities")
         .update({
-          archived_to_twin_id: twin.id,
-          archived_at: new Date().toISOString(),
+          linked_twin_id: twin.id,
         })
         .eq("id", identityId);
 
-      if (archiveError) throw archiveError;
+      if (linkError) throw linkError;
 
       toast.success(`Created Digital Twin: ${name}`);
       return twin;

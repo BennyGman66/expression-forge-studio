@@ -836,6 +836,7 @@ export type Database = {
           gender: string
           id: string
           image_count: number
+          linked_twin_id: string | null
           name: string
           representative_image_id: string | null
           scrape_run_id: string
@@ -848,6 +849,7 @@ export type Database = {
           gender: string
           id?: string
           image_count?: number
+          linked_twin_id?: string | null
           name: string
           representative_image_id?: string | null
           scrape_run_id: string
@@ -860,6 +862,7 @@ export type Database = {
           gender?: string
           id?: string
           image_count?: number
+          linked_twin_id?: string | null
           name?: string
           representative_image_id?: string | null
           scrape_run_id?: string
@@ -869,6 +872,13 @@ export type Database = {
           {
             foreignKeyName: "face_identities_archived_to_twin_id_fkey"
             columns: ["archived_to_twin_id"]
+            isOneToOne: false
+            referencedRelation: "digital_twins"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_identities_linked_twin_id_fkey"
+            columns: ["linked_twin_id"]
             isOneToOne: false
             referencedRelation: "digital_twins"
             referencedColumns: ["id"]

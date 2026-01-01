@@ -94,15 +94,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   };
 
   const handlePromoteSuccess = () => {
-    // Remove the promoted identity from the list
-    if (selectedIdentityForPromote) {
-      setIdentities(prev => prev.filter(i => i.id !== selectedIdentityForPromote.id));
-      setSelectedIdentityIds(prev => {
-        const next = new Set(prev);
-        next.delete(selectedIdentityForPromote.id);
-        return next;
-      });
-    }
+    // Just close the dialog - keep the identity visible for pairing
     setPromoteDialogOpen(false);
     setSelectedIdentityForPromote(null);
   };
