@@ -111,15 +111,67 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
   };
 
+  // Convert image URL to base64
+  const fetchImageAsBase64 = async (url: string): Promise<string> => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        // Remove data:image/png;base64, prefix
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
   // Upload reference images to Supabase storage
   const handleUploadReferenceImages = async () => {
     setUploadingRefs(true);
     try {
-      const baseUrl = window.location.origin;
-      console.log(`[CropEditor] Uploading reference images from ${baseUrl}`);
+      console.log(`[CropEditor] Fetching and uploading reference images as base64...`);
+      
+      // Reference images configuration
+      const referenceConfigs = [
+        { localPath: 'front/original-1.png', storagePath: 'front/original-1.png', viewType: 'front' as const, isCropped: false },
+        { localPath: 'front/cropped-1.png', storagePath: 'front/cropped-1.png', viewType: 'front' as const, isCropped: true },
+        { localPath: 'front/original-2.png', storagePath: 'front/original-2.png', viewType: 'front' as const, isCropped: false },
+        { localPath: 'front/cropped-2.png', storagePath: 'front/cropped-2.png', viewType: 'front' as const, isCropped: true },
+        { localPath: 'front/original-3.png', storagePath: 'front/original-3.png', viewType: 'front' as const, isCropped: false },
+        { localPath: 'front/cropped-3.png', storagePath: 'front/cropped-3.png', viewType: 'front' as const, isCropped: true },
+        { localPath: 'front/original-4.png', storagePath: 'front/original-4.png', viewType: 'front' as const, isCropped: false },
+        { localPath: 'front/cropped-4.png', storagePath: 'front/cropped-4.png', viewType: 'front' as const, isCropped: true },
+        { localPath: 'back/original-1.png', storagePath: 'back/original-1.png', viewType: 'back' as const, isCropped: false },
+        { localPath: 'back/cropped-1.png', storagePath: 'back/cropped-1.png', viewType: 'back' as const, isCropped: true },
+        { localPath: 'back/original-2.png', storagePath: 'back/original-2.png', viewType: 'back' as const, isCropped: false },
+        { localPath: 'back/cropped-2.png', storagePath: 'back/cropped-2.png', viewType: 'back' as const, isCropped: true },
+        { localPath: 'back/original-3.png', storagePath: 'back/original-3.png', viewType: 'back' as const, isCropped: false },
+        { localPath: 'back/cropped-3.png', storagePath: 'back/cropped-3.png', viewType: 'back' as const, isCropped: true },
+      ];
+      
+      // Fetch all images as base64
+      const images = await Promise.all(
+        referenceConfigs.map(async (config) => {
+          const url = `/reference-crops/${config.localPath}`;
+          console.log(`[CropEditor] Fetching ${url}...`);
+          const base64Data = await fetchImageAsBase64(url);
+          return {
+            name: config.localPath,
+            storagePath: config.storagePath,
+            viewType: config.viewType,
+            isCropped: config.isCropped,
+            base64Data
+          };
+        })
+      );
+      
+      console.log(`[CropEditor] Fetched ${images.length} images, sending to edge function...`);
       
       const response = await supabase.functions.invoke('upload-crop-references', {
-        body: { sourceBaseUrl: baseUrl }
+        body: { images }
       });
       
       if (response.error) {
