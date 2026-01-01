@@ -1083,12 +1083,13 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           defaultName={selectedIdentityForPromote.name}
           defaultGender={selectedIdentityForPromote.gender}
           representativeImageUrl={selectedIdentityForPromote.representative_image_url}
-          onSuccess={() => {
-            // Remove identity from list (it's now archived)
-            setIdentities(prev => prev.filter(id => id.id !== selectedIdentityForPromote.id));
-            if (selectedIdentity === selectedIdentityForPromote.id) {
-              setSelectedIdentity(null);
-            }
+          onSuccess={(twinId, twinName) => {
+            // Update identity in list with linked twin info and new name
+            setIdentities(prev => prev.map(id => 
+              id.id === selectedIdentityForPromote.id 
+                ? { ...id, name: twinName, linked_twin_id: twinId }
+                : id
+            ));
             setSelectedIdentityForPromote(null);
           }}
         />
