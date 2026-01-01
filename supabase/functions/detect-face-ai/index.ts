@@ -35,7 +35,7 @@ serve(async (req) => {
   }
 
   try {
-    const { imageUrl, aspectRatio = '1:1', referenceImages = [], baseUrl } = await req.json();
+    const { imageUrl, aspectRatio = '1:1', referenceImages = [], baseUrl, corrections = [] } = await req.json();
 
     if (!imageUrl) {
       return new Response(
@@ -52,6 +52,7 @@ serve(async (req) => {
     console.log(`[detect-face-ai] Processing image: ${imageUrl.substring(0, 100)}...`);
     console.log(`[detect-face-ai] Aspect ratio: ${aspectRatio}`);
     console.log(`[detect-face-ai] Reference images count: ${referenceImages.length}`);
+    console.log(`[detect-face-ai] User corrections count: ${corrections.length}`);
     
     // Check if reference images are publicly accessible (have valid https URLs)
     let useReferenceImages = false;
@@ -122,6 +123,27 @@ Use ${aspectRatio} aspect ratio.`
       userContent.push({
         type: 'text',
         text: `Analyze this fashion photograph. Provide a TIGHT head crop (35-45% of image dimensions). Bottom edge at collar line, NOT shoulders.`
+      });
+    }
+
+    // Add user corrections for dynamic learning (if any)
+    if (corrections && corrections.length > 0) {
+      userContent.push({
+        type: 'text',
+        text: `=== IMPORTANT: USER CORRECTIONS ===
+The user has manually corrected previous AI crops. LEARN from these corrections and apply similar adjustments:
+${corrections.map((c: any, i: number) => {
+  const widthDelta = (c.user_crop.width - c.ai_crop.width).toFixed(1);
+  const heightDelta = (c.user_crop.height - c.ai_crop.height).toFixed(1);
+  const xDelta = (c.user_crop.x - c.ai_crop.x).toFixed(1);
+  const yDelta = (c.user_crop.y - c.ai_crop.y).toFixed(1);
+  return `Correction ${i + 1} (${c.view_type} view):
+  - AI suggested: x=${c.ai_crop.x.toFixed(1)}, y=${c.ai_crop.y.toFixed(1)}, width=${c.ai_crop.width.toFixed(1)}%, height=${c.ai_crop.height.toFixed(1)}%
+  - User corrected to: x=${c.user_crop.x.toFixed(1)}, y=${c.user_crop.y.toFixed(1)}, width=${c.user_crop.width.toFixed(1)}%, height=${c.user_crop.height.toFixed(1)}%
+  - Delta: x${xDelta}, y${yDelta}, width${widthDelta}%, height${heightDelta}%`;
+}).join('\n\n')}
+
+APPLY THESE PATTERNS: If corrections consistently show the user wants SMALLER/TIGHTER crops, reduce your crop size. If they shift position, adjust accordingly.`
       });
     }
 
