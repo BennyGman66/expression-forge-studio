@@ -972,6 +972,36 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
   };
 
+  // Delete a specific crop
+  const handleDeleteCrop = async (imageId: string, cropId: string) => {
+    try {
+      // Capture scroll position before re-fetching
+      const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+      const scrollTop = scrollContainer?.scrollTop || 0;
+
+      const { error } = await supabase
+        .from('face_crops')
+        .delete()
+        .eq('id', cropId);
+
+      if (error) throw error;
+
+      toast({ title: "Deleted", description: "Crop removed" });
+      await fetchImagesWithCrops();
+
+      // Restore scroll position after re-fetch
+      requestAnimationFrame(() => {
+        const container = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+        if (container) {
+          container.scrollTop = scrollTop;
+        }
+      });
+    } catch (error) {
+      console.error('Error deleting crop:', error);
+      toast({ title: "Error", description: "Failed to delete crop", variant: "destructive" });
+    }
+  };
+
   const getAspectMultiplier = () => aspectRatio === '1:1' ? 1 : 1.25;
 
   const handleCropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1329,7 +1359,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                     <div
                       key={image.id}
                       onClick={() => setSelectedIndex(index)}
-                      className={`aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-colors ${
+                      className={`aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-colors group ${
                         selectedIndex === index 
                           ? 'border-primary' 
                           : 'border-transparent hover:border-muted-foreground/50'
@@ -1343,14 +1373,26 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                           loading="lazy"
                         />
                         {image.crop && (
-                          <Badge 
-                            className={`absolute top-1 right-1 text-[10px] px-1 ${
-                              image.crop.is_auto ? 'bg-gray-400' : 'bg-green-500'
-                            }`}
-                            title={image.crop.is_auto ? 'AI-applied crop' : 'Manually applied crop'}
-                          >
-                            ✓
-                          </Badge>
+                          <div className="absolute top-1 right-1 flex items-center gap-0.5">
+                            <Badge 
+                              className={`text-[10px] px-1 ${
+                                image.crop.is_auto ? 'bg-gray-400' : 'bg-green-500'
+                              }`}
+                              title={image.crop.is_auto ? 'AI-applied crop' : 'Manually applied crop'}
+                            >
+                              ✓
+                            </Badge>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteCrop(image.id, image.crop!.id);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity bg-destructive hover:bg-destructive/80 text-destructive-foreground rounded p-0.5"
+                              title="Delete crop"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
                         )}
                         {image.noFaceDetected && (
                           <Badge className="absolute top-1 left-1 text-[10px] px-1 bg-orange-500" title="No face detected - manual crop needed">
