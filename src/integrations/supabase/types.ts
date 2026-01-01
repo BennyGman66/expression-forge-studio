@@ -254,6 +254,81 @@ export type Database = {
           },
         ]
       }
+      crop_corrections: {
+        Row: {
+          ai_crop_height: number
+          ai_crop_width: number
+          ai_crop_x: number
+          ai_crop_y: number
+          created_at: string
+          delta_height: number | null
+          delta_width: number | null
+          delta_x: number | null
+          delta_y: number | null
+          id: string
+          scrape_image_id: string
+          scrape_run_id: string
+          user_crop_height: number
+          user_crop_width: number
+          user_crop_x: number
+          user_crop_y: number
+          view_type: string
+        }
+        Insert: {
+          ai_crop_height: number
+          ai_crop_width: number
+          ai_crop_x: number
+          ai_crop_y: number
+          created_at?: string
+          delta_height?: number | null
+          delta_width?: number | null
+          delta_x?: number | null
+          delta_y?: number | null
+          id?: string
+          scrape_image_id: string
+          scrape_run_id: string
+          user_crop_height: number
+          user_crop_width: number
+          user_crop_x: number
+          user_crop_y: number
+          view_type?: string
+        }
+        Update: {
+          ai_crop_height?: number
+          ai_crop_width?: number
+          ai_crop_x?: number
+          ai_crop_y?: number
+          created_at?: string
+          delta_height?: number | null
+          delta_width?: number | null
+          delta_x?: number | null
+          delta_y?: number | null
+          id?: string
+          scrape_image_id?: string
+          scrape_run_id?: string
+          user_crop_height?: number
+          user_crop_width?: number
+          user_crop_x?: number
+          user_crop_y?: number
+          view_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crop_corrections_scrape_image_id_fkey"
+            columns: ["scrape_image_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crop_corrections_scrape_run_id_fkey"
+            columns: ["scrape_run_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       crop_reference_images: {
         Row: {
           created_at: string

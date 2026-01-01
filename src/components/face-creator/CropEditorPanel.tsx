@@ -40,6 +40,25 @@ interface CropReferenceImage {
   is_active: boolean;
 }
 
+interface CropCorrection {
+  id: string;
+  scrape_image_id: string;
+  view_type: string;
+  ai_crop_x: number;
+  ai_crop_y: number;
+  ai_crop_width: number;
+  ai_crop_height: number;
+  user_crop_x: number;
+  user_crop_y: number;
+  user_crop_width: number;
+  user_crop_height: number;
+}
+
+interface AILastSuggestion {
+  imageId: string;
+  crop: { x: number; y: number; width: number; height: number };
+}
+
 export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const { toast } = useToast();
   const { detectFaces, isReady: detectorReady, isLoading: detectorLoading } = useFaceDetector();
@@ -65,6 +84,8 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const [imageBounds, setImageBounds] = useState({ offsetX: 0, offsetY: 0, width: 0, height: 0 });
   const [imageBoundsReady, setImageBoundsReady] = useState(false);
   const [referenceImages, setReferenceImages] = useState<CropReferenceImage[]>([]);
+  const [recentCorrections, setRecentCorrections] = useState<CropCorrection[]>([]);
+  const [aiLastSuggestion, setAiLastSuggestion] = useState<AILastSuggestion | null>(null);
 
   const selectedImage = images[selectedIndex];
 
@@ -74,6 +95,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     fetchImagesWithCrops();
     fetchJob();
     fetchReferenceImages();
+    fetchRecentCorrections();
 
     const channel = supabase
       .channel('crop-editor')
@@ -97,6 +119,20 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       supabase.removeChannel(channel);
     };
   }, [runId]);
+
+  // Fetch recent crop corrections for few-shot learning
+  const fetchRecentCorrections = async () => {
+    const { data, error } = await supabase
+      .from('crop_corrections')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    
+    if (data && !error) {
+      setRecentCorrections(data as CropCorrection[]);
+      console.log(`[CropEditor] Loaded ${data.length} recent corrections for learning`);
+    }
+  };
 
   // Check if reference images have valid HTTPS URLs
   const hasValidReferenceUrls = useCallback(() => {
@@ -483,7 +519,13 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
             cropped_image_url: r.cropped_image_url,
             view_type: r.view_type
           })),
-          baseUrl
+          baseUrl,
+          // Pass recent corrections for dynamic learning
+          corrections: recentCorrections.map(c => ({
+            view_type: c.view_type,
+            ai_crop: { x: c.ai_crop_x, y: c.ai_crop_y, width: c.ai_crop_width, height: c.ai_crop_height },
+            user_crop: { x: c.user_crop_x, y: c.user_crop_y, width: c.user_crop_width, height: c.user_crop_height }
+          }))
         }
       });
       
@@ -557,6 +599,12 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
           description: "AI crop was too large, reduced for tighter framing"
         });
       }
+
+      // Store the AI suggestion for potential learning (before any adjustments for display)
+      setAiLastSuggestion({
+        imageId: selectedImage.id,
+        crop: { ...result.suggestedCrop }
+      });
 
       const cropCoords = result.suggestedCrop;
       
@@ -813,7 +861,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   };
 
   const handleSaveCrop = async () => {
-    if (!selectedImage || imageBounds.width === 0) return;
+    if (!selectedImage || imageBounds.width === 0 || !runId) return;
     
     // Convert from pixel coordinates to percentage (0-100) relative to image bounds
     const cropXPercent = ((cropRect.x - imageBounds.offsetX) / imageBounds.width) * 100;
@@ -822,6 +870,50 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     const cropHeightPercent = (cropRect.height / imageBounds.height) * 100;
     
     try {
+      // Check if this is a correction of an AI suggestion (for learning)
+      if (aiLastSuggestion && aiLastSuggestion.imageId === selectedImage.id) {
+        const ai = aiLastSuggestion.crop;
+        const hasSignificantDelta = 
+          Math.abs(ai.x - cropXPercent) > 3 ||
+          Math.abs(ai.y - cropYPercent) > 3 ||
+          Math.abs(ai.width - cropWidthPercent) > 3 ||
+          Math.abs(ai.height - cropHeightPercent) > 3;
+        
+        if (hasSignificantDelta) {
+          // Get view type from identity images if available
+          const { data: identityImage } = await supabase
+            .from('face_identity_images')
+            .select('view')
+            .eq('scrape_image_id', selectedImage.id)
+            .single();
+          
+          const viewType = identityImage?.view || 'front';
+          
+          // Save the correction for learning
+          await supabase.from('crop_corrections').insert({
+            scrape_image_id: selectedImage.id,
+            scrape_run_id: runId,
+            view_type: viewType,
+            ai_crop_x: ai.x,
+            ai_crop_y: ai.y,
+            ai_crop_width: ai.width,
+            ai_crop_height: ai.height,
+            user_crop_x: cropXPercent,
+            user_crop_y: cropYPercent,
+            user_crop_width: cropWidthPercent,
+            user_crop_height: cropHeightPercent
+          });
+          
+          console.log(`[CropEditor] Saved correction: AI (${ai.width.toFixed(1)}%x${ai.height.toFixed(1)}%) -> User (${cropWidthPercent.toFixed(1)}%x${cropHeightPercent.toFixed(1)}%)`);
+          
+          // Refresh corrections list for future AI calls
+          fetchRecentCorrections();
+        }
+        
+        // Clear the AI suggestion after saving
+        setAiLastSuggestion(null);
+      }
+      
       if (selectedImage.crop) {
         const { error } = await supabase
           .from('face_crops')
