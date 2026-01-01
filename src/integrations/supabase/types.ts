@@ -518,6 +518,95 @@ export type Database = {
         }
         Relationships: []
       }
+      digital_twin_images: {
+        Row: {
+          created_at: string | null
+          crop_data: Json | null
+          id: string
+          source_url: string
+          stored_url: string | null
+          twin_id: string
+          view: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          crop_data?: Json | null
+          id?: string
+          source_url: string
+          stored_url?: string | null
+          twin_id: string
+          view?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          crop_data?: Json | null
+          id?: string
+          source_url?: string
+          stored_url?: string | null
+          twin_id?: string
+          view?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "digital_twin_images_twin_id_fkey"
+            columns: ["twin_id"]
+            isOneToOne: false
+            referencedRelation: "digital_twins"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      digital_twins: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          gender: string | null
+          id: string
+          image_count: number | null
+          name: string
+          representative_image_url: string | null
+          source_scrape_run_id: string | null
+          usage_count: number | null
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          gender?: string | null
+          id?: string
+          image_count?: number | null
+          name: string
+          representative_image_url?: string | null
+          source_scrape_run_id?: string | null
+          usage_count?: number | null
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          gender?: string | null
+          id?: string
+          image_count?: number | null
+          name?: string
+          representative_image_url?: string | null
+          source_scrape_run_id?: string | null
+          usage_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "digital_twins_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "digital_twins_source_scrape_run_id_fkey"
+            columns: ["source_scrape_run_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       expression_map_exports: {
         Row: {
           created_at: string
@@ -741,6 +830,8 @@ export type Database = {
       }
       face_identities: {
         Row: {
+          archived_at: string | null
+          archived_to_twin_id: string | null
           created_at: string
           gender: string
           id: string
@@ -751,6 +842,8 @@ export type Database = {
           talent_id: string | null
         }
         Insert: {
+          archived_at?: string | null
+          archived_to_twin_id?: string | null
           created_at?: string
           gender: string
           id?: string
@@ -761,6 +854,8 @@ export type Database = {
           talent_id?: string | null
         }
         Update: {
+          archived_at?: string | null
+          archived_to_twin_id?: string | null
           created_at?: string
           gender?: string
           id?: string
@@ -771,6 +866,13 @@ export type Database = {
           talent_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "face_identities_archived_to_twin_id_fkey"
+            columns: ["archived_to_twin_id"]
+            isOneToOne: false
+            referencedRelation: "digital_twins"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "face_identities_representative_image_id_fkey"
             columns: ["representative_image_id"]

@@ -20,7 +20,8 @@ import {
   Download,
   Link,
   Unlink,
-  Trash2
+  Trash2,
+  Plus
 } from "lucide-react";
 import {
   Select,
@@ -42,6 +43,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PromoteToTwinDialog } from "@/components/shared/PromoteToTwinDialog";
 
 interface ClassificationPanelProps {
   runId: string | null;
@@ -114,6 +116,10 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   const [selectedIdentityForLink, setSelectedIdentityForLink] = useState<Identity | null>(null);
   const [digitalTalents, setDigitalTalents] = useState<DigitalTalent[]>([]);
   const [talentsLoading, setTalentsLoading] = useState(false);
+
+  // Promote to twin dialog
+  const [promoteDialogOpen, setPromoteDialogOpen] = useState(false);
+  const [selectedIdentityForPromote, setSelectedIdentityForPromote] = useState<Identity | null>(null);
 
   // Fetch identities with thumbnails when runId or gender changes
   useEffect(() => {
@@ -767,6 +773,19 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="h-7 w-7 opacity-0 group-hover:opacity-100 text-primary hover:text-primary hover:bg-primary/10"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedIdentityForPromote(identity);
+                                setPromoteDialogOpen(true);
+                              }}
+                              title="Promote to Digital Twin"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive hover:bg-destructive/10"
                               onClick={(e) => handleDeleteModel(e, identity)}
                               title="Delete model and images"
@@ -1054,6 +1073,26 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Promote to Twin Dialog */}
+      {selectedIdentityForPromote && (
+        <PromoteToTwinDialog
+          open={promoteDialogOpen}
+          onOpenChange={setPromoteDialogOpen}
+          identityId={selectedIdentityForPromote.id}
+          defaultName={selectedIdentityForPromote.name}
+          defaultGender={selectedIdentityForPromote.gender}
+          representativeImageUrl={selectedIdentityForPromote.representative_image_url}
+          onSuccess={() => {
+            // Remove identity from list (it's now archived)
+            setIdentities(prev => prev.filter(id => id.id !== selectedIdentityForPromote.id));
+            if (selectedIdentity === selectedIdentityForPromote.id) {
+              setSelectedIdentity(null);
+            }
+            setSelectedIdentityForPromote(null);
+          }}
+        />
+      )}
     </div>
   );
 }
