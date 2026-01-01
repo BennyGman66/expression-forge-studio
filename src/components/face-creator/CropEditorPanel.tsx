@@ -979,20 +979,21 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
       const scrollTop = scrollContainer?.scrollTop || 0;
 
-      // OPTIMISTIC UPDATE: Remove crop from local state immediately
-      // Create a completely new array to ensure React detects the change
-      setImages(prevImages => {
-        const newImages = prevImages.map(img => {
-          if (img.id === imageId) {
-            // Create a new object without the crop property
-            const { crop, ...rest } = img;
-            return rest as ImageWithCrop;
+      // OPTIMISTIC UPDATE: Filter out the image entirely from the list
+      const deletedIndex = images.findIndex(img => img.id === imageId);
+      setImages(prev => prev.filter(img => img.id !== imageId));
+      
+      // Adjust selectedIndex if needed
+      if (deletedIndex !== -1) {
+        setSelectedIndex(prev => {
+          if (deletedIndex < prev) {
+            return Math.max(0, prev - 1);
+          } else if (deletedIndex === prev) {
+            return Math.max(0, Math.min(prev, images.length - 2));
           }
-          return img;
+          return prev;
         });
-        console.log('Updated images after delete:', newImages.find(i => i.id === imageId));
-        return newImages;
-      });
+      }
 
       // Also clear aiLastSuggestion if it was for this image
       if (aiLastSuggestion?.imageId === imageId) {
