@@ -84,10 +84,22 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        "leapfrog-hop": {
+          "0%, 100%": { transform: "translateY(0) scale(1)" },
+          "30%": { transform: "translateY(-12px) scale(1.1) rotate(-5deg)" },
+          "50%": { transform: "translateY(-16px) scale(1.05)" },
+          "70%": { transform: "translateY(-8px) scale(1.08) rotate(5deg)" },
+        },
+        "leapfrog-shadow": {
+          "0%, 100%": { transform: "translateX(-50%) scaleX(1)", opacity: "0.3" },
+          "50%": { transform: "translateX(-50%) scaleX(0.5)", opacity: "0.1" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "leapfrog-hop": "leapfrog-hop 0.8s ease-in-out infinite",
+        "leapfrog-shadow": "leapfrog-shadow 0.8s ease-in-out infinite",
       },
     },
   },
