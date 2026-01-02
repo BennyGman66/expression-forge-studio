@@ -49,6 +49,7 @@ export function LooksUploadTab({
   const [newLookName, setNewLookName] = useState("");
   const [showNewLookForm, setShowNewLookForm] = useState(false);
   const [uploading, setUploading] = useState<Record<string, boolean>>({});
+  const [dragOver, setDragOver] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
   // Fetch digital talents
@@ -291,6 +292,7 @@ export function LooksUploadTab({
               <div className="grid grid-cols-2 gap-4">
                 {VIEWS.map((view) => {
                   const imageUrl = getImageForView(view);
+                  const isDragOver = dragOver[view];
                   return (
                     <div key={view} className="space-y-2">
                       <Label className="capitalize">{view}</Label>
@@ -298,9 +300,34 @@ export function LooksUploadTab({
                         className={`
                           relative aspect-[3/4] border-2 border-dashed rounded-lg 
                           flex items-center justify-center cursor-pointer
-                          hover:border-primary transition-colors overflow-hidden
+                          transition-all overflow-hidden
+                          ${isDragOver ? "border-primary bg-primary/5 scale-[1.02]" : "hover:border-primary"}
                           ${imageUrl ? "border-solid border-muted" : "border-muted-foreground/30"}
                         `}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDragOver((prev) => ({ ...prev, [view]: true }));
+                        }}
+                        onDragEnter={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDragOver((prev) => ({ ...prev, [view]: true }));
+                        }}
+                        onDragLeave={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDragOver((prev) => ({ ...prev, [view]: false }));
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDragOver((prev) => ({ ...prev, [view]: false }));
+                          const file = e.dataTransfer.files?.[0];
+                          if (file && file.type.startsWith('image/')) {
+                            handleUpload(view, file);
+                          }
+                        }}
                       >
                         {imageUrl ? (
                           <img
@@ -315,7 +342,7 @@ export function LooksUploadTab({
                             ) : (
                               <>
                                 <ImageIcon className="h-8 w-8" />
-                                <span className="text-xs">Upload</span>
+                                <span className="text-xs">{isDragOver ? "Drop here" : "Upload"}</span>
                               </>
                             )}
                           </div>
