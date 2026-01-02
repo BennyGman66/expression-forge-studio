@@ -45,6 +45,8 @@ export default function FaceApplication() {
           <TabsContent value="crop">
             <HeadCropTab
               lookId={selectedLookId}
+              talentId={selectedTalentId}
+              onLookChange={setSelectedLookId}
               onContinue={() => setActiveTab("match")}
             />
           </TabsContent>

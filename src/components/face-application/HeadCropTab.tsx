@@ -8,12 +8,20 @@ import { LookSourceImage } from "@/types/face-application";
 
 interface HeadCropTabProps {
   lookId: string | null;
+  talentId: string | null;
+  onLookChange: (lookId: string) => void;
   onContinue: () => void;
+}
+
+interface TalentLook {
+  id: string;
+  name: string;
 }
 
 const OUTPUT_SIZE = 1000; // Final crop size
 
-export function HeadCropTab({ lookId, onContinue }: HeadCropTabProps) {
+export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: HeadCropTabProps) {
+  const [looks, setLooks] = useState<TalentLook[]>([]);
   const [sourceImages, setSourceImages] = useState<LookSourceImage[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 200, height: 200 });
@@ -28,6 +36,23 @@ export function HeadCropTab({ lookId, onContinue }: HeadCropTabProps) {
   const imageRef = useRef<HTMLImageElement>(null);
   const { toast } = useToast();
 
+  // Fetch all looks for the talent
+  useEffect(() => {
+    if (!talentId) return;
+    const fetchLooks = async () => {
+      const { data } = await supabase
+        .from("talent_looks")
+        .select("id, name")
+        .eq("talent_id", talentId)
+        .order("created_at");
+      if (data) {
+        setLooks(data);
+      }
+    };
+    fetchLooks();
+  }, [talentId]);
+
+  // Fetch source images for current look
   useEffect(() => {
     if (!lookId) return;
     const fetchSourceImages = async () => {
@@ -38,6 +63,7 @@ export function HeadCropTab({ lookId, onContinue }: HeadCropTabProps) {
         .order("view");
       if (data) {
         setSourceImages(data as LookSourceImage[]);
+        setSelectedIndex(0);
         // Initialize crop box from existing data if available
         const first = data[0];
         if (first?.head_crop_x !== null) {
@@ -304,6 +330,26 @@ export function HeadCropTab({ lookId, onContinue }: HeadCropTabProps) {
               </button>
             ))}
           </CardContent>
+
+          {/* Looks Quick Switcher */}
+          {looks.length > 1 && (
+            <div className="border-t p-3">
+              <p className="text-xs text-muted-foreground mb-2">Switch Look</p>
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                {looks.map((look) => (
+                  <Button
+                    key={look.id}
+                    size="sm"
+                    variant={look.id === lookId ? "default" : "outline"}
+                    className="shrink-0 text-xs"
+                    onClick={() => onLookChange(look.id)}
+                  >
+                    {look.name}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* Center: Crop Editor */}
