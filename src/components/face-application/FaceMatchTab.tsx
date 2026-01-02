@@ -151,9 +151,10 @@ export function FaceMatchTab({ talentId, onContinue }: FaceMatchTabProps) {
     });
   };
 
-  // Check if ALL source images across ALL looks are matched
+  // Check matches - require at least one, not all
   const allSourceImages = looks.flatMap((l) => l.sourceImages);
-  const allMatched = allSourceImages.length > 0 && allSourceImages.every((img) => matches[img.id]);
+  const matchedCount = allSourceImages.filter((img) => matches[img.id]).length;
+  const hasAnyMatched = matchedCount > 0;
 
   const viewToAngle = (view: string): string => {
     switch (view) {
@@ -269,10 +270,10 @@ export function FaceMatchTab({ talentId, onContinue }: FaceMatchTabProps) {
         <div className="flex justify-end pt-4 pb-8">
           <Button
             size="lg"
-            disabled={!allMatched || faceFoundations.length === 0}
+            disabled={!hasAnyMatched || faceFoundations.length === 0}
             onClick={onContinue}
           >
-            Continue to Generate
+            Continue to Generate ({matchedCount}/{allSourceImages.length} matched)
             <ArrowRight className="h-4 w-4 ml-2" />
           </Button>
         </div>
