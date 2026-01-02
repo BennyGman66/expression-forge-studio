@@ -35,6 +35,15 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [forceDefaultCrop, setForceDefaultCrop] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [expanding, setExpanding] = useState(false);
+  // Cached bounds to ensure consistent coordinate calculations
+  const [cachedBounds, setCachedBounds] = useState<{
+    offsetX: number;
+    offsetY: number;
+    renderedWidth: number;
+    renderedHeight: number;
+    scaleX: number;
+    scaleY: number;
+  } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const { toast } = useToast();
@@ -89,6 +98,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     setImageReady(false);
     setCropBox({ x: 0, y: 0, width: 0, height: 0 });
     setImageDimensions({ width: 0, height: 0 });
+    setCachedBounds(null); // Clear cached bounds
     setForceDefaultCrop(false);
   }, [selectedIndex]);
 
@@ -134,6 +144,35 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     const newDimensions = { width: img.naturalWidth, height: img.naturalHeight };
     setImageDimensions(newDimensions);
     
+    // Calculate and CACHE bounds immediately when image loads
+    const rect = img.getBoundingClientRect();
+    const containerAspect = rect.width / rect.height;
+    const imageAspect = newDimensions.width / newDimensions.height;
+    
+    let renderedWidth: number, renderedHeight: number, offsetX: number, offsetY: number;
+    
+    if (imageAspect > containerAspect) {
+      renderedWidth = rect.width;
+      renderedHeight = rect.width / imageAspect;
+      offsetX = 0;
+      offsetY = (rect.height - renderedHeight) / 2;
+    } else {
+      renderedHeight = rect.height;
+      renderedWidth = rect.height * imageAspect;
+      offsetX = (rect.width - renderedWidth) / 2;
+      offsetY = 0;
+    }
+    
+    const bounds = {
+      offsetX,
+      offsetY,
+      renderedWidth,
+      renderedHeight,
+      scaleX: newDimensions.width / renderedWidth,
+      scaleY: newDimensions.height / renderedHeight,
+    };
+    setCachedBounds(bounds);
+    
     // If forceDefaultCrop is set (e.g., after expansion), use defaults regardless of saved data
     const shouldUseDefault = forceDefaultCrop || 
       currentImage?.head_crop_x === null || 
@@ -163,16 +202,13 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!containerRef.current || !imageRef.current) return;
-    
-    const bounds = getImageBounds();
-    if (!bounds) return;
+    if (!containerRef.current || !imageRef.current || !cachedBounds) return;
     
     const rect = imageRef.current.getBoundingClientRect();
     
-    // Convert client coordinates to image coordinates, accounting for letterboxing
-    const x = (e.clientX - rect.left - bounds.offsetX) * bounds.scaleX;
-    const y = (e.clientY - rect.top - bounds.offsetY) * bounds.scaleY;
+    // Convert client coordinates to image coordinates using CACHED bounds
+    const x = (e.clientX - rect.left - cachedBounds.offsetX) * cachedBounds.scaleX;
+    const y = (e.clientY - rect.top - cachedBounds.offsetY) * cachedBounds.scaleY;
     
     // Check if clicking inside crop box
     if (
@@ -188,18 +224,15 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
 
   const handleCornerMouseDown = (e: React.MouseEvent, corner: 'nw' | 'ne' | 'sw' | 'se') => {
     e.stopPropagation();
-    if (!imageRef.current) return;
-    
-    const bounds = getImageBounds();
-    if (!bounds) return;
+    if (!imageRef.current || !cachedBounds) return;
     
     const rect = imageRef.current.getBoundingClientRect();
     
     setIsResizing(true);
     setResizeCorner(corner);
     setResizeStart({
-      x: (e.clientX - rect.left - bounds.offsetX) * bounds.scaleX,
-      y: (e.clientY - rect.top - bounds.offsetY) * bounds.scaleY,
+      x: (e.clientX - rect.left - cachedBounds.offsetX) * cachedBounds.scaleX,
+      y: (e.clientY - rect.top - cachedBounds.offsetY) * cachedBounds.scaleY,
       cropX: cropBox.x,
       cropY: cropBox.y,
       cropWidth: cropBox.width,
@@ -208,15 +241,13 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!imageRef.current) return;
-    
-    const bounds = getImageBounds();
-    if (!bounds) return;
+    if (!imageRef.current || !cachedBounds) return;
     
     const rect = imageRef.current.getBoundingClientRect();
     
-    const x = (e.clientX - rect.left - bounds.offsetX) * bounds.scaleX;
-    const y = (e.clientY - rect.top - bounds.offsetY) * bounds.scaleY;
+    // Use CACHED bounds for consistent coordinate conversion
+    const x = (e.clientX - rect.left - cachedBounds.offsetX) * cachedBounds.scaleX;
+    const y = (e.clientY - rect.top - cachedBounds.offsetY) * cachedBounds.scaleY;
     
     if (isResizing && resizeCorner) {
       const deltaX = x - resizeStart.x;
@@ -454,16 +485,15 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
 
   const allCropped = sourceImages.every((img) => img.head_cropped_url);
 
-  // Calculate crop box position accounting for letterboxing
+  // Calculate crop box position using CACHED bounds for consistency
   const getCropStyle = () => {
-    const bounds = getImageBounds();
-    if (!bounds) return {};
+    if (!cachedBounds) return {};
     
     return {
-      left: bounds.offsetX + cropBox.x / bounds.scaleX,
-      top: bounds.offsetY + cropBox.y / bounds.scaleY,
-      width: cropBox.width / bounds.scaleX,
-      height: cropBox.height / bounds.scaleY,
+      left: cachedBounds.offsetX + cropBox.x / cachedBounds.scaleX,
+      top: cachedBounds.offsetY + cropBox.y / cachedBounds.scaleY,
+      width: cropBox.width / cachedBounds.scaleX,
+      height: cropBox.height / cachedBounds.scaleY,
     };
   };
 
