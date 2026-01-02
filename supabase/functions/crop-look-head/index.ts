@@ -8,11 +8,11 @@ const corsHeaders = {
 
 interface CropRequest {
   imageUrl: string;
-  cropX: number;
-  cropY: number;
-  cropWidth: number;
-  cropHeight: number;
-  outputSize: number;
+  cropX: number;      // Pixel X position of selection
+  cropY: number;      // Pixel Y position of selection
+  cropWidth: number;  // Pixel width of selection
+  cropHeight: number; // Pixel height of selection
+  outputSize: number; // Target output size (e.g., 1000)
   imageId: string;
 }
 
@@ -24,14 +24,14 @@ serve(async (req) => {
   try {
     const { imageUrl, cropX, cropY, cropWidth, cropHeight, outputSize, imageId }: CropRequest = await req.json();
 
-    console.log(`Processing crop for image ${imageId}: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY})`);
+    console.log(`Processing crop for image ${imageId}: selection ${cropWidth}x${cropHeight} at (${cropX}, ${cropY})`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch the original image
+    // Fetch the original image to get dimensions
     const imageResponse = await fetch(imageUrl);
     if (!imageResponse.ok) {
       throw new Error(`Failed to fetch image: ${imageResponse.status}`);
@@ -49,31 +49,16 @@ serve(async (req) => {
 
     console.log(`Original image: ${dimensions.width}x${dimensions.height}`);
 
-    // NEW LOGIC: The user's crop box represents the BOTTOM HALF of the final output
-    // We need to expand upward by the same height to create the full square
-    
-    // Calculate the expanded region (double the height, going upward)
-    const expandedHeight = cropHeight * 2;
-    const expandedY = Math.max(0, cropY - cropHeight); // Move up by cropHeight
-    
-    // How much actual space we got from the image above the selection
-    const actualTopSpace = cropY - expandedY;
-    
-    console.log(`Expanded region: starting at Y=${expandedY}, height=${expandedHeight}, actualTopSpace=${actualTopSpace}`);
-
-    // Calculate crop percentages for the expanded region
+    // Convert pixel coordinates to percentages for crop-and-store-image
     const cropXPercent = (cropX / dimensions.width) * 100;
-    const cropYPercent = (expandedY / dimensions.height) * 100;
+    const cropYPercent = (cropY / dimensions.height) * 100;
     const cropWidthPercent = (cropWidth / dimensions.width) * 100;
-    
-    // If we have enough space above, use the full expanded height
-    // If not, we take what we can and the crop-and-store will handle it
-    const effectiveHeight = Math.min(expandedHeight, dimensions.height - expandedY);
-    const cropHeightPercent = (effectiveHeight / dimensions.height) * 100;
-    
+    const cropHeightPercent = (cropHeight / dimensions.height) * 100;
+
     console.log(`Crop percentages: x=${cropXPercent}%, y=${cropYPercent}%, w=${cropWidthPercent}%, h=${cropHeightPercent}%`);
 
-    // Call crop-and-store-image with the expanded region
+    // Call crop-and-store-image with the selection coordinates
+    // Using 'bottom-half' mode: the selection becomes the bottom half of the output
     const cropResponse = await supabase.functions.invoke("crop-and-store-image", {
       body: {
         imageUrl,
@@ -82,7 +67,8 @@ serve(async (req) => {
         cropWidth: cropWidthPercent,
         cropHeight: cropHeightPercent,
         cropId: `look-head-${imageId}`,
-        targetSize: outputSize || 1000, // Target 1000x1000 output
+        targetSize: outputSize,
+        mode: 'bottom-half', // Selection goes in bottom half, top half is white
       },
     });
 

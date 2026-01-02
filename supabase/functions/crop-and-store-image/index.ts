@@ -13,6 +13,8 @@ interface CropRequest {
   cropWidth: number;  // percentage 0-100
   cropHeight: number; // percentage 0-100
   cropId: string;     // UUID for naming the file
+  targetSize?: number; // Optional target output size (e.g., 1000 for 1000x1000)
+  mode?: 'bottom-half'; // If set, the cropped content goes in the bottom half with white padding above
 }
 
 serve(async (req) => {
@@ -21,10 +23,11 @@ serve(async (req) => {
   }
 
   try {
-    const { imageUrl, cropX, cropY, cropWidth, cropHeight, cropId } = await req.json() as CropRequest;
+    const { imageUrl, cropX, cropY, cropWidth, cropHeight, cropId, targetSize, mode } = await req.json() as CropRequest;
 
     console.log(`Cropping image: ${imageUrl}`);
     console.log(`Crop params: x=${cropX}%, y=${cropY}%, w=${cropWidth}%, h=${cropHeight}%`);
+    console.log(`Mode: ${mode || 'standard'}, Target size: ${targetSize || 'none'}`);
 
     // Fetch the original image
     const imageResponse = await fetch(imageUrl);
@@ -37,19 +40,6 @@ serve(async (req) => {
     const imageBytes = new Uint8Array(imageBuffer);
 
     // Decode image to get dimensions
-    // We'll use the ImageMagick approach via a web service or decode manually
-    // For simplicity, we'll use a canvas-like approach with sharp-like processing
-    
-    // Since Deno doesn't have native canvas, we'll use the image dimensions from headers
-    // or decode the image. Let's use a simpler approach - use the Lovable AI gateway
-    // to process the image, or use a pure TypeScript image library.
-    
-    // Alternative approach: Use ImageMagick via Deno FFI or a hosted service
-    // For now, let's use the browser-based approach and call from frontend instead
-    
-    // Actually, let's decode PNG/JPEG headers to get dimensions, then use 
-    // a streaming crop approach
-    
     const dimensions = getImageDimensions(imageBytes);
     if (!dimensions) {
       throw new Error('Could not determine image dimensions');
@@ -65,11 +55,7 @@ serve(async (req) => {
 
     console.log(`Crop pixels: x=${pixelX}, y=${pixelY}, w=${pixelWidth}, h=${pixelHeight}`);
 
-    // Use ImageMagick via subprocess (available in Deno Deploy)
-    // Actually Deno Deploy doesn't have ImageMagick, so we need another approach
-    
-    // Let's use a pure JS/TS image processing library
-    // We'll use the 'imagescript' library which works in Deno
+    // Use imagescript for image processing
     const { Image } = await import("https://deno.land/x/imagescript@1.3.0/mod.ts");
     
     const image = await Image.decode(imageBytes);
@@ -82,11 +68,40 @@ serve(async (req) => {
 
     console.log(`Safe crop: x=${safeX}, y=${safeY}, w=${safeWidth}, h=${safeHeight}`);
 
-    // Crop the image
-    const croppedImage = image.crop(safeX, safeY, safeWidth, safeHeight);
+    let outputImage;
+
+    if (mode === 'bottom-half' && targetSize) {
+      // Mode: Selection goes in bottom half, top half is white padding
+      console.log(`Bottom-half mode: creating ${targetSize}x${targetSize} output with selection in bottom half`);
+      
+      // Crop the selected region (green box)
+      const croppedRegion = image.crop(safeX, safeY, safeWidth, safeHeight);
+      
+      // Scale the cropped region to fit the bottom half (targetSize x targetSize/2)
+      const halfHeight = Math.floor(targetSize / 2);
+      const scaledCrop = croppedRegion.resize(targetSize, halfHeight);
+      
+      // Create output canvas filled with white
+      outputImage = new Image(targetSize, targetSize);
+      outputImage.fill(0xFFFFFFFF); // White (RGBA)
+      
+      // Composite the scaled crop onto the BOTTOM half
+      outputImage.composite(scaledCrop, 0, halfHeight);
+      
+      console.log(`Created ${targetSize}x${targetSize} output with head in bottom half`);
+    } else {
+      // Standard mode: just crop
+      const croppedImage = image.crop(safeX, safeY, safeWidth, safeHeight);
+      
+      if (targetSize) {
+        outputImage = croppedImage.resize(targetSize, targetSize);
+      } else {
+        outputImage = croppedImage;
+      }
+    }
     
     // Encode as PNG
-    const croppedBytes = await croppedImage.encode();
+    const croppedBytes = await outputImage.encode();
 
     // Upload to Supabase storage
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -120,7 +135,7 @@ serve(async (req) => {
         croppedUrl,
         dimensions: {
           original: { width: dimensions.width, height: dimensions.height },
-          cropped: { width: safeWidth, height: safeHeight }
+          cropped: { width: outputImage.width, height: outputImage.height }
         }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
