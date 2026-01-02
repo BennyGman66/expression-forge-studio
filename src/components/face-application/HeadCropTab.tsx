@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage } from "@/types/face-application";
 
@@ -312,6 +312,55 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
     }
   };
 
+  const handleResetCrop = async () => {
+    if (!currentImage) return;
+    
+    try {
+      // Clear crop data in database
+      await supabase
+        .from("look_source_images")
+        .update({
+          head_crop_x: null,
+          head_crop_y: null,
+          head_crop_width: null,
+          head_crop_height: null,
+          head_cropped_url: null,
+        })
+        .eq("id", currentImage.id);
+
+      // Update local state
+      setSourceImages((prev) =>
+        prev.map((img) =>
+          img.id === currentImage.id
+            ? {
+                ...img,
+                head_crop_x: null,
+                head_crop_y: null,
+                head_crop_width: null,
+                head_crop_height: null,
+                head_cropped_url: null,
+              }
+            : img
+        )
+      );
+
+      // Reset crop box to default
+      if (imageDimensions.width) {
+        const defaultWidth = Math.min(imageDimensions.width * 0.4, 400);
+        setCropBox({
+          x: (imageDimensions.width - defaultWidth) / 2,
+          y: 20,
+          width: defaultWidth,
+          height: defaultWidth,
+        });
+      }
+
+      toast({ title: "Crop reset", description: "You can now redo the crop." });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
+
   const handleExpandImage = async () => {
     if (!currentImage) return;
     setExpanding(true);
@@ -546,9 +595,21 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
 
                 {/* Preview of Full Output */}
                 <div className="mt-4">
-                  <p className="text-sm font-medium mb-2">
-                    {currentImage.head_cropped_url ? "Saved Result" : "Live Preview"} ({OUTPUT_SIZE}×{OUTPUT_SIZE} output):
-                  </p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium">
+                      {currentImage.head_cropped_url ? "Saved Result" : "Live Preview"} ({OUTPUT_SIZE}×{OUTPUT_SIZE} output):
+                    </p>
+                    {currentImage.head_cropped_url && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleResetCrop}
+                      >
+                        <RotateCcw className="h-3 w-3 mr-1" />
+                        Reset Crop
+                      </Button>
+                    )}
+                  </div>
                   <div className="relative w-40 h-40 overflow-hidden rounded border bg-white">
                     {currentImage.head_cropped_url ? (
                       <img
