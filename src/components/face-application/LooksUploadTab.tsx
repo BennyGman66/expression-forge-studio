@@ -273,6 +273,26 @@ export function LooksUploadTab({
                     </Button>
                   </div>
                 )}
+
+                {/* Quick-access look tabs */}
+                {looks.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <Label className="text-xs text-muted-foreground mb-2 block">Quick Access</Label>
+                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
+                      {looks.map((look) => (
+                        <Button
+                          key={look.id}
+                          variant={selectedLookId === look.id ? "default" : "outline"}
+                          size="sm"
+                          className="whitespace-nowrap flex-shrink-0"
+                          onClick={() => setSelectedLookId(look.id)}
+                        >
+                          {look.name}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
