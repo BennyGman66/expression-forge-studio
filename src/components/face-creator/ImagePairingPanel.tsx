@@ -405,6 +405,80 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setIsLoading(true);
 
     try {
+      // First, collect all images and check for missing cropped files
+      const allImages: Array<{scrapeImageId: string, cropId?: string, cropData?: any, sourceUrl: string}> = [];
+      
+      for (const queuedPairing of pairingQueue) {
+        for (const image of queuedPairing.identity.images) {
+          // Get the crop data for this image
+          const { data: cropData } = await supabase
+            .from('face_crops')
+            .select('id, crop_x, crop_y, crop_width, crop_height, cropped_stored_url')
+            .eq('scrape_image_id', image.scrape_image_id)
+            .maybeSingle();
+          
+          // Get the source image URL
+          const { data: imageData } = await supabase
+            .from('face_scrape_images')
+            .select('stored_url, source_url')
+            .eq('id', image.scrape_image_id)
+            .single();
+          
+          allImages.push({
+            scrapeImageId: image.scrape_image_id,
+            cropId: cropData?.id,
+            cropData: cropData,
+            sourceUrl: imageData?.stored_url || imageData?.source_url || ''
+          });
+        }
+      }
+      
+      // Check for missing cropped files
+      const imagesMissingCrops = allImages.filter(img => img.cropData && !img.cropData.cropped_stored_url);
+      
+      if (imagesMissingCrops.length > 0) {
+        toast.info(`Generating ${imagesMissingCrops.length} missing crop files...`);
+        
+        let generated = 0;
+        for (const img of imagesMissingCrops) {
+          if (!img.cropData) continue;
+          
+          try {
+            const { data: cropResult, error: cropError } = await supabase.functions.invoke('crop-and-store-image', {
+              body: {
+                imageUrl: img.sourceUrl,
+                cropX: img.cropData.crop_x,
+                cropY: img.cropData.crop_y,
+                cropWidth: img.cropData.crop_width,
+                cropHeight: img.cropData.crop_height,
+                cropId: img.cropId,
+              }
+            });
+            
+            if (cropError) {
+              console.error(`Failed to crop image ${img.scrapeImageId}:`, cropError);
+              continue;
+            }
+            
+            if (cropResult?.success && cropResult.croppedUrl) {
+              // Update the crop record with the new URL
+              await supabase
+                .from('face_crops')
+                .update({ cropped_stored_url: cropResult.croppedUrl })
+                .eq('id', img.cropId);
+              
+              generated++;
+            }
+          } catch (err) {
+            console.error(`Error generating crop for ${img.scrapeImageId}:`, err);
+          }
+        }
+        
+        if (generated > 0) {
+          toast.success(`Generated ${generated} crop files`);
+        }
+      }
+
       // Create job
       const { data: job, error: jobError } = await supabase
         .from('face_pairing_jobs')
