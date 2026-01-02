@@ -286,44 +286,22 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
     };
   };
 
-  // Calculate expanded area (crop box = bottom half, equal space above)
-  const getExpandedAreaStyle = () => {
-    if (!imageRef.current || !imageDimensions.width) return null;
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = rect.width / imageDimensions.width;
-    const scaleY = rect.height / imageDimensions.height;
-    
-    // Expanded area starts at cropBox.y - cropBox.height (or 0 if not enough space)
-    const expandedY = Math.max(0, cropBox.y - cropBox.height);
-    const expandedHeight = cropBox.height * 2;
-    
-    return {
-      left: cropBox.x * scaleX,
-      top: expandedY * scaleY,
-      width: cropBox.width * scaleX,
-      height: expandedHeight * scaleY,
-      // For live preview calculations
-      expandedY,
-      expandedHeight,
-    };
-  };
-
-  // Calculate live preview transform
+  // The live preview shows: top half = white, bottom half = the selection
+  // This matches the actual output from the edge function
   const getLivePreviewStyle = () => {
     if (!imageDimensions.width || !cropBox.width) return null;
     
-    const expandedY = Math.max(0, cropBox.y - cropBox.height);
-    const expandedHeight = cropBox.height * 2;
-    
     // Preview container is 160x160 (w-40 h-40)
-    const previewSize = 160;
+    // Bottom half shows the selection scaled to 160x80
+    const previewWidth = 160;
+    const previewBottomHalfHeight = 80;
     
-    // Scale factor: how much to scale the source image
-    const scale = previewSize / cropBox.width; // Use cropBox.width since final output is square
+    // Scale the source image so the selection width fits the preview width
+    const scale = previewWidth / cropBox.width;
     
-    // Position offset to show the expanded region
+    // Position offset to show only the selection in the bottom half
     const left = -cropBox.x * scale;
-    const top = -expandedY * scale;
+    const top = -cropBox.y * scale;
     
     return {
       width: imageDimensions.width * scale,
@@ -444,18 +422,7 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
                     onLoad={handleImageLoad}
                     draggable={false}
                   />
-                  {/* Expanded area indicator (dashed blue box showing full output) */}
-                  {getExpandedAreaStyle() && (
-                    <div
-                      className="absolute border-2 border-dashed border-blue-400/60 pointer-events-none"
-                      style={{
-                        left: getExpandedAreaStyle()!.left,
-                        top: getExpandedAreaStyle()!.top,
-                        width: getExpandedAreaStyle()!.width,
-                        height: getExpandedAreaStyle()!.height,
-                      }}
-                    />
-                  )}
+                  {/* No expanded area indicator needed - the selection IS the bottom half */}
                   {/* Crop overlay (green box = bottom half of output) */}
                   <div
                     className="absolute border-2 border-green-500 bg-green-500/10 cursor-move"
@@ -481,34 +448,36 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
 
                 <div className="flex justify-between items-center">
                   <p className="text-sm text-muted-foreground">
-                    <span className="text-green-600 font-medium">Green box</span> = bottom half of output. 
-                    Equal space above (blue dashed) will be included. Output: {OUTPUT_SIZE}×{OUTPUT_SIZE}px
+                    <span className="text-green-600 font-medium">Green box</span> = your selection (becomes bottom half). 
+                    Top half will be white padding. Output: {OUTPUT_SIZE}×{OUTPUT_SIZE}px
                   </p>
                   <Button onClick={handleApplyCrop} disabled={processing}>
                     {processing ? "Processing..." : "Apply Crop"}
                   </Button>
                 </div>
 
-                {/* Live Preview of Full Output */}
+                {/* Live Preview of Full Output: white top half, selection bottom half */}
                 <div className="mt-4">
                   <p className="text-sm font-medium mb-2">Live Preview ({OUTPUT_SIZE}×{OUTPUT_SIZE} output):</p>
-                  <div 
-                    className="relative w-40 h-40 overflow-hidden rounded border bg-white"
-                  >
-                    {getLivePreviewStyle() && (
-                      <img
-                        src={currentImage.source_url}
-                        alt="Live preview"
-                        className="absolute"
-                        style={{
-                          width: getLivePreviewStyle()!.width,
-                          height: getLivePreviewStyle()!.height,
-                          left: getLivePreviewStyle()!.left,
-                          top: getLivePreviewStyle()!.top,
-                        }}
-                        draggable={false}
-                      />
-                    )}
+                  <div className="relative w-40 h-40 overflow-hidden rounded border bg-white">
+                    {/* Top half is white (inherent from bg-white) */}
+                    {/* Bottom half shows the selection */}
+                    <div className="absolute bottom-0 left-0 right-0 h-1/2 overflow-hidden">
+                      {getLivePreviewStyle() && (
+                        <img
+                          src={currentImage.source_url}
+                          alt="Live preview"
+                          className="absolute"
+                          style={{
+                            width: getLivePreviewStyle()!.width,
+                            height: getLivePreviewStyle()!.height,
+                            left: getLivePreviewStyle()!.left,
+                            top: getLivePreviewStyle()!.top,
+                          }}
+                          draggable={false}
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
