@@ -83,22 +83,28 @@ serve(async (req) => {
     let outputImage;
 
     if (mode === 'bottom-half' && targetSize) {
-      // SIMPLE STRATEGY:
-      // 1. Crop ONLY the green box selection from the image
-      // 2. Scale it to 1000x500 (full width, half height)
+      // FIXED STRATEGY (preserves aspect ratio):
+      // 1. Crop the green box selection (1:1 aspect ratio)
+      // 2. Scale it to 500x500 (half the target size, preserving 1:1)
       // 3. Create 1000x1000 white canvas
-      // 4. Place scaled selection in bottom 500px
+      // 4. Place 500x500 selection centered in the bottom half
       
-      console.log(`Bottom-half mode: selection becomes bottom half, top half is white`);
+      console.log(`Bottom-half mode: selection goes in bottom half, preserving aspect ratio`);
       
       // 1. Crop just the green box selection
       const croppedSelection = image.crop(safeX, safeY, safeWidth, safeHeight);
       console.log(`Cropped selection: ${croppedSelection.width}x${croppedSelection.height}`);
       
-      // 2. Scale the selection to fill the bottom half (full width, half height)
-      const halfHeight = Math.floor(targetSize / 2);
-      const scaledSelection = croppedSelection.resize(targetSize, halfHeight);
-      console.log(`Scaled to: ${scaledSelection.width}x${scaledSelection.height}`);
+      // 2. Scale to fit in bottom half while preserving aspect ratio
+      const halfSize = Math.floor(targetSize / 2);
+      const scaleX = halfSize / croppedSelection.width;
+      const scaleY = halfSize / croppedSelection.height;
+      const scale = Math.min(scaleX, scaleY);
+      
+      const scaledWidth = Math.round(croppedSelection.width * scale);
+      const scaledHeight = Math.round(croppedSelection.height * scale);
+      const scaledSelection = croppedSelection.resize(scaledWidth, scaledHeight);
+      console.log(`Scaled to: ${scaledSelection.width}x${scaledSelection.height} (preserving aspect ratio)`);
       
       // 3. Create 1000x1000 output canvas with white background
       outputImage = new Image(targetSize, targetSize);
@@ -108,10 +114,12 @@ serve(async (req) => {
         }
       }
       
-      // 4. Composite the scaled selection at the BOTTOM (y = halfHeight)
-      outputImage.composite(scaledSelection, 0, halfHeight);
+      // 4. Center horizontally and align to bottom
+      const offsetX = Math.floor((targetSize - scaledWidth) / 2);
+      const offsetY = targetSize - scaledHeight; // Align to bottom edge
+      outputImage.composite(scaledSelection, offsetX, offsetY);
       
-      console.log(`Final output: ${outputImage.width}x${outputImage.height} (top ${halfHeight}px white, bottom ${halfHeight}px = selection)`);
+      console.log(`Final output: ${outputImage.width}x${outputImage.height} (selection at x=${offsetX}, y=${offsetY})`);
     } else {
       // Standard mode: just crop
       const croppedImage = image.crop(safeX, safeY, safeWidth, safeHeight);
