@@ -321,9 +321,8 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
           cropY: (cropBox.y / imageDimensions.height) * 100,
           cropWidth: (cropBox.width / imageDimensions.width) * 100,
           cropHeight: (cropBox.height / imageDimensions.height) * 100,
-          outputSize: OUTPUT_SIZE,
-          bucketName: "face-crops",
-          fileName: `look-head-${currentImage.id}.png`,
+          targetSize: OUTPUT_SIZE,
+          cropId: `look-head-${currentImage.id}`,
         },
       });
 
