@@ -456,28 +456,37 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
                   </Button>
                 </div>
 
-                {/* Live Preview of Full Output: white top half, selection bottom half */}
+                {/* Preview of Full Output */}
                 <div className="mt-4">
-                  <p className="text-sm font-medium mb-2">Live Preview ({OUTPUT_SIZE}×{OUTPUT_SIZE} output):</p>
+                  <p className="text-sm font-medium mb-2">
+                    {currentImage.head_cropped_url ? "Saved Result" : "Live Preview"} ({OUTPUT_SIZE}×{OUTPUT_SIZE} output):
+                  </p>
                   <div className="relative w-40 h-40 overflow-hidden rounded border bg-white">
-                    {/* Top half is white (inherent from bg-white) */}
-                    {/* Bottom half shows the selection */}
-                    <div className="absolute bottom-0 left-0 right-0 h-1/2 overflow-hidden">
-                      {getLivePreviewStyle() && (
-                        <img
-                          src={currentImage.source_url}
-                          alt="Live preview"
-                          className="absolute"
-                          style={{
-                            width: getLivePreviewStyle()!.width,
-                            height: getLivePreviewStyle()!.height,
-                            left: getLivePreviewStyle()!.left,
-                            top: getLivePreviewStyle()!.top,
-                          }}
-                          draggable={false}
-                        />
-                      )}
-                    </div>
+                    {currentImage.head_cropped_url ? (
+                      <img
+                        src={currentImage.head_cropped_url}
+                        alt="Cropped result"
+                        className="w-full h-full object-contain"
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className="absolute bottom-0 left-0 right-0 h-1/2 overflow-hidden">
+                        {getLivePreviewStyle() && (
+                          <img
+                            src={currentImage.source_url}
+                            alt="Live preview"
+                            className="absolute"
+                            style={{
+                              width: getLivePreviewStyle()!.width,
+                              height: getLivePreviewStyle()!.height,
+                              left: getLivePreviewStyle()!.left,
+                              top: getLivePreviewStyle()!.top,
+                            }}
+                            draggable={false}
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
