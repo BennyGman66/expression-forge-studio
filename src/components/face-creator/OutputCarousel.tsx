@@ -50,6 +50,7 @@ interface OutputCarouselProps {
   talentAvatar?: string;
   isRegenerating?: boolean;
   generatingMore?: boolean;
+  generatingCount?: number;
 }
 
 export function OutputCarousel({
@@ -65,6 +66,7 @@ export function OutputCarousel({
   talentAvatar,
   isRegenerating = false,
   generatingMore = false,
+  generatingCount = 0,
 }: OutputCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isAddingToFoundation, setIsAddingToFoundation] = useState(false);
@@ -318,8 +320,18 @@ export function OutputCarousel({
               <Check className="h-3 w-3 text-primary-foreground" />
             </div>
           )}
+
+          {/* Generating more overlay - shows on top of existing image */}
+          {generatingMore && (
+            <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-30">
+              <LeapfrogLoader 
+                message={`Generating +${generatingCount}...`} 
+                size="md" 
+              />
+            </div>
+          )}
         </>
-      ) : isRegenerating || currentVariation.status === "running" || generatingMore ? (
+      ) : isRegenerating || currentVariation.status === "running" ? (
         <div className="w-full h-full flex flex-col items-center justify-center bg-muted/50">
           <LeapfrogLoader message={generatingMore ? "Generating..." : isRegenerating ? "Regenerating..." : "Generating..."} size="md" />
         </div>

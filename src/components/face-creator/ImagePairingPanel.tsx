@@ -1457,8 +1457,8 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
   // Regenerating outputs state
   const [regeneratingOutputs, setRegeneratingOutputs] = useState<Set<string>>(new Set());
   
-  // Generating more outputs state (per pairing)
-  const [generatingMorePairings, setGeneratingMorePairings] = useState<Set<string>>(new Set());
+  // Generating more outputs state (per pairing) - Map tracks count being generated
+  const [generatingMorePairings, setGeneratingMorePairings] = useState<Map<string, number>>(new Map());
 
   // Regenerate an output
   const regenerateOutput = async (outputId: string) => {
@@ -1497,7 +1497,7 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
 
   // Generate more variations for a pairing
   const generateMoreOutputs = async (pairingId: string, count: number) => {
-    setGeneratingMorePairings(prev => new Set(prev).add(pairingId));
+    setGeneratingMorePairings(prev => new Map(prev).set(pairingId, count));
     toast.info(`Generating ${count} more variation${count > 1 ? 's' : ''}...`);
     
     try {
@@ -1516,7 +1516,7 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
       toast.error('Failed to generate more variations');
     } finally {
       setGeneratingMorePairings(prev => {
-        const next = new Set(prev);
+        const next = new Map(prev);
         next.delete(pairingId);
         return next;
       });
@@ -1823,6 +1823,7 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
                           onGenerateMore={generateMoreOutputs}
                           isRegenerating={pairingOutputs.some(o => regeneratingOutputs.has(o.id))}
                           generatingMore={generatingMorePairings.has(pairing.id)}
+                          generatingCount={generatingMorePairings.get(pairing.id) || 0}
                           sourcePreview={
                             <div className="w-8 h-10 rounded overflow-hidden bg-muted/20">
                               {croppedUrl ? (
