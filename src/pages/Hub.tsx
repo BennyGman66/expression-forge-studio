@@ -1,31 +1,16 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
-import { Grid3X3, Users, ExternalLink, User, Flag } from "lucide-react";
+import { Grid3X3, Users, ExternalLink, User } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const apps = [
-  {
-    id: "tommy-hilfiger",
-    title: "Tommy Hilfiger - Self Serve Beta Test",
-    description: "Self serve beta testing workspace.",
-    icon: Flag,
-    path: "/tommy-hilfiger",
-    disabled: false,
-  },
+const generalApps = [
   {
     id: "expression-map",
     title: "Expression Map",
     description: "Extract and generate expression recipes at scale.",
     icon: Grid3X3,
     path: "/expression-map",
-    disabled: false,
-  },
-  {
-    id: "avatar-repose",
-    title: "Avatar Repose",
-    description: "Ingest open poses, generate clay poses, transfer to digital talent.",
-    icon: Users,
-    path: "/avatar-repose",
-    disabled: false,
   },
   {
     id: "digital-talent",
@@ -33,7 +18,6 @@ const apps = [
     description: "Manage digital talent identities and track their usage.",
     icon: User,
     path: "/digital-talent",
-    disabled: false,
   },
   {
     id: "external",
@@ -41,15 +25,17 @@ const apps = [
     description: "Share curated selections with clients for review.",
     icon: ExternalLink,
     path: "/external",
-    disabled: false,
   },
+];
+
+const avatarToPdpApps = [
   {
     id: "talent-face-library",
     title: "Talent Face Library",
     description: "Build reference face datasets per digital talent.",
     icon: Grid3X3,
     path: "/face-creator",
-    disabled: false,
+    stepNumber: 1,
   },
   {
     id: "face-application",
@@ -57,17 +43,24 @@ const apps = [
     description: "Apply digital talent faces to look imagery.",
     icon: Users,
     path: "/face-application",
-    disabled: false,
+    stepNumber: 2,
+  },
+  {
+    id: "avatar-repose",
+    title: "Avatar Repose",
+    description: "Ingest open poses, generate clay poses, transfer to digital talent.",
+    icon: Users,
+    path: "/avatar-repose",
+    stepNumber: 3,
   },
 ];
 
 export default function Hub() {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState("general");
 
-  const handleAppClick = (app: typeof apps[0]) => {
-    if (app.path && !app.disabled) {
-      navigate(app.path);
-    }
+  const handleAppClick = (path: string) => {
+    navigate(path);
   };
 
   return (
@@ -75,19 +68,49 @@ export default function Hub() {
       <HubHeader />
 
       <main className="px-6 py-8">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-          {apps.map((app) => (
-            <button
-              key={app.id}
-              onClick={() => handleAppClick(app)}
-              disabled={app.disabled}
-              className={`app-card text-left ${app.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              <h3 className="app-card-title">{app.title}</h3>
-              <p className="app-card-description">{app.description}</p>
-            </button>
-          ))}
-        </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="mb-6">
+            <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="avatar-to-pdp">Avatar to PDP</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="general">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {generalApps.map((app) => (
+                <button
+                  key={app.id}
+                  onClick={() => handleAppClick(app.path)}
+                  className="app-card text-left"
+                >
+                  <h3 className="app-card-title">{app.title}</h3>
+                  <p className="app-card-description">{app.description}</p>
+                </button>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="avatar-to-pdp">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {avatarToPdpApps.map((app) => (
+                <button
+                  key={app.id}
+                  onClick={() => handleAppClick(app.path)}
+                  className="app-card text-left relative"
+                >
+                  <div className="absolute top-4 left-4 w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <span className="text-xl font-serif font-medium text-primary">
+                      {app.stepNumber}
+                    </span>
+                  </div>
+                  <div className="pt-12">
+                    <h3 className="app-card-title">{app.title}</h3>
+                    <p className="app-card-description">{app.description}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   );
