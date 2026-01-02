@@ -19,6 +19,9 @@ export function HeadCropTab({ lookId, onContinue }: HeadCropTabProps) {
   const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 200, height: 200 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeCorner, setResizeCorner] = useState<'nw' | 'ne' | 'sw' | 'se' | null>(null);
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, cropX: 0, cropY: 0, cropWidth: 0, cropHeight: 0 });
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [processing, setProcessing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -90,8 +93,28 @@ export function HeadCropTab({ lookId, onContinue }: HeadCropTabProps) {
     }
   };
 
+  const handleCornerMouseDown = (e: React.MouseEvent, corner: 'nw' | 'ne' | 'sw' | 'se') => {
+    e.stopPropagation();
+    if (!imageRef.current) return;
+    
+    const rect = imageRef.current.getBoundingClientRect();
+    const scaleX = imageDimensions.width / rect.width;
+    const scaleY = imageDimensions.height / rect.height;
+    
+    setIsResizing(true);
+    setResizeCorner(corner);
+    setResizeStart({
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+      cropX: cropBox.x,
+      cropY: cropBox.y,
+      cropWidth: cropBox.width,
+      cropHeight: cropBox.height,
+    });
+  };
+
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !imageRef.current) return;
+    if (!imageRef.current) return;
     
     const rect = imageRef.current.getBoundingClientRect();
     const scaleX = imageDimensions.width / rect.width;
@@ -100,18 +123,61 @@ export function HeadCropTab({ lookId, onContinue }: HeadCropTabProps) {
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
     
-    let newX = x - dragStart.x;
-    let newY = y - dragStart.y;
+    if (isResizing && resizeCorner) {
+      const deltaX = x - resizeStart.x;
+      const deltaY = y - resizeStart.y;
+      
+      let newX = resizeStart.cropX;
+      let newY = resizeStart.cropY;
+      let newSize = resizeStart.cropWidth;
+      
+      // Use the larger delta to maintain 1:1 aspect ratio
+      const delta = Math.abs(deltaX) > Math.abs(deltaY) ? deltaX : deltaY;
+      
+      switch (resizeCorner) {
+        case 'se':
+          newSize = Math.max(50, resizeStart.cropWidth + delta);
+          break;
+        case 'sw':
+          newSize = Math.max(50, resizeStart.cropWidth - delta);
+          newX = resizeStart.cropX + resizeStart.cropWidth - newSize;
+          break;
+        case 'ne':
+          newSize = Math.max(50, resizeStart.cropWidth + delta);
+          newY = resizeStart.cropY + resizeStart.cropHeight - newSize;
+          break;
+        case 'nw':
+          newSize = Math.max(50, resizeStart.cropWidth - delta);
+          newX = resizeStart.cropX + resizeStart.cropWidth - newSize;
+          newY = resizeStart.cropY + resizeStart.cropHeight - newSize;
+          break;
+      }
+      
+      // Constrain to image bounds
+      newX = Math.max(0, newX);
+      newY = Math.max(0, newY);
+      newSize = Math.min(newSize, imageDimensions.width - newX, imageDimensions.height - newY);
+      
+      setCropBox({ x: newX, y: newY, width: newSize, height: newSize });
+      return;
+    }
     
-    // Constrain to image bounds
-    newX = Math.max(0, Math.min(newX, imageDimensions.width - cropBox.width));
-    newY = Math.max(0, Math.min(newY, imageDimensions.height - cropBox.height));
-    
-    setCropBox((prev) => ({ ...prev, x: newX, y: newY }));
+    if (isDragging) {
+      let newX = x - dragStart.x;
+      let newY = y - dragStart.y;
+      
+      // Constrain to image bounds
+      newX = Math.max(0, Math.min(newX, imageDimensions.width - cropBox.width));
+      newY = Math.max(0, Math.min(newY, imageDimensions.height - cropBox.height));
+      
+      setCropBox((prev) => ({ ...prev, x: newX, y: newY }));
+    }
   };
 
   const handleMouseUp = () => {
     setIsDragging(false);
+    setIsResizing(false);
+    setResizeCorner(null);
   };
 
   const handleApplyCrop = async () => {
@@ -289,12 +355,28 @@ export function HeadCropTab({ lookId, onContinue }: HeadCropTabProps) {
                   <div
                     className="absolute border-2 border-green-500 bg-green-500/10 cursor-move"
                     style={getCropStyle()}
-                  />
+                  >
+                    {/* Corner resize handles */}
+                    {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+                      <div
+                        key={corner}
+                        className="absolute w-3 h-3 bg-green-500 border-2 border-white rounded-full shadow-sm"
+                        style={{
+                          cursor: corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize',
+                          top: corner.includes('n') ? -6 : undefined,
+                          bottom: corner.includes('s') ? -6 : undefined,
+                          left: corner.includes('w') ? -6 : undefined,
+                          right: corner.includes('e') ? -6 : undefined,
+                        }}
+                        onMouseDown={(e) => handleCornerMouseDown(e, corner)}
+                      />
+                    ))}
+                  </div>
                 </div>
 
                 <div className="flex justify-between items-center">
                   <p className="text-sm text-muted-foreground">
-                    Drag the green box to select the head region (neck to nose).
+                    Drag to move, use corners to resize. Select head region (neck to nose).
                     Output will be {OUTPUT_SIZE}×{OUTPUT_SIZE}px with padding above.
                   </p>
                   <Button onClick={handleApplyCrop} disabled={processing}>
