@@ -83,24 +83,62 @@ serve(async (req) => {
     let outputImage;
 
     if (mode === 'bottom-half' && targetSize) {
-      // Mode: Selection goes in bottom half, top half is white padding
-      console.log(`Bottom-half mode: creating ${targetSize}x${targetSize} output with selection in bottom half`);
+      // PRE-EXPAND STRATEGY:
+      // 1. First, add white padding above the original image
+      // 2. Then crop the 1:1 region where green box selection becomes the bottom half
       
-      // Crop the selected region (green box)
-      const croppedRegion = image.crop(safeX, safeY, safeWidth, safeHeight);
+      console.log(`Bottom-half mode: pre-expanding image with white padding above`);
       
-      // Scale the cropped region to fit the bottom half (targetSize x targetSize/2)
-      const halfHeight = Math.floor(targetSize / 2);
-      const scaledCrop = croppedRegion.resize(targetSize, halfHeight);
+      // The green box selection should be the BOTTOM half of output
+      // So we need to grab an equal-height region ABOVE the green box for the TOP half
+      // If there's not enough image above, we fill with white
       
-      // Create output canvas filled with white
-      outputImage = new Image(targetSize, targetSize);
-      outputImage.fill(0xFFFFFFFF); // White (RGBA)
+      const paddingHeight = safeHeight; // Add padding equal to selection height
+      const expandedHeight = image.height + paddingHeight;
       
-      // Composite the scaled crop onto the BOTTOM half
-      outputImage.composite(scaledCrop, 0, halfHeight);
+      console.log(`Adding ${paddingHeight}px white padding above. New height: ${expandedHeight}`);
       
-      console.log(`Created ${targetSize}x${targetSize} output with head in bottom half`);
+      // Create expanded canvas with white background
+      const expandedImage = new Image(image.width, expandedHeight);
+      
+      // Fill with white by iterating through each pixel (more reliable than fill())
+      for (let py = 1; py <= expandedHeight; py++) {
+        for (let px = 1; px <= image.width; px++) {
+          expandedImage.setPixelAt(px, py, 0xFFFFFFFF);
+        }
+      }
+      
+      // Composite original image at the BOTTOM of the expanded canvas
+      // In imagescript, composite places the source starting at x,y on the destination
+      expandedImage.composite(image, 0, paddingHeight);
+      
+      console.log(`Composited original image at y=${paddingHeight}`);
+      
+      // Now calculate the crop region in the expanded image coordinates
+      // The green box is now shifted down by paddingHeight
+      const expandedCropY = safeY + paddingHeight;
+      
+      // For 1:1 output with selection in bottom half:
+      // We need a region that is 2x the height of the selection
+      // Starting from (selection's top - selection's height) in expanded coords
+      const fullRegionY = expandedCropY - safeHeight; // Start one selection-height above
+      const fullRegionHeight = safeHeight * 2;        // Double height for both halves
+      
+      console.log(`Cropping 1:1 region from expanded image: x=${safeX}, y=${fullRegionY}, w=${safeWidth}, h=${fullRegionHeight}`);
+      
+      // Ensure bounds are valid
+      const safeCropY = Math.max(0, fullRegionY);
+      const safeCropHeight = Math.min(fullRegionHeight, expandedImage.height - safeCropY);
+      
+      // Crop the full region (top half + bottom half)
+      const croppedRegion = expandedImage.crop(safeX, safeCropY, safeWidth, safeCropHeight);
+      
+      console.log(`Cropped region: ${croppedRegion.width}x${croppedRegion.height}`);
+      
+      // Resize to target size (maintains aspect ratio since we cropped a square region)
+      outputImage = croppedRegion.resize(targetSize, targetSize);
+      
+      console.log(`Final output: ${outputImage.width}x${outputImage.height}`);
     } else {
       // Standard mode: just crop
       const croppedImage = image.crop(safeX, safeY, safeWidth, safeHeight);
