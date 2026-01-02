@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.upload-reference-images]
 verify_jwt = false
+
+[functions.crop-and-store-image]
+verify_jwt = false
