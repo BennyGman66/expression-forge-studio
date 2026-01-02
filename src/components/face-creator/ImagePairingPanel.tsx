@@ -1043,7 +1043,9 @@ interface ImagePairingReviewProps {
   onStartGeneration: () => void;
 }
 
-function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProps) {
+function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePairingReviewProps) {
+  const [allJobs, setAllJobs] = useState<FacePairingJob[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(externalJobId);
   const [pairings, setPairings] = useState<any[]>([]);
   const [outputs, setOutputs] = useState<Record<string, any[]>>({});
   const [job, setJob] = useState<FacePairingJob | null>(null);
@@ -1051,9 +1053,43 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
   const [totalOutputs, setTotalOutputs] = useState({ completed: 0, failed: 0, pending: 0, running: 0, total: 0 });
   const [selectedOutputs, setSelectedOutputs] = useState<Set<string>>(new Set());
 
+  // Sync external jobId when it changes (from new generation)
+  useEffect(() => {
+    if (externalJobId && externalJobId !== selectedJobId) {
+      setSelectedJobId(externalJobId);
+    }
+  }, [externalJobId]);
+
+  // Load all jobs on mount
+  useEffect(() => {
+    loadAllJobs();
+  }, []);
+
+  // Reload jobs list when external job changes (new job created)
+  useEffect(() => {
+    if (externalJobId) {
+      loadAllJobs();
+    }
+  }, [externalJobId]);
+
+  const loadAllJobs = async () => {
+    const { data, error } = await supabase
+      .from('face_pairing_jobs')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setAllJobs(data as FacePairingJob[]);
+      // Auto-select first job if none selected
+      if (!selectedJobId && data.length > 0) {
+        setSelectedJobId(data[0].id);
+      }
+    }
+  };
+
   // Initial load and polling for reliability
   useEffect(() => {
-    if (!jobId) return;
+    if (!selectedJobId) return;
     
     loadJobData();
     
@@ -1067,7 +1103,10 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
     }, 2000);
     
     return () => clearInterval(interval);
-  }, [jobId, job?.status]);
+  }, [selectedJobId, job?.status]);
+
+  // Update the jobId reference used by loadJobData
+  const jobId = selectedJobId;
 
   // Realtime subscription for outputs and pairings
   useEffect(() => {
@@ -1366,21 +1405,70 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
     }
   };
 
-  if (!jobId) {
-    return (
-      <Card className="p-8 text-center text-muted-foreground">
-        <p>No generation job selected. Start a new generation to see results here.</p>
-      </Card>
-    );
-  }
-
   const statusInfo = job ? getStatusInfo(job.status) : null;
   const StatusIcon = statusInfo?.icon || Clock;
   const groupedData = getGroupedPairings();
   const allCompletedOutputs = Object.values(outputs).flat().filter(o => o.status === 'completed');
 
+  // Format date for display
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <div className="space-y-4">
+      {/* Job History List */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            Job History
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {allJobs.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              No generation jobs yet. Start a new generation to see results here.
+            </p>
+          ) : (
+            <ScrollArea className="h-[120px]">
+              <div className="space-y-1.5">
+                {allJobs.map(j => {
+                  const jStatusInfo = getStatusInfo(j.status);
+                  return (
+                    <div
+                      key={j.id}
+                      className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
+                        selectedJobId === j.id 
+                          ? 'bg-primary/10 border border-primary/30' 
+                          : 'hover:bg-muted'
+                      }`}
+                      onClick={() => setSelectedJobId(j.id)}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium">{j.name}</span>
+                          <span className="text-xs text-muted-foreground">{formatDate(j.created_at)}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {j.progress}/{j.total_pairings}
+                        </Badge>
+                        <Badge variant="outline" className={`text-xs ${jStatusInfo.color}`}>
+                          {jStatusInfo.label}
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Job Status Card */}
       {job && (
         <Card className="p-4">
@@ -1462,41 +1550,44 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
         </Card>
       )}
 
-      {/* Controls Row */}
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
-          <Button 
-            variant={groupBy === 'talent' ? 'default' : 'outline'} 
-            size="sm"
-            onClick={() => setGroupBy('talent')}
-          >
-            <User className="h-3 w-3 mr-1" />
-            Group by Talent
-          </Button>
-          <Button 
-            variant={groupBy === 'identity' ? 'default' : 'outline'} 
-            size="sm"
-            onClick={() => setGroupBy('identity')}
-          >
-            <Users className="h-3 w-3 mr-1" />
-            Group by Identity
-          </Button>
-        </div>
-        
-        {allCompletedOutputs.length > 0 && (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={selectAllCompleted}>
-              Select All ({allCompletedOutputs.length})
-            </Button>
-            {selectedOutputs.size > 0 && (
-              <Button size="sm" onClick={downloadSelected}>
-                <Download className="h-3 w-3 mr-1" />
-                Download ({selectedOutputs.size})
+      {/* Show results when a job is selected */}
+      {selectedJobId && job && (
+        <>
+          {/* Controls Row */}
+          <div className="flex items-center justify-between">
+            <div className="flex gap-2">
+              <Button 
+                variant={groupBy === 'talent' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setGroupBy('talent')}
+              >
+                <User className="h-3 w-3 mr-1" />
+                Group by Talent
               </Button>
+              <Button 
+                variant={groupBy === 'identity' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setGroupBy('identity')}
+              >
+                <Users className="h-3 w-3 mr-1" />
+                Group by Identity
+              </Button>
+            </div>
+            
+            {allCompletedOutputs.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={selectAllCompleted}>
+                  Select All ({allCompletedOutputs.length})
+                </Button>
+                {selectedOutputs.size > 0 && (
+                  <Button size="sm" onClick={downloadSelected}>
+                    <Download className="h-3 w-3 mr-1" />
+                    Download ({selectedOutputs.size})
+                  </Button>
+                )}
+              </div>
             )}
           </div>
-        )}
-      </div>
 
       {/* Grouped Results */}
       <ScrollArea className="h-[600px]">
@@ -1604,6 +1695,8 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
           })}
         </div>
       </ScrollArea>
+        </>
+      )}
     </div>
   );
 }
