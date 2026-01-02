@@ -21,7 +21,8 @@ import {
   Link,
   Unlink,
   Trash2,
-  Plus
+  Plus,
+  Maximize2
 } from "lucide-react";
 import {
   Select,
@@ -120,6 +121,12 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   // Promote to twin dialog
   const [promoteDialogOpen, setPromoteDialogOpen] = useState(false);
   const [selectedIdentityForPromote, setSelectedIdentityForPromote] = useState<Identity | null>(null);
+
+  // Image preview dialog
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [previewIdentity, setPreviewIdentity] = useState<Identity | null>(null);
+  const [previewImages, setPreviewImages] = useState<IdentityImage[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   // Fetch identities with thumbnails when runId or gender changes
   useEffect(() => {
@@ -565,6 +572,27 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     }
   };
 
+  const handleOpenPreview = async (e: React.MouseEvent, identity: Identity) => {
+    e.stopPropagation();
+    setPreviewIdentity(identity);
+    setPreviewDialogOpen(true);
+    setPreviewLoading(true);
+
+    const { data, error } = await supabase
+      .from('face_identity_images')
+      .select(`
+        *,
+        scrape_image:face_scrape_images(id, stored_url, source_url, gender)
+      `)
+      .eq('identity_id', identity.id)
+      .eq('is_ignored', false);
+
+    if (!error && data) {
+      setPreviewImages(data as IdentityImage[]);
+    }
+    setPreviewLoading(false);
+  };
+
   const filteredImages = viewFilter === 'all' 
     ? identityImages 
     : identityImages.filter(img => img.view === viewFilter);
@@ -767,6 +795,15 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                                 <Link className="h-3.5 w-3.5" />
                               </Button>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 opacity-60 hover:opacity-100"
+                              onClick={(e) => handleOpenPreview(e, identity)}
+                              title="Preview all images"
+                            >
+                              <Maximize2 className="h-3.5 w-3.5" />
+                            </Button>
                             <Badge variant="secondary" className="min-w-[28px] justify-center">
                               {identity.image_count}
                             </Badge>
@@ -1094,6 +1131,55 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           }}
         />
       )}
+
+      {/* Image Preview Dialog */}
+      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3">
+              {previewIdentity?.representative_image_url && (
+                <Avatar className="h-10 w-10">
+                  <AvatarImage src={previewIdentity.representative_image_url} className="object-cover" />
+                  <AvatarFallback><User className="h-4 w-4" /></AvatarFallback>
+                </Avatar>
+              )}
+              {previewIdentity?.name}
+              <Badge variant="secondary">{previewImages.length} images</Badge>
+            </DialogTitle>
+            <DialogDescription>
+              All images for this model identity
+            </DialogDescription>
+          </DialogHeader>
+          
+          <ScrollArea className="h-[60vh]">
+            {previewLoading ? (
+              <div className="grid grid-cols-4 gap-4 p-4">
+                {[1,2,3,4,5,6,7,8].map(i => (
+                  <Skeleton key={i} className="aspect-[3/4] rounded-lg" />
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 gap-4 p-4">
+                {previewImages.map((img) => (
+                  <div key={img.id} className="relative group">
+                    <img
+                      src={img.scrape_image?.stored_url || img.scrape_image?.source_url}
+                      alt="Model image"
+                      className="w-full aspect-[3/4] object-cover rounded-lg"
+                    />
+                    <Badge 
+                      variant="secondary" 
+                      className="absolute bottom-2 left-2 text-xs capitalize"
+                    >
+                      {img.view || 'unknown'}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
