@@ -9,33 +9,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const BASE_PROMPT_TEMPLATE = `Recreate image 1 exactly: keep the same crop, framing, body pose, and outfit.
+// Prompt template matching the reference workflow exactly
+const BASE_PROMPT_TEMPLATE = `Recreate image 1 keep the crop, pose, and {{OUTFIT_DESCRIPTION}} keep it exactly the same but put the head of image 2 on it. Neutral expression with a subtle, relaxed softness at the corners of the mouth. Head very slightly tilted.
 
-The outfit must remain identical to image 1:
-{{OUTFIT_DESCRIPTION}}
-
-Replace only the head with the head from image 2.
-
-Identity and lighting rules:
-- Use the face from image 2 only
-- Keep facial proportions, skin texture, and expression consistent with image 2
-- Match the lighting on the face to image 2, not image 1
-- Do not alter the outfit, body, or pose from image 1
-
-Studio lighting and background:
-- Model shot in soft, high-key studio lighting
-- Background is clean white with no visible texture
-- Light is diffused and even, creating minimal shadows
-- Key light is centred and slightly above eye level
-- Gentle falloff on the cheeks
-- Natural, matte skin appearance
-- No harsh rim light
-
-Overall look:
-- Crisp, neutral, modern
-- Premium fashion e-commerce photography
-- Colours true-to-life with subtle contrast
-- No stylisation, no dramatic lighting, no background changes`;
+Model shot in soft, high-key studio lighting. Background is clean white with no visible texture. Light is diffused and even, creating minimal shadows. Key light is centred and slightly above eye level, producing gentle falloff on the cheeks and a natural, matte skin appearance. No harsh rim light. Overall look is crisp, neutral, and modern, similar to premium fashion e-commerce photography. Colours are true-to-life with subtle contrast.`;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -172,7 +149,16 @@ async function processPairedGeneration(
       const image1Url = cropData?.cropped_stored_url || faceImage.stored_url || faceImage.source_url;
       const image2Url = digitalTalent.front_face_url;
       
-      console.log(`[generate-paired-images] Using image1: ${image1Url.substring(0, 80)}...`);
+      // Log which image types are being used for debugging
+      const usingCropped = !!cropData?.cropped_stored_url;
+      console.log(`[generate-paired-images] Pairing ${pairing.id}:`);
+      console.log(`  - Image 1 (outfit/body): ${usingCropped ? 'CROPPED' : 'ORIGINAL'} - ${image1Url.substring(0, 80)}...`);
+      console.log(`  - Image 2 (face): ${image2Url.substring(0, 80)}...`);
+      
+      if (!usingCropped) {
+        console.warn(`[generate-paired-images] WARNING: No cropped image available, using original full-body image`);
+      }
+      
       const outfitDescription = pairing.outfit_description || 'A fashionable outfit';
 
       // Build the final prompt
