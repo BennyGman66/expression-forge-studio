@@ -977,11 +977,23 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
   const [totalOutputs, setTotalOutputs] = useState({ completed: 0, failed: 0, pending: 0, running: 0, total: 0 });
   const [selectedOutputs, setSelectedOutputs] = useState<Set<string>>(new Set());
 
+  // Initial load and polling for reliability
   useEffect(() => {
-    if (jobId) {
+    if (!jobId) return;
+    
+    loadJobData();
+    
+    // Poll every 2 seconds while job is active
+    const interval = setInterval(() => {
+      // Check if job is still active before polling
+      if (job && ['completed', 'failed'].includes(job.status)) {
+        return;
+      }
       loadJobData();
-    }
-  }, [jobId]);
+    }, 2000);
+    
+    return () => clearInterval(interval);
+  }, [jobId, job?.status]);
 
   // Realtime subscription for outputs and pairings
   useEffect(() => {
@@ -1311,7 +1323,7 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
                   <>
                     <span className="flex items-center gap-1">
                       <Sparkles className="h-3 w-3" />
-                      Analyzing outfits: {pairings.filter(p => p.outfit_description_status === 'completed').length}/{pairings.length}
+                      Analyzing outfits: {job.progress}/{job.total_pairings}
                     </span>
                   </>
                 )}
@@ -1368,7 +1380,7 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
                 job.status === 'generating' && totalOutputs.total > 0
                   ? ((totalOutputs.completed + totalOutputs.failed) / totalOutputs.total) * 100
                   : job.total_pairings > 0 
-                    ? (pairings.filter(p => p.outfit_description_status === 'completed').length / job.total_pairings) * 100 
+                    ? (job.progress / job.total_pairings) * 100 
                     : 0
               } 
             />
