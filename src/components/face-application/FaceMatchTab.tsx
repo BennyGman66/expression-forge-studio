@@ -37,7 +37,7 @@ export function FaceMatchTab({ lookId, talentId, onContinue }: FaceMatchTabProps
   useEffect(() => {
     if (!talentId) return;
     const fetchFaceFoundations = async () => {
-      // Get completed face pairing outputs linked to this talent
+      // Get completed face pairing outputs marked as face foundations for this talent
       const { data } = await supabase
         .from("face_pairing_outputs")
         .select(`
@@ -49,6 +49,7 @@ export function FaceMatchTab({ lookId, talentId, onContinue }: FaceMatchTabProps
           )
         `)
         .eq("status", "completed")
+        .eq("is_face_foundation", true)
         .not("stored_url", "is", null);
 
       if (data) {

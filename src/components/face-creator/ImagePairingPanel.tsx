@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
-import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users, UserPlus, UserCheck, Clock, Sparkles, Download } from "lucide-react";
+import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users, UserPlus, UserCheck, Clock, Sparkles, Download, Star } from "lucide-react";
 
 // CroppedFacePreview component for displaying cropped faces using CSS transforms
 function CroppedFacePreview({ imageUrl, crop }: { imageUrl: string; crop: { crop_x: number; crop_y: number; crop_width: number; crop_height: number; aspect_ratio?: string } }) {
@@ -37,6 +37,8 @@ function CroppedFacePreview({ imageUrl, crop }: { imageUrl: string; crop: { crop
 import type { FacePairingJob } from "@/types/face-pairing";
 import type { DigitalTalent } from "@/types/digital-talent";
 import { PromoteToTwinDialog } from "@/components/shared/PromoteToTwinDialog";
+import { OutputImageCard } from "./OutputImageCard";
+import { BulkActionsToolbar } from "./BulkActionsToolbar";
 
 interface ImagePairingPanelProps {
   runId: string | null;
@@ -1379,6 +1381,73 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
     });
   };
 
+  // Delete an output
+  const deleteOutput = async (outputId: string) => {
+    try {
+      const { error } = await supabase
+        .from('face_pairing_outputs')
+        .delete()
+        .eq('id', outputId);
+      
+      if (error) throw error;
+      
+      // Remove from local state
+      setOutputs(prev => {
+        const updated = { ...prev };
+        for (const pairingId in updated) {
+          updated[pairingId] = updated[pairingId].filter(o => o.id !== outputId);
+        }
+        return updated;
+      });
+      
+      setSelectedOutputs(prev => {
+        const updated = new Set(prev);
+        updated.delete(outputId);
+        return updated;
+      });
+      
+      recalculateTotals();
+      toast.success('Output deleted');
+    } catch (error) {
+      console.error('Error deleting output:', error);
+      toast.error('Failed to delete output');
+    }
+  };
+
+  // Delete multiple outputs
+  const deleteOutputs = async (outputIds: string[]) => {
+    try {
+      const { error } = await supabase
+        .from('face_pairing_outputs')
+        .delete()
+        .in('id', outputIds);
+      
+      if (error) throw error;
+      
+      // Remove from local state
+      setOutputs(prev => {
+        const updated = { ...prev };
+        const idsSet = new Set(outputIds);
+        for (const pairingId in updated) {
+          updated[pairingId] = updated[pairingId].filter(o => !idsSet.has(o.id));
+        }
+        return updated;
+      });
+      
+      setSelectedOutputs(new Set());
+      recalculateTotals();
+      toast.success(`Deleted ${outputIds.length} outputs`);
+    } catch (error) {
+      console.error('Error deleting outputs:', error);
+      toast.error('Failed to delete outputs');
+    }
+  };
+
+  // Clear selection
+  const clearSelection = () => {
+    setSelectedOutputs(new Set());
+  };
+
   // Group pairings for display
   const getGroupedPairings = () => {
     if (groupBy === 'talent') {
@@ -1629,63 +1698,31 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
                       const originalUrl = sourceImage?.stored_url || sourceImage?.source_url;
 
                       return pairingOutputs.map(output => (
-                        <div 
-                          key={output.id} 
-                          className={`relative group aspect-[3/4] rounded-lg overflow-hidden bg-muted border-2 transition-colors cursor-pointer ${
-                            selectedOutputs.has(output.id) ? 'border-primary' : 'border-transparent hover:border-muted-foreground/30'
-                          }`}
-                          onClick={() => output.status === 'completed' && toggleOutputSelection(output.id)}
-                        >
-                          {output.status === 'completed' && output.stored_url ? (
-                            <>
-                              <img 
-                                src={output.stored_url} 
-                                alt="" 
-                                className="w-full h-full object-cover"
-                              />
-                              {/* Hover overlay with source images */}
-                              <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity p-2 flex flex-col justify-end">
-                                <div className="flex gap-1">
-                                  <div className="w-8 h-10 rounded overflow-hidden bg-muted/20">
-                                    {croppedUrl ? (
-                                      <img src={croppedUrl} alt="Source" className="w-full h-full object-cover" />
-                                    ) : faceCrop && originalUrl ? (
-                                      <CroppedFacePreview imageUrl={originalUrl} crop={faceCrop} />
-                                    ) : originalUrl ? (
-                                      <img src={originalUrl} alt="Source" className="w-full h-full object-cover" />
-                                    ) : null}
-                                  </div>
-                                  {pairing.digital_talents?.front_face_url && (
-                                    <div className="w-8 h-8 rounded-full overflow-hidden bg-muted/20">
-                                      <img src={pairing.digital_talents.front_face_url} alt="Talent" className="w-full h-full object-cover" />
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              {/* Selection indicator */}
-                              {selectedOutputs.has(output.id) && (
-                                <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
-                                  <Check className="h-3 w-3 text-primary-foreground" />
-                                </div>
-                              )}
-                            </>
-                          ) : output.status === 'running' ? (
-                            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
-                              <Loader2 className="h-6 w-6 animate-spin mb-2" />
-                              <span className="text-xs">Generating...</span>
+                        <OutputImageCard
+                          key={output.id}
+                          output={{
+                            id: output.id,
+                            pairing_id: output.pairing_id,
+                            stored_url: output.stored_url,
+                            status: output.status,
+                            is_face_foundation: output.is_face_foundation,
+                          }}
+                          isSelected={selectedOutputs.has(output.id)}
+                          onToggleSelect={toggleOutputSelection}
+                          onDelete={deleteOutput}
+                          sourcePreview={
+                            <div className="w-8 h-10 rounded overflow-hidden bg-muted/20">
+                              {croppedUrl ? (
+                                <img src={croppedUrl} alt="Source" className="w-full h-full object-cover" />
+                              ) : faceCrop && originalUrl ? (
+                                <CroppedFacePreview imageUrl={originalUrl} crop={faceCrop} />
+                              ) : originalUrl ? (
+                                <img src={originalUrl} alt="Source" className="w-full h-full object-cover" />
+                              ) : null}
                             </div>
-                          ) : output.status === 'failed' ? (
-                            <div className="w-full h-full flex flex-col items-center justify-center text-destructive">
-                              <X className="h-6 w-6 mb-2" />
-                              <span className="text-xs">Failed</span>
-                            </div>
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
-                              <Clock className="h-6 w-6 mb-2" />
-                              <span className="text-xs">Pending</span>
-                            </div>
-                          )}
-                        </div>
+                          }
+                          talentAvatar={pairing.digital_talents?.front_face_url}
+                        />
                       ));
                     })}
                   </div>
@@ -1697,6 +1734,15 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
       </ScrollArea>
         </>
       )}
+
+      {/* Bulk Actions Toolbar */}
+      <BulkActionsToolbar
+        selectedCount={selectedOutputs.size}
+        selectedIds={selectedOutputs}
+        onClearSelection={clearSelection}
+        onDelete={deleteOutputs}
+        onDownload={downloadSelected}
+      />
     </div>
   );
 }
