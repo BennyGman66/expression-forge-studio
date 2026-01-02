@@ -53,7 +53,6 @@ export default function FaceApplication() {
 
           <TabsContent value="match">
             <FaceMatchTab
-              lookId={selectedLookId}
               talentId={selectedTalentId}
               onContinue={() => setActiveTab("generate")}
             />
