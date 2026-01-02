@@ -1443,11 +1443,48 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
     }
   };
 
+  // Regenerating outputs state
+  const [regeneratingOutputs, setRegeneratingOutputs] = useState<Set<string>>(new Set());
+
+  // Regenerate an output
+  const regenerateOutput = async (outputId: string) => {
+    setRegeneratingOutputs(prev => new Set(prev).add(outputId));
+    try {
+      const { data, error } = await supabase.functions.invoke('regenerate-output', {
+        body: { outputId }
+      });
+      
+      if (error) throw error;
+      
+      if (data?.stored_url) {
+        // Update local state with new image
+        setOutputs(prev => {
+          const updated = { ...prev };
+          for (const pairingId in updated) {
+            updated[pairingId] = updated[pairingId].map(o => 
+              o.id === outputId ? { ...o, stored_url: data.stored_url, status: 'completed' } : o
+            );
+          }
+          return updated;
+        });
+        toast.success('Image regenerated successfully');
+      }
+    } catch (error) {
+      console.error('Error regenerating output:', error);
+      toast.error('Failed to regenerate image');
+    } finally {
+      setRegeneratingOutputs(prev => {
+        const next = new Set(prev);
+        next.delete(outputId);
+        return next;
+      });
+    }
+  };
+
   // Clear selection
   const clearSelection = () => {
     setSelectedOutputs(new Set());
   };
-
   // Group pairings for display
   const getGroupedPairings = () => {
     if (groupBy === 'talent') {
@@ -1710,6 +1747,8 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
                           isSelected={selectedOutputs.has(output.id)}
                           onToggleSelect={toggleOutputSelection}
                           onDelete={deleteOutput}
+                          onRegenerate={regenerateOutput}
+                          isRegenerating={regeneratingOutputs.has(output.id)}
                           sourcePreview={
                             <div className="w-8 h-10 rounded overflow-hidden bg-muted/20">
                               {croppedUrl ? (

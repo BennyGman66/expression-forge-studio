@@ -10,6 +10,7 @@ import {
 import { MoreVertical, Trash2, Crop, RefreshCw, Star, Check, Loader2, X, Clock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 
 interface OutputImageCardProps {
   output: {
@@ -22,10 +23,11 @@ interface OutputImageCardProps {
   isSelected: boolean;
   onToggleSelect: (id: string) => void;
   onDelete?: (id: string) => void;
-  onRegenerate?: (pairingId: string) => void;
+  onRegenerate?: (outputId: string) => void;
   onCrop?: (id: string) => void;
   sourcePreview?: React.ReactNode;
   talentAvatar?: string;
+  isRegenerating?: boolean;
 }
 
 export function OutputImageCard({
@@ -37,10 +39,10 @@ export function OutputImageCard({
   onCrop,
   sourcePreview,
   talentAvatar,
+  isRegenerating = false,
 }: OutputImageCardProps) {
   const [isAddingToFoundation, setIsAddingToFoundation] = useState(false);
   const [isFoundation, setIsFoundation] = useState(output.is_face_foundation || false);
-
   const handleAddToFoundation = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsAddingToFoundation(true);
@@ -88,7 +90,7 @@ export function OutputImageCard({
 
   const handleRegenerate = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onRegenerate?.(output.pairing_id);
+    onRegenerate?.(output.id);
   };
 
   const handleCrop = (e: React.MouseEvent) => {
@@ -105,7 +107,7 @@ export function OutputImageCard({
       }`}
       onClick={() => output.status === "completed" && onToggleSelect(output.id)}
     >
-      {output.status === "completed" && output.stored_url ? (
+      {output.status === "completed" && output.stored_url && !isRegenerating ? (
         <>
           <img
             src={output.stored_url}
@@ -181,10 +183,9 @@ export function OutputImageCard({
             </div>
           )}
         </>
-      ) : output.status === "running" ? (
-        <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin mb-2" />
-          <span className="text-xs">Generating...</span>
+      ) : isRegenerating || output.status === "running" ? (
+        <div className="w-full h-full flex flex-col items-center justify-center bg-muted/50">
+          <LeapfrogLoader message={isRegenerating ? "Regenerating..." : "Generating..."} size="md" />
         </div>
       ) : output.status === "failed" ? (
         <div className="w-full h-full flex flex-col items-center justify-center text-destructive">
