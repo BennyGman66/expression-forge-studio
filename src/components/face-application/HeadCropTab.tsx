@@ -366,10 +366,6 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
     setExpanding(true);
 
     try {
-      // Capture current image height before expansion to calculate offset
-      const originalHeight = imageDimensions.height;
-      const paddingHeight = Math.round(originalHeight * 0.2); // 20% padding
-
       const response = await supabase.functions.invoke("expand-image-top", {
         body: {
           imageUrl: currentImage.source_url,
@@ -382,44 +378,42 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
 
       const { expandedUrl } = response.data;
 
-      // If there's an existing crop, adjust Y coordinate to account for new top padding
-      if (currentImage.head_crop_y !== null && currentImage.head_crop_y !== undefined) {
-        const newCropY = currentImage.head_crop_y + paddingHeight;
-        
-        // Update database with adjusted Y coordinate
-        await supabase
-          .from("look_source_images")
-          .update({ head_crop_y: newCropY })
-          .eq("id", currentImage.id);
+      // Expanded image is the new source - clear any existing crop data
+      await supabase
+        .from("look_source_images")
+        .update({
+          source_url: expandedUrl,
+          head_crop_x: null,
+          head_crop_y: null,
+          head_crop_width: null,
+          head_crop_height: null,
+          head_cropped_url: null,
+        })
+        .eq("id", currentImage.id);
 
-        // Update local state with new source URL and adjusted crop Y
-        setSourceImages((prev) =>
-          prev.map((img) =>
-            img.id === currentImage.id
-              ? { ...img, source_url: expandedUrl, head_crop_y: newCropY }
-              : img
-          )
-        );
+      // Update local state with new source URL and cleared crop data
+      setSourceImages((prev) =>
+        prev.map((img) =>
+          img.id === currentImage.id
+            ? {
+                ...img,
+                source_url: expandedUrl,
+                head_crop_x: null,
+                head_crop_y: null,
+                head_crop_width: null,
+                head_crop_height: null,
+                head_cropped_url: null,
+              }
+            : img
+        )
+      );
 
-        // Also shift the visual crop box down
-        setCropBox((prev) => ({
-          ...prev,
-          y: prev.y + paddingHeight,
-        }));
-      } else {
-        // No existing crop, just update source URL
-        setSourceImages((prev) =>
-          prev.map((img) =>
-            img.id === currentImage.id
-              ? { ...img, source_url: expandedUrl }
-              : img
-          )
-        );
-      }
+      // Reset crop box to default (will be recalculated on image load)
+      setCropBox({ x: 0, y: 0, width: 200, height: 200 });
 
-      toast({ 
-        title: "Image expanded", 
-        description: "Added 20% white space to top of image." 
+      toast({
+        title: "Image expanded",
+        description: "Added 20% white space to top. Please reposition the crop box.",
       });
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
