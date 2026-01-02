@@ -307,20 +307,23 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   };
 
   const handleApplyCrop = async () => {
-    if (!currentImage) return;
+    if (!currentImage || !imageDimensions.width || !imageDimensions.height) return;
     setProcessing(true);
 
     try {
-      // Call edge function to crop and add padding
-      const response = await supabase.functions.invoke("crop-look-head", {
+      // Call crop-and-store-image directly with percentage coordinates
+      // This is the same approach used by CropOutputDialog which works correctly
+      const response = await supabase.functions.invoke("crop-and-store-image", {
         body: {
           imageUrl: currentImage.source_url,
-          cropX: Math.round(cropBox.x),
-          cropY: Math.round(cropBox.y),
-          cropWidth: Math.round(cropBox.width),
-          cropHeight: Math.round(cropBox.height),
+          // Convert pixel coordinates to percentages
+          cropX: (cropBox.x / imageDimensions.width) * 100,
+          cropY: (cropBox.y / imageDimensions.height) * 100,
+          cropWidth: (cropBox.width / imageDimensions.width) * 100,
+          cropHeight: (cropBox.height / imageDimensions.height) * 100,
           outputSize: OUTPUT_SIZE,
-          imageId: currentImage.id,
+          bucketName: "face-crops",
+          fileName: `look-head-${currentImage.id}.png`,
         },
       });
 
