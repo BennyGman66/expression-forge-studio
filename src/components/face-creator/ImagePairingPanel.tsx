@@ -109,7 +109,7 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     representativeImageUrl: string | null;
   } | null>(null);
 
-  // Crop dialog state
+  // Crop dialog state  
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [cropOutputId, setCropOutputId] = useState<string | null>(null);
   const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
@@ -1060,6 +1060,11 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
   const [groupBy, setGroupBy] = useState<'talent' | 'identity'>('talent');
   const [totalOutputs, setTotalOutputs] = useState({ completed: 0, failed: 0, pending: 0, running: 0, total: 0 });
   const [selectedOutputs, setSelectedOutputs] = useState<Set<string>>(new Set());
+  
+  // Crop dialog state
+  const [cropDialogOpen, setCropDialogOpen] = useState(false);
+  const [cropOutputId, setCropOutputId] = useState<string | null>(null);
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
 
   // Sync external jobId when it changes (from new generation)
   useEffect(() => {
@@ -1794,20 +1799,6 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
                           talentAvatar={pairing.digital_talents?.front_face_url}
                         />
                       ));
-                          sourcePreview={
-                            <div className="w-8 h-10 rounded overflow-hidden bg-muted/20">
-                              {croppedUrl ? (
-                                <img src={croppedUrl} alt="Source" className="w-full h-full object-cover" />
-                              ) : faceCrop && originalUrl ? (
-                                <CroppedFacePreview imageUrl={originalUrl} crop={faceCrop} />
-                              ) : originalUrl ? (
-                                <img src={originalUrl} alt="Source" className="w-full h-full object-cover" />
-                              ) : null}
-                            </div>
-                          }
-                          talentAvatar={pairing.digital_talents?.front_face_url}
-                        />
-                      ));
                     })}
                   </div>
                 </CollapsibleContent>
@@ -1816,7 +1807,7 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
           })}
         </div>
       </ScrollArea>
-        </>
+      </>
       )}
 
       {/* Bulk Actions Toolbar */}
