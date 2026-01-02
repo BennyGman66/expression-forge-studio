@@ -32,6 +32,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, cropX: 0, cropY: 0, cropWidth: 0, cropHeight: 0 });
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [imageReady, setImageReady] = useState(false);
+  const [forceDefaultCrop, setForceDefaultCrop] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [expanding, setExpanding] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -88,6 +89,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     setImageReady(false);
     setCropBox({ x: 0, y: 0, width: 0, height: 0 });
     setImageDimensions({ width: 0, height: 0 });
+    setForceDefaultCrop(false);
   }, [selectedIndex]);
 
   // Helper to get actual rendered image bounds (accounting for object-contain letterboxing)
@@ -132,15 +134,12 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     const newDimensions = { width: img.naturalWidth, height: img.naturalHeight };
     setImageDimensions(newDimensions);
     
-    // Set crop from saved data if available, otherwise use defaults
-    if (currentImage?.head_crop_x !== null && currentImage?.head_crop_x !== undefined) {
-      setCropBox({
-        x: currentImage.head_crop_x,
-        y: currentImage.head_crop_y || 0,
-        width: currentImage.head_crop_width || 200,
-        height: currentImage.head_crop_height || 200,
-      });
-    } else {
+    // If forceDefaultCrop is set (e.g., after expansion), use defaults regardless of saved data
+    const shouldUseDefault = forceDefaultCrop || 
+      currentImage?.head_crop_x === null || 
+      currentImage?.head_crop_x === undefined;
+    
+    if (shouldUseDefault) {
       // Default crop to top-center
       const defaultWidth = Math.min(newDimensions.width * 0.4, 400);
       setCropBox({
@@ -148,6 +147,15 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
         y: 20,
         width: defaultWidth,
         height: defaultWidth,
+      });
+      setForceDefaultCrop(false); // Reset the flag after using it
+    } else {
+      // Use saved crop data
+      setCropBox({
+        x: currentImage.head_crop_x,
+        y: currentImage.head_crop_y || 0,
+        width: currentImage.head_crop_width || 200,
+        height: currentImage.head_crop_height || 200,
       });
     }
     
@@ -409,6 +417,9 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
           head_cropped_url: null,
         })
         .eq("id", currentImage.id);
+
+      // Set flag BEFORE updating state so handleImageLoad uses defaults for new image
+      setForceDefaultCrop(true);
 
       // Update local state with new source URL and cleared crop data
       setSourceImages((prev) =>
