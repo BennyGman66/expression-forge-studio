@@ -8,13 +8,14 @@ const corsHeaders = {
 
 interface CropRequest {
   imageUrl: string;
-  cropX: number;      // percentage 0-100
-  cropY: number;      // percentage 0-100
-  cropWidth: number;  // percentage 0-100
-  cropHeight: number; // percentage 0-100
+  cropX: number;      // percentage 0-100 (or pixels if usePixelCoords is true)
+  cropY: number;      // percentage 0-100 (or pixels if usePixelCoords is true)
+  cropWidth: number;  // percentage 0-100 (or pixels if usePixelCoords is true)
+  cropHeight: number; // percentage 0-100 (or pixels if usePixelCoords is true)
   cropId: string;     // UUID for naming the file
   targetSize?: number; // Optional target output size (e.g., 1000 for 1000x1000)
   mode?: 'bottom-half'; // If set, the cropped content goes in the bottom half with white padding above
+  usePixelCoords?: boolean; // If true, crop values are pixels, not percentages
 }
 
 serve(async (req) => {
@@ -23,10 +24,10 @@ serve(async (req) => {
   }
 
   try {
-    const { imageUrl, cropX, cropY, cropWidth, cropHeight, cropId, targetSize, mode } = await req.json() as CropRequest;
+    const { imageUrl, cropX, cropY, cropWidth, cropHeight, cropId, targetSize, mode, usePixelCoords } = await req.json() as CropRequest;
 
     console.log(`Cropping image: ${imageUrl}`);
-    console.log(`Crop params: x=${cropX}%, y=${cropY}%, w=${cropWidth}%, h=${cropHeight}%`);
+    console.log(`Crop params: x=${cropX}, y=${cropY}, w=${cropWidth}, h=${cropHeight} (${usePixelCoords ? 'pixels' : 'percentages'})`);
     console.log(`Mode: ${mode || 'standard'}, Target size: ${targetSize || 'none'}`);
 
     // Fetch the original image
@@ -47,11 +48,22 @@ serve(async (req) => {
 
     console.log(`Original image dimensions: ${dimensions.width}x${dimensions.height}`);
 
-    // Calculate pixel coordinates from percentages
-    const pixelX = Math.round(dimensions.width * (cropX / 100));
-    const pixelY = Math.round(dimensions.height * (cropY / 100));
-    const pixelWidth = Math.round(dimensions.width * (cropWidth / 100));
-    const pixelHeight = Math.round(dimensions.height * (cropHeight / 100));
+    // Calculate pixel coordinates - either use directly or convert from percentages
+    let pixelX: number, pixelY: number, pixelWidth: number, pixelHeight: number;
+    
+    if (usePixelCoords) {
+      // Use coordinates directly as pixels
+      pixelX = Math.round(cropX);
+      pixelY = Math.round(cropY);
+      pixelWidth = Math.round(cropWidth);
+      pixelHeight = Math.round(cropHeight);
+    } else {
+      // Convert from percentages to pixels
+      pixelX = Math.round(dimensions.width * (cropX / 100));
+      pixelY = Math.round(dimensions.height * (cropY / 100));
+      pixelWidth = Math.round(dimensions.width * (cropWidth / 100));
+      pixelHeight = Math.round(dimensions.height * (cropHeight / 100));
+    }
 
     console.log(`Crop pixels: x=${pixelX}, y=${pixelY}, w=${pixelWidth}, h=${pixelHeight}`);
 
