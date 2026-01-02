@@ -10,6 +10,7 @@ import External from "./pages/External";
 import TalentReplacement from "./pages/TalentReplacement";
 import ClientReview from "./pages/ClientReview";
 import FaceCreator from "./pages/FaceCreator";
+import FaceApplication from "./pages/FaceApplication";
 import DigitalTalent from "./pages/DigitalTalent";
 import TommyHilfiger from "./pages/TommyHilfiger";
 import NotFound from "./pages/NotFound";
@@ -31,6 +32,7 @@ const App = () => (
           <Route path="/external/talent-replacement" element={<TalentReplacement />} />
           <Route path="/review/:reviewId" element={<ClientReview />} />
           <Route path="/face-creator" element={<FaceCreator />} />
+          <Route path="/face-application" element={<FaceApplication />} />
           <Route path="/digital-talent" element={<DigitalTalent />} />
           <Route path="/tommy-hilfiger" element={<TommyHilfiger />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
