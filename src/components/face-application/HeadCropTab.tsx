@@ -366,6 +366,10 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
     setExpanding(true);
 
     try {
+      // Capture current image height before expansion to calculate offset
+      const originalHeight = imageDimensions.height;
+      const paddingHeight = Math.round(originalHeight * 0.2); // 20% padding
+
       const response = await supabase.functions.invoke("expand-image-top", {
         body: {
           imageUrl: currentImage.source_url,
@@ -378,14 +382,40 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
 
       const { expandedUrl } = response.data;
 
-      // Update local state with new source URL
-      setSourceImages((prev) =>
-        prev.map((img) =>
-          img.id === currentImage.id
-            ? { ...img, source_url: expandedUrl }
-            : img
-        )
-      );
+      // If there's an existing crop, adjust Y coordinate to account for new top padding
+      if (currentImage.head_crop_y !== null && currentImage.head_crop_y !== undefined) {
+        const newCropY = currentImage.head_crop_y + paddingHeight;
+        
+        // Update database with adjusted Y coordinate
+        await supabase
+          .from("look_source_images")
+          .update({ head_crop_y: newCropY })
+          .eq("id", currentImage.id);
+
+        // Update local state with new source URL and adjusted crop Y
+        setSourceImages((prev) =>
+          prev.map((img) =>
+            img.id === currentImage.id
+              ? { ...img, source_url: expandedUrl, head_crop_y: newCropY }
+              : img
+          )
+        );
+
+        // Also shift the visual crop box down
+        setCropBox((prev) => ({
+          ...prev,
+          y: prev.y + paddingHeight,
+        }));
+      } else {
+        // No existing crop, just update source URL
+        setSourceImages((prev) =>
+          prev.map((img) =>
+            img.id === currentImage.id
+              ? { ...img, source_url: expandedUrl }
+              : img
+          )
+        );
+      }
 
       toast({ 
         title: "Image expanded", 
