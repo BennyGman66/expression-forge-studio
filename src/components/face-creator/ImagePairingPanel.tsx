@@ -37,7 +37,7 @@ function CroppedFacePreview({ imageUrl, crop }: { imageUrl: string; crop: { crop
 import type { FacePairingJob } from "@/types/face-pairing";
 import type { DigitalTalent } from "@/types/digital-talent";
 import { PromoteToTwinDialog } from "@/components/shared/PromoteToTwinDialog";
-import { OutputImageCard } from "./OutputImageCard";
+import { OutputCarousel } from "./OutputCarousel";
 import { BulkActionsToolbar } from "./BulkActionsToolbar";
 import { CropOutputDialog } from "./CropOutputDialog";
 
@@ -1456,6 +1456,9 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
 
   // Regenerating outputs state
   const [regeneratingOutputs, setRegeneratingOutputs] = useState<Set<string>>(new Set());
+  
+  // Generating more outputs state (per pairing)
+  const [generatingMorePairings, setGeneratingMorePairings] = useState<Set<string>>(new Set());
 
   // Regenerate an output
   const regenerateOutput = async (outputId: string) => {
@@ -1487,6 +1490,34 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
       setRegeneratingOutputs(prev => {
         const next = new Set(prev);
         next.delete(outputId);
+        return next;
+      });
+    }
+  };
+
+  // Generate more variations for a pairing
+  const generateMoreOutputs = async (pairingId: string, count: number) => {
+    setGeneratingMorePairings(prev => new Set(prev).add(pairingId));
+    toast.info(`Generating ${count} more variation${count > 1 ? 's' : ''}...`);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-more-outputs', {
+        body: { pairingId, count }
+      });
+      
+      if (error) throw error;
+      
+      if (data?.success) {
+        toast.success(`Generated ${data.generated}/${data.total} variations`);
+        // The realtime subscription will update the outputs automatically
+      }
+    } catch (error) {
+      console.error('Error generating more outputs:', error);
+      toast.error('Failed to generate more variations');
+    } finally {
+      setGeneratingMorePairings(prev => {
+        const next = new Set(prev);
+        next.delete(pairingId);
         return next;
       });
     }
@@ -1769,22 +1800,29 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
                       const croppedUrl = faceCrop?.cropped_stored_url;
                       const originalUrl = sourceImage?.stored_url || sourceImage?.source_url;
 
-                      return pairingOutputs.map(output => (
-                        <OutputImageCard
-                          key={output.id}
-                          output={{
-                            id: output.id,
-                            pairing_id: output.pairing_id,
-                            stored_url: output.stored_url,
-                            status: output.status,
-                            is_face_foundation: output.is_face_foundation,
-                          }}
-                          isSelected={selectedOutputs.has(output.id)}
+                      // Skip pairings with no outputs
+                      if (pairingOutputs.length === 0) return null;
+
+                      return (
+                        <OutputCarousel
+                          key={pairing.id}
+                          pairingId={pairing.id}
+                          variations={pairingOutputs.map(o => ({
+                            id: o.id,
+                            pairing_id: o.pairing_id,
+                            stored_url: o.stored_url,
+                            status: o.status,
+                            is_face_foundation: o.is_face_foundation,
+                            attempt_index: o.attempt_index || 0,
+                          }))}
+                          isSelected={pairingOutputs.some(o => selectedOutputs.has(o.id))}
                           onToggleSelect={toggleOutputSelection}
                           onDelete={deleteOutput}
                           onRegenerate={regenerateOutput}
                           onCrop={openCropDialog}
-                          isRegenerating={regeneratingOutputs.has(output.id)}
+                          onGenerateMore={generateMoreOutputs}
+                          isRegenerating={pairingOutputs.some(o => regeneratingOutputs.has(o.id))}
+                          generatingMore={generatingMorePairings.has(pairing.id)}
                           sourcePreview={
                             <div className="w-8 h-10 rounded overflow-hidden bg-muted/20">
                               {croppedUrl ? (
@@ -1798,7 +1836,7 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
                           }
                           talentAvatar={pairing.digital_talents?.front_face_url}
                         />
-                      ));
+                      );
                     })}
                   </div>
                 </CollapsibleContent>
