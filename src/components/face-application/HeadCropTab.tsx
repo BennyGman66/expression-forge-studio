@@ -81,6 +81,43 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
 
   const currentImage = sourceImages[selectedIndex];
 
+  // Helper to get actual rendered image bounds (accounting for object-contain letterboxing)
+  const getImageBounds = () => {
+    if (!imageRef.current || !imageDimensions.width) return null;
+    
+    const rect = imageRef.current.getBoundingClientRect();
+    const containerAspect = rect.width / rect.height;
+    const imageAspect = imageDimensions.width / imageDimensions.height;
+    
+    let renderedWidth: number;
+    let renderedHeight: number;
+    let offsetX: number;
+    let offsetY: number;
+    
+    if (imageAspect > containerAspect) {
+      // Image is wider than container - width fills, height has letterboxing
+      renderedWidth = rect.width;
+      renderedHeight = rect.width / imageAspect;
+      offsetX = 0;
+      offsetY = (rect.height - renderedHeight) / 2;
+    } else {
+      // Image is taller than container - height fills, width has letterboxing
+      renderedHeight = rect.height;
+      renderedWidth = rect.height * imageAspect;
+      offsetX = (rect.width - renderedWidth) / 2;
+      offsetY = 0;
+    }
+    
+    return {
+      offsetX,
+      offsetY,
+      renderedWidth,
+      renderedHeight,
+      scaleX: imageDimensions.width / renderedWidth,
+      scaleY: imageDimensions.height / renderedHeight,
+    };
+  };
+
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
     setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
@@ -100,12 +137,14 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!containerRef.current || !imageRef.current) return;
     
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = imageDimensions.width / rect.width;
-    const scaleY = imageDimensions.height / rect.height;
+    const bounds = getImageBounds();
+    if (!bounds) return;
     
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const rect = imageRef.current.getBoundingClientRect();
+    
+    // Convert client coordinates to image coordinates, accounting for letterboxing
+    const x = (e.clientX - rect.left - bounds.offsetX) * bounds.scaleX;
+    const y = (e.clientY - rect.top - bounds.offsetY) * bounds.scaleY;
     
     // Check if clicking inside crop box
     if (
@@ -123,15 +162,16 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
     e.stopPropagation();
     if (!imageRef.current) return;
     
+    const bounds = getImageBounds();
+    if (!bounds) return;
+    
     const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = imageDimensions.width / rect.width;
-    const scaleY = imageDimensions.height / rect.height;
     
     setIsResizing(true);
     setResizeCorner(corner);
     setResizeStart({
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
+      x: (e.clientX - rect.left - bounds.offsetX) * bounds.scaleX,
+      y: (e.clientY - rect.top - bounds.offsetY) * bounds.scaleY,
       cropX: cropBox.x,
       cropY: cropBox.y,
       cropWidth: cropBox.width,
@@ -142,12 +182,13 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!imageRef.current) return;
     
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = imageDimensions.width / rect.width;
-    const scaleY = imageDimensions.height / rect.height;
+    const bounds = getImageBounds();
+    if (!bounds) return;
     
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const rect = imageRef.current.getBoundingClientRect();
+    
+    const x = (e.clientX - rect.left - bounds.offsetX) * bounds.scaleX;
+    const y = (e.clientY - rect.top - bounds.offsetY) * bounds.scaleY;
     
     if (isResizing && resizeCorner) {
       const deltaX = x - resizeStart.x;
@@ -271,18 +312,16 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
 
   const allCropped = sourceImages.every((img) => img.head_cropped_url);
 
-  // Calculate crop box position as percentage for display
+  // Calculate crop box position accounting for letterboxing
   const getCropStyle = () => {
-    if (!imageRef.current || !imageDimensions.width) return {};
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = rect.width / imageDimensions.width;
-    const scaleY = rect.height / imageDimensions.height;
+    const bounds = getImageBounds();
+    if (!bounds) return {};
     
     return {
-      left: cropBox.x * scaleX,
-      top: cropBox.y * scaleY,
-      width: cropBox.width * scaleX,
-      height: cropBox.height * scaleY,
+      left: bounds.offsetX + cropBox.x / bounds.scaleX,
+      top: bounds.offsetY + cropBox.y / bounds.scaleY,
+      width: cropBox.width / bounds.scaleX,
+      height: cropBox.height / bounds.scaleY,
     };
   };
 
