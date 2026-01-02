@@ -83,43 +83,34 @@ serve(async (req) => {
     let outputImage;
 
     if (mode === 'bottom-half' && targetSize) {
-      // FIXED STRATEGY (preserves aspect ratio):
-      // 1. Crop the green box selection (1:1 aspect ratio)
-      // 2. Scale it to 500x500 (half the target size, preserving 1:1)
-      // 3. Create 1000x1000 white canvas
-      // 4. Place 500x500 selection centered in the bottom half
+      // SIMPLIFIED STRATEGY using imagescript's fit() method:
+      // 1. Crop the green box selection
+      // 2. Use fit() to scale to 500x500 (preserves aspect ratio automatically)
+      // 3. Create 1000x1000 white canvas using fill()
+      // 4. Place fitted selection centered in bottom half
       
-      console.log(`Bottom-half mode: selection goes in bottom half, preserving aspect ratio`);
+      console.log(`Bottom-half mode: using fit() for proper aspect ratio preservation`);
       
       // 1. Crop just the green box selection
       const croppedSelection = image.crop(safeX, safeY, safeWidth, safeHeight);
-      console.log(`Cropped selection: ${croppedSelection.width}x${croppedSelection.height}`);
+      console.log(`Step 1 - Cropped: ${croppedSelection.width}x${croppedSelection.height}`);
       
-      // 2. Scale to fit in bottom half while preserving aspect ratio
+      // 2. Use fit() - imagescript's built-in method that preserves aspect ratio
       const halfSize = Math.floor(targetSize / 2);
-      const scaleX = halfSize / croppedSelection.width;
-      const scaleY = halfSize / croppedSelection.height;
-      const scale = Math.min(scaleX, scaleY);
+      const fittedSelection = croppedSelection.fit(halfSize, halfSize);
+      console.log(`Step 2 - After fit(${halfSize}, ${halfSize}): ${fittedSelection.width}x${fittedSelection.height}`);
       
-      const scaledWidth = Math.round(croppedSelection.width * scale);
-      const scaledHeight = Math.round(croppedSelection.height * scale);
-      const scaledSelection = croppedSelection.resize(scaledWidth, scaledHeight);
-      console.log(`Scaled to: ${scaledSelection.width}x${scaledSelection.height} (preserving aspect ratio)`);
-      
-      // 3. Create 1000x1000 output canvas with white background
+      // 3. Create 1000x1000 output canvas with white background using fill()
       outputImage = new Image(targetSize, targetSize);
-      for (let py = 1; py <= targetSize; py++) {
-        for (let px = 1; px <= targetSize; px++) {
-          outputImage.setPixelAt(px, py, 0xFFFFFFFF); // White
-        }
-      }
+      outputImage.fill(0xFFFFFFFF); // White with full opacity (RGBA)
+      console.log(`Step 3 - Canvas created: ${outputImage.width}x${outputImage.height}`);
       
-      // 4. Center horizontally and align to bottom
-      const offsetX = Math.floor((targetSize - scaledWidth) / 2);
-      const offsetY = targetSize - scaledHeight; // Align to bottom edge
-      outputImage.composite(scaledSelection, offsetX, offsetY);
+      // 4. Center horizontally and place in bottom half
+      const offsetX = Math.floor((targetSize - fittedSelection.width) / 2);
+      const offsetY = targetSize - fittedSelection.height; // Align to bottom
+      outputImage.composite(fittedSelection, offsetX, offsetY);
       
-      console.log(`Final output: ${outputImage.width}x${outputImage.height} (selection at x=${offsetX}, y=${offsetY})`);
+      console.log(`Step 4 - Composited at: x=${offsetX}, y=${offsetY}`);
     } else {
       // Standard mode: just crop
       const croppedImage = image.crop(safeX, safeY, safeWidth, safeHeight);
