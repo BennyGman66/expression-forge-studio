@@ -43,7 +43,7 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
       const { data } = await supabase
         .from("talent_looks")
         .select("id, name")
-        .eq("talent_id", talentId)
+        .eq("digital_talent_id", talentId)
         .order("created_at");
       if (data) {
         setLooks(data);
@@ -332,7 +332,7 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
           </CardContent>
 
           {/* Looks Quick Switcher */}
-          {looks.length > 1 && (
+          {looks.length > 0 && (
             <div className="border-t p-3">
               <p className="text-xs text-muted-foreground mb-2">Switch Look</p>
               <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
