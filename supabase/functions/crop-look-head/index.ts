@@ -49,34 +49,40 @@ serve(async (req) => {
 
     console.log(`Original image: ${dimensions.width}x${dimensions.height}`);
 
-    // Calculate the final output composition:
-    // - The cropped head region is placed at the bottom
-    // - Empty space (white) fills above to reach outputSize x outputSize
+    // NEW LOGIC: The user's crop box represents the BOTTOM HALF of the final output
+    // We need to expand upward by the same height to create the full square
     
-    // For now, we'll use a simpler approach: 
-    // Call the AI image generation to create the padded version
-    // OR use canvas-like processing
+    // Calculate the expanded region (double the height, going upward)
+    const expandedHeight = cropHeight * 2;
+    const expandedY = Math.max(0, cropY - cropHeight); // Move up by cropHeight
     
-    // Since Deno doesn't have native canvas, we'll use a different approach:
-    // Use the Lovable AI to inpaint/extend the image
+    // How much actual space we got from the image above the selection
+    const actualTopSpace = cropY - expandedY;
     
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY not configured");
-    }
+    console.log(`Expanded region: starting at Y=${expandedY}, height=${expandedHeight}, actualTopSpace=${actualTopSpace}`);
 
-    // For V1, let's create a simple cropped version without padding
-    // and handle the padding on the client side or via AI later
+    // Calculate crop percentages for the expanded region
+    const cropXPercent = (cropX / dimensions.width) * 100;
+    const cropYPercent = (expandedY / dimensions.height) * 100;
+    const cropWidthPercent = (cropWidth / dimensions.width) * 100;
     
-    // Use the existing crop-and-store-image logic
+    // If we have enough space above, use the full expanded height
+    // If not, we take what we can and the crop-and-store will handle it
+    const effectiveHeight = Math.min(expandedHeight, dimensions.height - expandedY);
+    const cropHeightPercent = (effectiveHeight / dimensions.height) * 100;
+    
+    console.log(`Crop percentages: x=${cropXPercent}%, y=${cropYPercent}%, w=${cropWidthPercent}%, h=${cropHeightPercent}%`);
+
+    // Call crop-and-store-image with the expanded region
     const cropResponse = await supabase.functions.invoke("crop-and-store-image", {
       body: {
         imageUrl,
-        cropX: cropX / dimensions.width * 100, // Convert to percentage
-        cropY: cropY / dimensions.height * 100,
-        cropWidth: cropWidth / dimensions.width * 100,
-        cropHeight: cropHeight / dimensions.height * 100,
+        cropX: cropXPercent,
+        cropY: cropYPercent,
+        cropWidth: cropWidthPercent,
+        cropHeight: cropHeightPercent,
         cropId: `look-head-${imageId}`,
+        targetSize: outputSize || 1000, // Target 1000x1000 output
       },
     });
 
