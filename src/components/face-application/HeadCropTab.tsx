@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowRight, Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage } from "@/types/face-application";
 
@@ -32,6 +32,7 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, cropX: 0, cropY: 0, cropWidth: 0, cropHeight: 0 });
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [processing, setProcessing] = useState(false);
+  const [expanding, setExpanding] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const { toast } = useToast();
@@ -310,6 +311,43 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
     }
   };
 
+  const handleExpandImage = async () => {
+    if (!currentImage) return;
+    setExpanding(true);
+
+    try {
+      const response = await supabase.functions.invoke("expand-image-top", {
+        body: {
+          imageUrl: currentImage.source_url,
+          imageId: currentImage.id,
+          paddingPercent: 10,
+        },
+      });
+
+      if (response.error) throw response.error;
+
+      const { expandedUrl } = response.data;
+
+      // Update local state with new source URL
+      setSourceImages((prev) =>
+        prev.map((img) =>
+          img.id === currentImage.id
+            ? { ...img, source_url: expandedUrl }
+            : img
+        )
+      );
+
+      toast({ 
+        title: "Image expanded", 
+        description: "Added 10% white space to top of image." 
+      });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setExpanding(false);
+    }
+  };
+
   const allCropped = sourceImages.every((img) => img.head_cropped_url);
 
   // Calculate crop box position accounting for letterboxing
@@ -490,9 +528,19 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
                     <span className="text-green-600 font-medium">Green box</span> = your selection (becomes bottom half). 
                     Top half will be white padding. Output: {OUTPUT_SIZE}×{OUTPUT_SIZE}px
                   </p>
-                  <Button onClick={handleApplyCrop} disabled={processing}>
-                    {processing ? "Processing..." : "Apply Crop"}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={handleExpandImage} 
+                      disabled={expanding || processing}
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      {expanding ? "Expanding..." : "Increase Image"}
+                    </Button>
+                    <Button onClick={handleApplyCrop} disabled={processing || expanding}>
+                      {processing ? "Processing..." : "Apply Crop"}
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Preview of Full Output */}

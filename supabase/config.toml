@@ -80,3 +80,6 @@ verify_jwt = false
 
 [functions.regenerate-output]
 verify_jwt = false
+
+[functions.expand-image-top]
+verify_jwt = false
