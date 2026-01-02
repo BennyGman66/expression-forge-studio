@@ -122,7 +122,7 @@ export function OutputImageCard({
           )}
 
           {/* Three-dots menu */}
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-20">
             <DropdownMenu>
               <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                 <Button variant="secondary" size="icon" className="h-7 w-7">
