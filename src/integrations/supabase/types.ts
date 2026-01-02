@@ -1157,6 +1157,7 @@ export type Database = {
           error_message: string | null
           final_prompt: string | null
           id: string
+          is_face_foundation: boolean | null
           pairing_id: string
           status: string
           stored_url: string | null
@@ -1167,6 +1168,7 @@ export type Database = {
           error_message?: string | null
           final_prompt?: string | null
           id?: string
+          is_face_foundation?: boolean | null
           pairing_id: string
           status?: string
           stored_url?: string | null
@@ -1177,6 +1179,7 @@ export type Database = {
           error_message?: string | null
           final_prompt?: string | null
           id?: string
+          is_face_foundation?: boolean | null
           pairing_id?: string
           status?: string
           stored_url?: string | null

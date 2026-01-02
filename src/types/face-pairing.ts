@@ -33,6 +33,7 @@ export interface FacePairingOutput {
   stored_url: string | null;
   status: 'pending' | 'running' | 'completed' | 'failed';
   error_message: string | null;
+  is_face_foundation?: boolean;
   created_at: string;
 }
 
