@@ -49,26 +49,21 @@ serve(async (req) => {
 
     console.log(`Original image: ${dimensions.width}x${dimensions.height}`);
 
-    // Convert pixel coordinates to percentages for crop-and-store-image
-    const cropXPercent = (cropX / dimensions.width) * 100;
-    const cropYPercent = (cropY / dimensions.height) * 100;
-    const cropWidthPercent = (cropWidth / dimensions.width) * 100;
-    const cropHeightPercent = (cropHeight / dimensions.height) * 100;
-
-    console.log(`Crop percentages: x=${cropXPercent}%, y=${cropYPercent}%, w=${cropWidthPercent}%, h=${cropHeightPercent}%`);
-
-    // Call crop-and-store-image with the selection coordinates
+    // Call crop-and-store-image with pixel coordinates directly
     // Using 'bottom-half' mode: the selection becomes the bottom half of the output
+    console.log(`Passing pixel coords to crop-and-store-image: x=${cropX}, y=${cropY}, w=${cropWidth}, h=${cropHeight}`);
+    
     const cropResponse = await supabase.functions.invoke("crop-and-store-image", {
       body: {
         imageUrl,
-        cropX: cropXPercent,
-        cropY: cropYPercent,
-        cropWidth: cropWidthPercent,
-        cropHeight: cropHeightPercent,
+        cropX,
+        cropY,
+        cropWidth,
+        cropHeight,
         cropId: `look-head-${imageId}`,
         targetSize: outputSize,
-        mode: 'bottom-half', // Selection goes in bottom half, top half is white
+        mode: 'bottom-half',
+        usePixelCoords: true, // Use pixel coordinates directly, no percentage conversion
       },
     });
 
