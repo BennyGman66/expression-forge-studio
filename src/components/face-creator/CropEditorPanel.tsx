@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan, AlertTriangle, Sparkles, Trash2, Upload } from "lucide-react";
+import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan, AlertTriangle, Sparkles, Trash2, Upload, ImageIcon, FileImage } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useFaceDetector } from "@/hooks/useFaceDetector";
@@ -76,6 +76,8 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, failed: 0 });
   const [job, setJob] = useState<FaceJob | null>(null);
   const [uploadingRefs, setUploadingRefs] = useState(false);
+  const [generatingCropFiles, setGeneratingCropFiles] = useState(false);
+  const [cropFileProgress, setCropFileProgress] = useState({ current: 0, total: 0 });
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '4:5'>('1:1');
   const [cropRect, setCropRect] = useState({ x: 0, y: 0, width: 200, height: 200 });
   const [interactionMode, setInteractionMode] = useState<'none' | 'move' | 'nw' | 'ne' | 'sw' | 'se'>('none');
@@ -1104,6 +1106,81 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     }
   };
 
+  // Generate missing crop files for crops that have metadata but no stored file
+  const handleGenerateMissingCropFiles = async () => {
+    const cropsWithoutFiles = images.filter(img => img.crop && !img.crop.cropped_stored_url);
+    
+    if (cropsWithoutFiles.length === 0) {
+      toast({ title: "All Done", description: "All crops already have files generated" });
+      return;
+    }
+    
+    setGeneratingCropFiles(true);
+    setCropFileProgress({ current: 0, total: cropsWithoutFiles.length });
+    
+    let generated = 0;
+    let failed = 0;
+    
+    for (const image of cropsWithoutFiles) {
+      if (!image.crop) continue;
+      
+      try {
+        const imageUrl = image.stored_url || image.source_url;
+        
+        console.log(`[CropEditor] Generating crop file for ${image.id}...`);
+        
+        const { data: cropResult, error: cropError } = await supabase.functions.invoke('crop-and-store-image', {
+          body: {
+            imageUrl,
+            cropX: image.crop.crop_x,
+            cropY: image.crop.crop_y,
+            cropWidth: image.crop.crop_width,
+            cropHeight: image.crop.crop_height,
+            cropId: image.crop.id,
+          }
+        });
+        
+        if (cropError) {
+          console.error(`[CropEditor] Failed to generate crop file:`, cropError);
+          failed++;
+        } else if (cropResult?.success && cropResult.croppedUrl) {
+          // Update the crop record with the new URL
+          await supabase
+            .from('face_crops')
+            .update({ cropped_stored_url: cropResult.croppedUrl })
+            .eq('id', image.crop.id);
+          
+          generated++;
+          console.log(`[CropEditor] Generated crop file: ${cropResult.croppedUrl}`);
+        } else {
+          console.error(`[CropEditor] Crop failed:`, cropResult?.error);
+          failed++;
+        }
+      } catch (err) {
+        console.error(`[CropEditor] Error generating crop for ${image.id}:`, err);
+        failed++;
+      }
+      
+      setCropFileProgress(prev => ({ ...prev, current: prev.current + 1 }));
+    }
+    
+    setGeneratingCropFiles(false);
+    
+    if (generated > 0) {
+      toast({ 
+        title: "Crop Files Generated", 
+        description: `Generated ${generated} crop files${failed > 0 ? `, ${failed} failed` : ''}` 
+      });
+      await fetchImagesWithCrops();
+    } else if (failed > 0) {
+      toast({ 
+        title: "Generation Failed", 
+        description: `Failed to generate ${failed} crop files`, 
+        variant: "destructive" 
+      });
+    }
+  };
+
   const getAspectMultiplier = () => aspectRatio === '1:1' ? 1 : 1.25;
 
   const handleCropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1335,6 +1412,28 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
             <Trash2 className="h-4 w-4 mr-2" />
             Reset All
           </Button>
+          {/* Generate missing crop files button */}
+          {images.some(img => img.crop && !img.crop.cropped_stored_url) && (
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleGenerateMissingCropFiles}
+              disabled={generatingCropFiles || generating || loading}
+              className="border-orange-500 text-orange-600 hover:bg-orange-50"
+            >
+              {generatingCropFiles ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {cropFileProgress.current}/{cropFileProgress.total}
+                </>
+              ) : (
+                <>
+                  <FileImage className="h-4 w-4 mr-2" />
+                  Generate {images.filter(img => img.crop && !img.crop.cropped_stored_url).length} Crop Files
+                </>
+              )}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={fetchImagesWithCrops}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
@@ -1476,14 +1575,25 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
                         />
                         {image.crop && (
                           <div className="absolute top-1 right-1 flex items-center gap-0.5">
-                            <Badge 
-                              className={`text-[10px] px-1 ${
-                                image.crop.is_auto ? 'bg-gray-400' : 'bg-green-500'
-                              }`}
-                              title={image.crop.is_auto ? 'AI-applied crop' : 'Manually applied crop'}
-                            >
-                              ✓
-                            </Badge>
+                            {/* Crop file status indicator */}
+                            {image.crop.cropped_stored_url ? (
+                              <Badge 
+                                className="text-[10px] px-1 bg-green-600"
+                                title="Crop with file ready for pairing"
+                              >
+                                <FileImage className="h-2.5 w-2.5 mr-0.5" />
+                                ✓
+                              </Badge>
+                            ) : (
+                              <Badge 
+                                className={`text-[10px] px-1 ${
+                                  image.crop.is_auto ? 'bg-gray-400' : 'bg-orange-500'
+                                }`}
+                                title={`${image.crop.is_auto ? 'AI' : 'Manual'} crop - file not generated`}
+                              >
+                                ✓
+                              </Badge>
+                            )}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
