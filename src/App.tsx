@@ -33,6 +33,7 @@ const App = () => (
           <Route path="/review/:reviewId" element={<ClientReview />} />
           <Route path="/face-creator" element={<FaceCreator />} />
           <Route path="/face-application" element={<FaceApplication />} />
+          <Route path="/face-application/:projectId" element={<FaceApplication />} />
           <Route path="/digital-talent" element={<DigitalTalent />} />
           <Route path="/tommy-hilfiger" element={<TommyHilfiger />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

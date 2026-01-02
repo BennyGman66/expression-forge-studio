@@ -17,11 +17,12 @@ interface TalentInfo {
 }
 
 interface FaceMatchTabProps {
+  projectId: string;
   talentId: string | null;
   onContinue: () => void;
 }
 
-export function FaceMatchTab({ talentId, onContinue }: FaceMatchTabProps) {
+export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabProps) {
   const [looks, setLooks] = useState<LookWithImages[]>([]);
   const [faceFoundations, setFaceFoundations] = useState<FaceFoundation[]>([]);
   const [matches, setMatches] = useState<Record<string, string>>({}); // sourceImageId -> faceUrl

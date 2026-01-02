@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage } from "@/types/face-application";
 
 interface HeadCropTabProps {
+  projectId: string;
   lookId: string | null;
   talentId: string | null;
   onLookChange: (lookId: string) => void;
@@ -20,7 +21,7 @@ interface TalentLook {
 
 const OUTPUT_SIZE = 1000; // Final crop size
 
-export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: HeadCropTabProps) {
+export function HeadCropTab({ projectId, lookId, talentId, onLookChange, onContinue }: HeadCropTabProps) {
   const [looks, setLooks] = useState<TalentLook[]>([]);
   const [sourceImages, setSourceImages] = useState<LookSourceImage[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);

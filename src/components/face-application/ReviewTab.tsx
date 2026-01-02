@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FaceApplicationOutput } from "@/types/face-application";
 
 interface ReviewTabProps {
+  projectId: string;
   lookId: string | null;
   talentId: string | null;
 }
@@ -15,7 +16,7 @@ interface GroupedOutputs {
   [view: string]: FaceApplicationOutput[];
 }
 
-export function ReviewTab({ lookId, talentId }: ReviewTabProps) {
+export function ReviewTab({ projectId, lookId, talentId }: ReviewTabProps) {
   const [outputs, setOutputs] = useState<FaceApplicationOutput[]>([]);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
