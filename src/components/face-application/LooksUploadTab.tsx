@@ -66,10 +66,11 @@ export function LooksUploadTab({
     fetchTalents();
   }, []);
 
-  // Fetch looks for selected talent
+  // Fetch looks for selected talent within this project
   useEffect(() => {
-    if (!selectedTalentId) {
+    if (!selectedTalentId || !projectId) {
       setLooks([]);
+      setSelectedLookId(null);
       return;
     }
     const fetchLooks = async () => {
@@ -77,11 +78,20 @@ export function LooksUploadTab({
         .from("talent_looks")
         .select("id, name, product_type")
         .eq("digital_talent_id", selectedTalentId)
+        .eq("project_id", projectId)
         .order("name");
-      if (data) setLooks(data);
+      if (data) {
+        setLooks(data);
+        // Auto-select first look if none selected, or clear if no looks
+        if (data.length > 0 && !data.find(l => l.id === selectedLookId)) {
+          setSelectedLookId(data[0].id);
+        } else if (data.length === 0) {
+          setSelectedLookId(null);
+        }
+      }
     };
     fetchLooks();
-  }, [selectedTalentId]);
+  }, [selectedTalentId, projectId]);
 
   // Fetch source images for selected look
   useEffect(() => {
