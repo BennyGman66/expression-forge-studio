@@ -293,12 +293,12 @@ export function LooksLibraryPanel() {
           </div>
           <div className="space-y-2">
             <Label>Digital Talent (optional)</Label>
-            <Select value={newLookDigitalTalentId} onValueChange={setNewLookDigitalTalentId}>
+            <Select value={newLookDigitalTalentId || "none"} onValueChange={(v) => setNewLookDigitalTalentId(v === "none" ? "" : v)}>
               <SelectTrigger>
                 <SelectValue placeholder="Select talent" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">None</SelectItem>
+                <SelectItem value="none">None</SelectItem>
                 {digitalTalents.map(t => (
                   <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                 ))}
@@ -386,14 +386,14 @@ export function LooksLibraryPanel() {
                       <div className="flex items-center gap-2">
                         <Label className="text-xs">Digital Talent:</Label>
                         <Select
-                          value={look.digital_talent_id || ''}
-                          onValueChange={(v) => handleUpdateDigitalTalent(look.id, v || null)}
+                          value={look.digital_talent_id || "none"}
+                          onValueChange={(v) => handleUpdateDigitalTalent(look.id, v === "none" ? null : v)}
                         >
                           <SelectTrigger className="h-8 w-36 text-xs">
                             <SelectValue placeholder="None" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">None</SelectItem>
+                            <SelectItem value="none">None</SelectItem>
                             {digitalTalents.map(t => (
                               <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                             ))}
