@@ -106,22 +106,22 @@ async function processPairedGeneration(
     const attemptsPerPairing = job?.attempts_per_pairing || 1;
     const model = job?.model || 'google/gemini-2.5-flash-image-preview';
 
-    // Get all pairings with their related data
+    // Get all pairings with their related data (using Digital Talent model)
     const { data: pairings, error: pairingsError } = await supabase
       .from('face_pairings')
       .select(`
         id,
         outfit_description,
         cropped_face_id,
-        talent_image_id,
+        digital_talent_id,
         face_scrape_images!cropped_face_id (
           id,
           source_url,
           stored_url
         ),
-        talent_images!talent_image_id (
+        digital_talents!digital_talent_id (
           id,
-          stored_url
+          front_face_url
         )
       `)
       .eq('job_id', jobId)
@@ -149,10 +149,10 @@ async function processPairedGeneration(
 
     for (const pairing of pairings) {
       const faceImage = pairing.face_scrape_images;
-      const talentImage = pairing.talent_images;
+      const digitalTalent = pairing.digital_talents;
 
-      if (!faceImage || !talentImage) {
-        console.log(`[generate-paired-images] Missing images for pairing ${pairing.id}`);
+      if (!faceImage || !digitalTalent?.front_face_url) {
+        console.log(`[generate-paired-images] Missing images for pairing ${pairing.id} - faceImage: ${!!faceImage}, digitalTalent: ${!!digitalTalent}, front_face_url: ${digitalTalent?.front_face_url}`);
         await supabase
           .from('face_pairings')
           .update({ status: 'failed' })
@@ -166,11 +166,11 @@ async function processPairedGeneration(
         .from('face_crops')
         .select('cropped_stored_url')
         .eq('scrape_image_id', faceImage.id)
-        .single();
+        .maybeSingle();
       
       // Prioritize cropped image, then fall back to original
       const image1Url = cropData?.cropped_stored_url || faceImage.stored_url || faceImage.source_url;
-      const image2Url = talentImage.stored_url;
+      const image2Url = digitalTalent.front_face_url;
       
       console.log(`[generate-paired-images] Using image1: ${image1Url.substring(0, 80)}...`);
       const outfitDescription = pairing.outfit_description || 'A fashionable outfit';
