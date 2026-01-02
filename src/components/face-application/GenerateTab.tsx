@@ -10,6 +10,7 @@ import { LookSourceImage, FaceApplicationJob } from "@/types/face-application";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 
 interface GenerateTabProps {
+  projectId: string;
   lookId: string | null;
   talentId: string | null;
   onContinue: () => void;
@@ -17,7 +18,7 @@ interface GenerateTabProps {
 
 const ATTEMPT_OPTIONS = [1, 2, 4, 6, 8, 12, 24];
 
-export function GenerateTab({ lookId, talentId, onContinue }: GenerateTabProps) {
+export function GenerateTab({ projectId, lookId, talentId, onContinue }: GenerateTabProps) {
   const [sourceImages, setSourceImages] = useState<LookSourceImage[]>([]);
   const [outfitDescriptions, setOutfitDescriptions] = useState<Record<string, string>>({});
   const [faceMatches, setFaceMatches] = useState<Record<string, string>>({});
@@ -68,7 +69,7 @@ export function GenerateTab({ lookId, talentId, onContinue }: GenerateTabProps) 
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
-      if (data) setJob(data as FaceApplicationJob);
+      if (data) setJob(data as unknown as FaceApplicationJob);
     };
     fetchJob();
   }, [lookId, talentId]);
@@ -85,7 +86,7 @@ export function GenerateTab({ lookId, talentId, onContinue }: GenerateTabProps) 
         .single();
       
       if (data) {
-        setJob(data as FaceApplicationJob);
+        setJob(data as unknown as FaceApplicationJob);
         if (data.status === "completed") {
           setIsGenerating(false);
           toast({ title: "Generation complete", description: "All faces have been generated." });
@@ -156,7 +157,7 @@ export function GenerateTab({ lookId, talentId, onContinue }: GenerateTabProps) 
         .single();
 
       if (jobError) throw jobError;
-      setJob(newJob as FaceApplicationJob);
+      setJob(newJob as unknown as FaceApplicationJob);
 
       // Trigger generation
       const response = await supabase.functions.invoke("generate-face-application", {

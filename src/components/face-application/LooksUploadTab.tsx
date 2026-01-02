@@ -9,6 +9,7 @@ import { Upload, Plus, ArrowRight, Image as ImageIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface LooksUploadTabProps {
+  projectId: string;
   selectedLookId: string | null;
   setSelectedLookId: (id: string | null) => void;
   selectedTalentId: string | null;
@@ -37,6 +38,7 @@ interface LookSourceImage {
 const VIEWS = ['front', 'back', 'side', 'detail'] as const;
 
 export function LooksUploadTab({
+  projectId,
   selectedLookId,
   setSelectedLookId,
   selectedTalentId,
@@ -119,6 +121,7 @@ export function LooksUploadTab({
         name: newLookName.trim(),
         digital_talent_id: selectedTalentId,
         talent_id: talentId,
+        project_id: projectId,
       })
       .select()
       .single();

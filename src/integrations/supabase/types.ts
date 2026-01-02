@@ -750,6 +750,7 @@ export type Database = {
           look_id: string
           model: string | null
           progress: number | null
+          project_id: string | null
           status: string | null
           total: number | null
           updated_at: string | null
@@ -763,6 +764,7 @@ export type Database = {
           look_id: string
           model?: string | null
           progress?: number | null
+          project_id?: string | null
           status?: string | null
           total?: number | null
           updated_at?: string | null
@@ -776,11 +778,20 @@ export type Database = {
           look_id?: string
           model?: string | null
           progress?: number | null
+          project_id?: string | null
           status?: string | null
           total?: number | null
           updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "face_application_jobs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "face_application_projects"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       face_application_outputs: {
         Row: {
@@ -841,6 +852,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      face_application_projects: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       face_crops: {
         Row: {
@@ -1880,6 +1915,7 @@ export type Database = {
           id: string
           name: string
           product_type: string | null
+          project_id: string | null
           talent_id: string
         }
         Insert: {
@@ -1888,6 +1924,7 @@ export type Database = {
           id?: string
           name: string
           product_type?: string | null
+          project_id?: string | null
           talent_id: string
         }
         Update: {
@@ -1896,6 +1933,7 @@ export type Database = {
           id?: string
           name?: string
           product_type?: string | null
+          project_id?: string | null
           talent_id?: string
         }
         Relationships: [
@@ -1904,6 +1942,13 @@ export type Database = {
             columns: ["digital_talent_id"]
             isOneToOne: false
             referencedRelation: "digital_talents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_looks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "face_application_projects"
             referencedColumns: ["id"]
           },
           {
