@@ -136,7 +136,7 @@ export function FaceMatchTab({ lookId, talentId, onContinue }: FaceMatchTabProps
                 <div className="space-y-2">
                   <p className="text-sm font-medium capitalize">{img.view} View</p>
                   <img
-                    src={img.head_cropped_url || img.source_url}
+                    src={img.head_cropped_url ? `${img.head_cropped_url}?t=${Date.now()}` : img.source_url}
                     alt={img.view}
                     className="w-full aspect-square object-cover rounded-lg"
                   />
