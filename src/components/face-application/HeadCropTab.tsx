@@ -282,7 +282,8 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
         })
         .eq("id", currentImage.id);
 
-      // Update local state
+      // Update local state with cache-busted URL
+      const cacheBustedUrl = `${croppedUrl}?t=${Date.now()}`;
       setSourceImages((prev) =>
         prev.map((img) =>
           img.id === currentImage.id
@@ -292,7 +293,7 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
                 head_crop_y: Math.round(cropBox.y),
                 head_crop_width: Math.round(cropBox.width),
                 head_crop_height: Math.round(cropBox.height),
-                head_cropped_url: croppedUrl,
+                head_cropped_url: cacheBustedUrl,
               }
             : img
         )
