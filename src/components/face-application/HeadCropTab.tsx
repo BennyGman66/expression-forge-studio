@@ -24,13 +24,14 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
   const [looks, setLooks] = useState<TalentLook[]>([]);
   const [sourceImages, setSourceImages] = useState<LookSourceImage[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 200, height: 200 });
+const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isResizing, setIsResizing] = useState(false);
   const [resizeCorner, setResizeCorner] = useState<'nw' | 'ne' | 'sw' | 'se' | null>(null);
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, cropX: 0, cropY: 0, cropWidth: 0, cropHeight: 0 });
   const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
+  const [imageReady, setImageReady] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [expanding, setExpanding] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -82,6 +83,13 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
 
   const currentImage = sourceImages[selectedIndex];
 
+  // Reset state when switching images to prevent stale dimensions
+  useEffect(() => {
+    setImageReady(false);
+    setCropBox({ x: 0, y: 0, width: 0, height: 0 });
+    setImageDimensions({ width: 0, height: 0 });
+  }, [selectedIndex]);
+
   // Helper to get actual rendered image bounds (accounting for object-contain letterboxing)
   const getImageBounds = () => {
     if (!imageRef.current || !imageDimensions.width) return null;
@@ -121,18 +129,29 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
 
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
-    setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+    const newDimensions = { width: img.naturalWidth, height: img.naturalHeight };
+    setImageDimensions(newDimensions);
     
-    // Default crop to top-center if no existing crop
-    if (!currentImage?.head_crop_x) {
-      const defaultWidth = Math.min(img.naturalWidth * 0.4, 400);
+    // Set crop from saved data if available, otherwise use defaults
+    if (currentImage?.head_crop_x !== null && currentImage?.head_crop_x !== undefined) {
       setCropBox({
-        x: (img.naturalWidth - defaultWidth) / 2,
+        x: currentImage.head_crop_x,
+        y: currentImage.head_crop_y || 0,
+        width: currentImage.head_crop_width || 200,
+        height: currentImage.head_crop_height || 200,
+      });
+    } else {
+      // Default crop to top-center
+      const defaultWidth = Math.min(newDimensions.width * 0.4, 400);
+      setCropBox({
+        x: (newDimensions.width - defaultWidth) / 2,
         y: 20,
         width: defaultWidth,
         height: defaultWidth,
       });
     }
+    
+    setImageReady(true);
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -474,17 +493,7 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
             {sourceImages.map((img, index) => (
               <button
                 key={img.id}
-                onClick={() => {
-                  setSelectedIndex(index);
-                  if (img.head_crop_x !== null) {
-                    setCropBox({
-                      x: img.head_crop_x,
-                      y: img.head_crop_y!,
-                      width: img.head_crop_width!,
-                      height: img.head_crop_height!,
-                    });
-                  }
-                }}
+                onClick={() => setSelectedIndex(index)}
                 className={`
                   w-full flex items-center gap-3 p-2 rounded-lg transition-colors
                   ${index === selectedIndex ? "bg-primary/10 border border-primary" : "hover:bg-muted"}
@@ -573,28 +582,29 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
                     onLoad={handleImageLoad}
                     draggable={false}
                   />
-                  {/* No expanded area indicator needed - the selection IS the bottom half */}
-                  {/* Crop overlay (green box = bottom half of output) */}
-                  <div
-                    className="absolute border-2 border-green-500 bg-green-500/10 cursor-move"
-                    style={getCropStyle()}
-                  >
-                    {/* Corner resize handles */}
-                    {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
-                      <div
-                        key={corner}
-                        className="absolute w-3 h-3 bg-green-500 border-2 border-white rounded-full shadow-sm"
-                        style={{
-                          cursor: corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize',
-                          top: corner.includes('n') ? -6 : undefined,
-                          bottom: corner.includes('s') ? -6 : undefined,
-                          left: corner.includes('w') ? -6 : undefined,
-                          right: corner.includes('e') ? -6 : undefined,
-                        }}
-                        onMouseDown={(e) => handleCornerMouseDown(e, corner)}
-                      />
-                    ))}
-                  </div>
+                  {/* Crop overlay (green box = bottom half of output) - only show when ready */}
+                  {imageReady && imageDimensions.width > 0 && cropBox.width > 0 && (
+                    <div
+                      className="absolute border-2 border-green-500 bg-green-500/10 cursor-move"
+                      style={getCropStyle()}
+                    >
+                      {/* Corner resize handles */}
+                      {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+                        <div
+                          key={corner}
+                          className="absolute w-3 h-3 bg-green-500 border-2 border-white rounded-full shadow-sm"
+                          style={{
+                            cursor: corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize',
+                            top: corner.includes('n') ? -6 : undefined,
+                            bottom: corner.includes('s') ? -6 : undefined,
+                            left: corner.includes('w') ? -6 : undefined,
+                            right: corner.includes('e') ? -6 : undefined,
+                          }}
+                          onMouseDown={(e) => handleCornerMouseDown(e, corner)}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-between items-center">
@@ -642,22 +652,24 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
                         className="w-full h-full object-contain"
                         draggable={false}
                       />
-                    ) : (
+                    ) : imageReady && getLivePreviewStyle() ? (
                       <div className="absolute bottom-0 left-0 right-0 h-1/2 overflow-hidden">
-                        {getLivePreviewStyle() && (
-                          <img
-                            src={currentImage.source_url}
-                            alt="Live preview"
-                            className="absolute"
-                            style={{
-                              width: getLivePreviewStyle()!.width,
-                              height: getLivePreviewStyle()!.height,
-                              left: getLivePreviewStyle()!.left,
-                              top: getLivePreviewStyle()!.top,
-                            }}
-                            draggable={false}
-                          />
-                        )}
+                        <img
+                          src={currentImage.source_url}
+                          alt="Live preview"
+                          className="absolute"
+                          style={{
+                            width: getLivePreviewStyle()!.width,
+                            height: getLivePreviewStyle()!.height,
+                            left: getLivePreviewStyle()!.left,
+                            top: getLivePreviewStyle()!.top,
+                          }}
+                          draggable={false}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+                        Loading...
                       </div>
                     )}
                   </div>
