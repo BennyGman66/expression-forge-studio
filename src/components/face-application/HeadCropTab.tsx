@@ -320,7 +320,7 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
         body: {
           imageUrl: currentImage.source_url,
           imageId: currentImage.id,
-          paddingPercent: 10,
+          paddingPercent: 20,
         },
       });
 
@@ -339,7 +339,7 @@ export function HeadCropTab({ lookId, talentId, onLookChange, onContinue }: Head
 
       toast({ 
         title: "Image expanded", 
-        description: "Added 10% white space to top of image." 
+        description: "Added 20% white space to top of image." 
       });
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
