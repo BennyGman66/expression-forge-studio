@@ -1033,7 +1033,11 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       });
     } catch (error) {
       console.error('Error saving crop:', error);
-      toast({ title: "Error", description: "Failed to save crop", variant: "destructive" });
+      toast({ 
+        title: "Error", 
+        description: `Failed to save crop: ${error instanceof Error ? error.message : 'Unknown error'}`, 
+        variant: "destructive" 
+      });
     } finally {
       setLoading(false);
     }
