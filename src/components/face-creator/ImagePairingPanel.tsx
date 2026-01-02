@@ -39,6 +39,7 @@ import type { DigitalTalent } from "@/types/digital-talent";
 import { PromoteToTwinDialog } from "@/components/shared/PromoteToTwinDialog";
 import { OutputImageCard } from "./OutputImageCard";
 import { BulkActionsToolbar } from "./BulkActionsToolbar";
+import { CropOutputDialog } from "./CropOutputDialog";
 
 interface ImagePairingPanelProps {
   runId: string | null;
@@ -107,6 +108,11 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     gender: string;
     representativeImageUrl: string | null;
   } | null>(null);
+
+  // Crop dialog state
+  const [cropDialogOpen, setCropDialogOpen] = useState(false);
+  const [cropOutputId, setCropOutputId] = useState<string | null>(null);
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
 
   const handlePromoteClick = (e: React.MouseEvent, identity: IdentityForPairing) => {
     e.stopPropagation();
@@ -1481,6 +1487,30 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
     }
   };
 
+  // Open crop dialog for an output
+  const openCropDialog = (outputId: string) => {
+    const allOutputs = Object.values(outputs).flat();
+    const output = allOutputs.find(o => o.id === outputId);
+    if (output?.stored_url) {
+      setCropOutputId(outputId);
+      setCropImageUrl(output.stored_url);
+      setCropDialogOpen(true);
+    }
+  };
+
+  // Handle crop completion
+  const handleCropComplete = (outputId: string, newUrl: string) => {
+    setOutputs(prev => {
+      const updated = { ...prev };
+      for (const pairingId in updated) {
+        updated[pairingId] = updated[pairingId].map(o =>
+          o.id === outputId ? { ...o, stored_url: newUrl } : o
+        );
+      }
+      return updated;
+    });
+  };
+
   // Clear selection
   const clearSelection = () => {
     setSelectedOutputs(new Set());
@@ -1748,7 +1778,22 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
                           onToggleSelect={toggleOutputSelection}
                           onDelete={deleteOutput}
                           onRegenerate={regenerateOutput}
+                          onCrop={openCropDialog}
                           isRegenerating={regeneratingOutputs.has(output.id)}
+                          sourcePreview={
+                            <div className="w-8 h-10 rounded overflow-hidden bg-muted/20">
+                              {croppedUrl ? (
+                                <img src={croppedUrl} alt="Source" className="w-full h-full object-cover" />
+                              ) : faceCrop && originalUrl ? (
+                                <CroppedFacePreview imageUrl={originalUrl} crop={faceCrop} />
+                              ) : originalUrl ? (
+                                <img src={originalUrl} alt="Source" className="w-full h-full object-cover" />
+                              ) : null}
+                            </div>
+                          }
+                          talentAvatar={pairing.digital_talents?.front_face_url}
+                        />
+                      ));
                           sourcePreview={
                             <div className="w-8 h-10 rounded overflow-hidden bg-muted/20">
                               {croppedUrl ? (
@@ -1781,6 +1826,15 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
         onClearSelection={clearSelection}
         onDelete={deleteOutputs}
         onDownload={downloadSelected}
+      />
+
+      {/* Crop Dialog */}
+      <CropOutputDialog
+        open={cropDialogOpen}
+        onOpenChange={setCropDialogOpen}
+        outputId={cropOutputId}
+        imageUrl={cropImageUrl}
+        onCropComplete={handleCropComplete}
       />
     </div>
   );
