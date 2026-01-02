@@ -44,11 +44,19 @@ const apps = [
     disabled: false,
   },
   {
-    id: "face-creator",
-    title: "Face Creator",
-    description: "Collect & segment model faces for reference datasets.",
+    id: "talent-face-library",
+    title: "Talent Face Library",
+    description: "Build reference face datasets per digital talent.",
     icon: Grid3X3,
     path: "/face-creator",
+    disabled: false,
+  },
+  {
+    id: "face-application",
+    title: "Face Application",
+    description: "Apply digital talent faces to look imagery.",
+    icon: Users,
+    path: "/face-application",
     disabled: false,
   },
 ];

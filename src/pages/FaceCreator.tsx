@@ -26,8 +26,8 @@ export default function FaceCreator() {
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
-          <h1 className="text-xl font-semibold">Face Creator</h1>
-          <span className="text-muted-foreground text-sm">Scrape & Segment Models</span>
+          <h1 className="text-xl font-semibold">Talent Face Library</h1>
+          <span className="text-muted-foreground text-sm">Build reference face datasets</span>
         </div>
         <div className="w-10 h-10 rounded-full bg-lime-400 flex items-center justify-center text-sm font-medium">
           BG

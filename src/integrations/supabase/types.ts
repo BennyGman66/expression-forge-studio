@@ -740,6 +740,108 @@ export type Database = {
           },
         ]
       }
+      face_application_jobs: {
+        Row: {
+          attempts_per_view: number | null
+          created_at: string | null
+          digital_talent_id: string
+          id: string
+          logs: Json | null
+          look_id: string
+          model: string | null
+          progress: number | null
+          status: string | null
+          total: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          attempts_per_view?: number | null
+          created_at?: string | null
+          digital_talent_id: string
+          id?: string
+          logs?: Json | null
+          look_id: string
+          model?: string | null
+          progress?: number | null
+          status?: string | null
+          total?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          attempts_per_view?: number | null
+          created_at?: string | null
+          digital_talent_id?: string
+          id?: string
+          logs?: Json | null
+          look_id?: string
+          model?: string | null
+          progress?: number | null
+          status?: string | null
+          total?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      face_application_outputs: {
+        Row: {
+          attempt_index: number | null
+          created_at: string | null
+          face_foundation_url: string | null
+          final_prompt: string | null
+          id: string
+          is_selected: boolean | null
+          job_id: string | null
+          look_source_image_id: string | null
+          outfit_description: string | null
+          status: string | null
+          stored_url: string | null
+          view: string
+        }
+        Insert: {
+          attempt_index?: number | null
+          created_at?: string | null
+          face_foundation_url?: string | null
+          final_prompt?: string | null
+          id?: string
+          is_selected?: boolean | null
+          job_id?: string | null
+          look_source_image_id?: string | null
+          outfit_description?: string | null
+          status?: string | null
+          stored_url?: string | null
+          view: string
+        }
+        Update: {
+          attempt_index?: number | null
+          created_at?: string | null
+          face_foundation_url?: string | null
+          final_prompt?: string | null
+          id?: string
+          is_selected?: boolean | null
+          job_id?: string | null
+          look_source_image_id?: string | null
+          outfit_description?: string | null
+          status?: string | null
+          stored_url?: string | null
+          view?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "face_application_outputs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "face_application_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_application_outputs_look_source_image_id_fkey"
+            columns: ["look_source_image_id"]
+            isOneToOne: false
+            referencedRelation: "look_source_images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       face_crops: {
         Row: {
           aspect_ratio: string
@@ -1463,6 +1565,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      look_source_images: {
+        Row: {
+          created_at: string | null
+          digital_talent_id: string | null
+          head_crop_height: number | null
+          head_crop_width: number | null
+          head_crop_x: number | null
+          head_crop_y: number | null
+          head_cropped_url: string | null
+          id: string
+          look_id: string
+          source_url: string
+          view: string
+        }
+        Insert: {
+          created_at?: string | null
+          digital_talent_id?: string | null
+          head_crop_height?: number | null
+          head_crop_width?: number | null
+          head_crop_x?: number | null
+          head_crop_y?: number | null
+          head_cropped_url?: string | null
+          id?: string
+          look_id: string
+          source_url: string
+          view: string
+        }
+        Update: {
+          created_at?: string | null
+          digital_talent_id?: string | null
+          head_crop_height?: number | null
+          head_crop_width?: number | null
+          head_crop_x?: number | null
+          head_crop_y?: number | null
+          head_cropped_url?: string | null
+          id?: string
+          look_id?: string
+          source_url?: string
+          view?: string
+        }
+        Relationships: []
       }
       outputs: {
         Row: {
