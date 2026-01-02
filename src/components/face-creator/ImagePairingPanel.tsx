@@ -11,7 +11,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
-import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users, UserPlus, UserCheck } from "lucide-react";
+import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users, UserPlus, UserCheck, Clock, Sparkles, Download } from "lucide-react";
+
+// CroppedFacePreview component for displaying cropped faces using CSS transforms
+function CroppedFacePreview({ imageUrl, crop }: { imageUrl: string; crop: { crop_x: number; crop_y: number; crop_width: number; crop_height: number; aspect_ratio?: string } }) {
+  const scale = 100 / crop.crop_width;
+  const translateX = -crop.crop_x * scale;
+  const translateY = -crop.crop_y * scale;
+
+  return (
+    <div className="w-full h-full overflow-hidden relative">
+      <img
+        src={imageUrl}
+        alt=""
+        className="absolute origin-top-left"
+        style={{
+          transform: `scale(${scale}) translate(${translateX}%, ${translateY}%)`,
+          width: '100%',
+          height: 'auto',
+        }}
+      />
+    </div>
+  );
+}
 import type { FacePairingJob } from "@/types/face-pairing";
 import type { DigitalTalent } from "@/types/digital-talent";
 import { PromoteToTwinDialog } from "@/components/shared/PromoteToTwinDialog";
@@ -952,7 +974,8 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
   const [outputs, setOutputs] = useState<Record<string, any[]>>({});
   const [job, setJob] = useState<FacePairingJob | null>(null);
   const [groupBy, setGroupBy] = useState<'talent' | 'identity'>('talent');
-  const [totalOutputs, setTotalOutputs] = useState({ completed: 0, failed: 0, pending: 0, total: 0 });
+  const [totalOutputs, setTotalOutputs] = useState({ completed: 0, failed: 0, pending: 0, running: 0, total: 0 });
+  const [selectedOutputs, setSelectedOutputs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (jobId) {
@@ -960,12 +983,12 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
     }
   }, [jobId]);
 
-  // Realtime subscription for outputs
+  // Realtime subscription for outputs and pairings
   useEffect(() => {
     if (!jobId) return;
 
     const channel = supabase
-      .channel(`pairing-outputs-${jobId}`)
+      .channel(`pairing-review-${jobId}`)
       .on(
         'postgres_changes',
         { 
@@ -974,8 +997,28 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
           table: 'face_pairing_outputs'
         },
         (payload) => {
-          // Reload outputs when they change
-          loadOutputs();
+          console.log('[ImagePairingReview] Output update:', payload.eventType);
+          // Update outputs in real-time
+          if (payload.eventType === 'INSERT') {
+            handleNewOutput(payload.new as any);
+          } else if (payload.eventType === 'UPDATE') {
+            handleOutputUpdate(payload.new as any);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'face_pairings'
+        },
+        (payload) => {
+          console.log('[ImagePairingReview] Pairing update:', payload.eventType);
+          // Update pairing outfit descriptions in real-time
+          if (payload.eventType === 'UPDATE') {
+            handlePairingUpdate(payload.new as any);
+          }
         }
       )
       .on(
@@ -998,6 +1041,64 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
       supabase.removeChannel(channel);
     };
   }, [jobId]);
+
+  // Handle new output inserted
+  const handleNewOutput = (newOutput: any) => {
+    setOutputs(prev => {
+      const updated = { ...prev };
+      if (!updated[newOutput.pairing_id]) {
+        updated[newOutput.pairing_id] = [];
+      }
+      // Check if already exists
+      const exists = updated[newOutput.pairing_id].some(o => o.id === newOutput.id);
+      if (!exists) {
+        updated[newOutput.pairing_id] = [...updated[newOutput.pairing_id], newOutput];
+      }
+      return updated;
+    });
+    recalculateTotals();
+  };
+
+  // Handle output status update
+  const handleOutputUpdate = (updatedOutput: any) => {
+    setOutputs(prev => {
+      const updated = { ...prev };
+      if (updated[updatedOutput.pairing_id]) {
+        updated[updatedOutput.pairing_id] = updated[updatedOutput.pairing_id].map(o => 
+          o.id === updatedOutput.id ? updatedOutput : o
+        );
+      }
+      return updated;
+    });
+    recalculateTotals();
+  };
+
+  // Handle pairing outfit description update
+  const handlePairingUpdate = (updatedPairing: any) => {
+    setPairings(prev => prev.map(p => 
+      p.id === updatedPairing.id 
+        ? { ...p, outfit_description: updatedPairing.outfit_description, outfit_description_status: updatedPairing.outfit_description_status, status: updatedPairing.status }
+        : p
+    ));
+  };
+
+  // Recalculate totals from current outputs state
+  const recalculateTotals = () => {
+    setOutputs(currentOutputs => {
+      let completed = 0, failed = 0, pending = 0, running = 0;
+      Object.values(currentOutputs).forEach(pairingOutputs => {
+        pairingOutputs.forEach(output => {
+          if (output.status === 'completed') completed++;
+          else if (output.status === 'failed') failed++;
+          else if (output.status === 'running') running++;
+          else pending++;
+        });
+      });
+      const total = completed + failed + pending + running;
+      setTotalOutputs({ completed, failed, pending, running, total });
+      return currentOutputs;
+    });
+  };
 
   const loadJobData = async () => {
     if (!jobId) return;
@@ -1032,6 +1133,7 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
           ),
           face_identity_images (
             face_identities (
+              id,
               name
             )
           )
@@ -1058,12 +1160,13 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
     const { data: allOutputs } = await supabase
       .from('face_pairing_outputs')
       .select('*, face_pairings!inner(job_id)')
-      .eq('face_pairings.job_id', jobId);
+      .eq('face_pairings.job_id', jobId)
+      .order('created_at', { ascending: true });
 
     if (allOutputs) {
       // Group by pairing_id
       const outputsMap: Record<string, any[]> = {};
-      let completed = 0, failed = 0, pending = 0;
+      let completed = 0, failed = 0, pending = 0, running = 0;
 
       for (const output of allOutputs) {
         if (!outputsMap[output.pairing_id]) {
@@ -1073,11 +1176,12 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
 
         if (output.status === 'completed') completed++;
         else if (output.status === 'failed') failed++;
+        else if (output.status === 'running') running++;
         else pending++;
       }
 
       setOutputs(outputsMap);
-      setTotalOutputs({ completed, failed, pending, total: allOutputs.length });
+      setTotalOutputs({ completed, failed, pending, running, total: allOutputs.length });
     }
   };
 
@@ -1085,17 +1189,94 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
   const getStatusInfo = (status: string) => {
     switch (status) {
       case 'pending':
-        return { label: 'Pending', color: 'text-muted-foreground' };
+        return { label: 'Pending', color: 'text-muted-foreground', icon: Clock };
       case 'describing':
-        return { label: 'Analyzing Outfits', color: 'text-blue-500' };
+        return { label: 'Analyzing Outfits', color: 'text-blue-500', icon: Loader2 };
       case 'generating':
-        return { label: 'Generating Images', color: 'text-amber-500' };
+        return { label: 'Generating Images', color: 'text-amber-500', icon: Loader2 };
       case 'completed':
-        return { label: 'Completed', color: 'text-green-500' };
+        return { label: 'Completed', color: 'text-green-500', icon: Check };
       case 'failed':
-        return { label: 'Failed', color: 'text-destructive' };
+        return { label: 'Failed', color: 'text-destructive', icon: X };
       default:
-        return { label: status, color: 'text-muted-foreground' };
+        return { label: status, color: 'text-muted-foreground', icon: Clock };
+    }
+  };
+
+  // Toggle output selection
+  const toggleOutputSelection = (outputId: string) => {
+    setSelectedOutputs(prev => {
+      const updated = new Set(prev);
+      if (updated.has(outputId)) {
+        updated.delete(outputId);
+      } else {
+        updated.add(outputId);
+      }
+      return updated;
+    });
+  };
+
+  // Select all completed outputs
+  const selectAllCompleted = () => {
+    const completedIds: string[] = [];
+    Object.values(outputs).forEach(pairingOutputs => {
+      pairingOutputs.forEach(output => {
+        if (output.status === 'completed' && output.stored_url) {
+          completedIds.push(output.id);
+        }
+      });
+    });
+    setSelectedOutputs(new Set(completedIds));
+  };
+
+  // Download selected images
+  const downloadSelected = () => {
+    const urls: string[] = [];
+    Object.values(outputs).forEach(pairingOutputs => {
+      pairingOutputs.forEach(output => {
+        if (selectedOutputs.has(output.id) && output.stored_url) {
+          urls.push(output.stored_url);
+        }
+      });
+    });
+    
+    // Download each image
+    urls.forEach((url, index) => {
+      setTimeout(() => {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `output-${index + 1}.png`;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }, index * 200);
+    });
+  };
+
+  // Group pairings for display
+  const getGroupedPairings = () => {
+    if (groupBy === 'talent') {
+      const groups: Record<string, { talent: any; pairings: any[] }> = {};
+      pairings.forEach(p => {
+        const talentId = p.digital_talents?.id || 'unknown';
+        if (!groups[talentId]) {
+          groups[talentId] = { talent: p.digital_talents, pairings: [] };
+        }
+        groups[talentId].pairings.push(p);
+      });
+      return Object.values(groups);
+    } else {
+      const groups: Record<string, { identity: any; pairings: any[] }> = {};
+      pairings.forEach(p => {
+        const identity = p.face_scrape_images?.face_identity_images?.[0]?.face_identities;
+        const identityId = identity?.id || 'unknown';
+        if (!groups[identityId]) {
+          groups[identityId] = { identity, pairings: [] };
+        }
+        groups[identityId].pairings.push(p);
+      });
+      return Object.values(groups);
     }
   };
 
@@ -1108,55 +1289,86 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
   }
 
   const statusInfo = job ? getStatusInfo(job.status) : null;
+  const StatusIcon = statusInfo?.icon || Clock;
+  const groupedData = getGroupedPairings();
+  const allCompletedOutputs = Object.values(outputs).flat().filter(o => o.status === 'completed');
 
   return (
     <div className="space-y-4">
-      {/* Job Status */}
+      {/* Job Status Card */}
       {job && (
         <Card className="p-4">
           <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-medium">{job.name}</h3>
-              <div className="flex items-center gap-3 text-sm">
-                <span className={statusInfo?.color}>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h3 className="font-medium">{job.name}</h3>
+                <Badge variant="outline" className={statusInfo?.color}>
                   {statusInfo?.label}
-                </span>
+                </Badge>
+              </div>
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 {job.status === 'describing' && (
-                  <span className="text-muted-foreground">
-                    {job.progress}/{job.total_pairings} outfits analyzed
-                  </span>
+                  <>
+                    <span className="flex items-center gap-1">
+                      <Sparkles className="h-3 w-3" />
+                      Analyzing outfits: {pairings.filter(p => p.outfit_description_status === 'completed').length}/{pairings.length}
+                    </span>
+                  </>
                 )}
                 {job.status === 'generating' && (
-                  <span className="text-muted-foreground">
-                    {totalOutputs.completed} of {totalOutputs.total} images generated
-                    {totalOutputs.failed > 0 && ` (${totalOutputs.failed} failed)`}
-                  </span>
+                  <>
+                    <span className="flex items-center gap-1 text-green-500">
+                      <Check className="h-3 w-3" />
+                      {totalOutputs.completed} completed
+                    </span>
+                    {totalOutputs.running > 0 && (
+                      <span className="flex items-center gap-1 text-amber-500">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {totalOutputs.running} generating
+                      </span>
+                    )}
+                    {totalOutputs.failed > 0 && (
+                      <span className="flex items-center gap-1 text-destructive">
+                        <X className="h-3 w-3" />
+                        {totalOutputs.failed} failed
+                      </span>
+                    )}
+                    <span>{totalOutputs.pending} pending</span>
+                  </>
                 )}
                 {job.status === 'completed' && (
-                  <span className="text-muted-foreground">
-                    {totalOutputs.completed} images • {pairings.length} pairings
-                  </span>
+                  <>
+                    <span>{totalOutputs.completed} images generated</span>
+                    <span>{pairings.length} pairings</span>
+                    {totalOutputs.failed > 0 && (
+                      <span className="text-destructive">{totalOutputs.failed} failed</span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
-            {job.status === 'generating' && (
-              <Loader2 className="h-5 w-5 animate-spin text-amber-500" />
-            )}
-            {job.status === 'describing' && (
-              <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-            )}
-            {job.status === 'completed' && (
-              <Check className="h-5 w-5 text-green-500" />
-            )}
+            <div className="flex items-center gap-2">
+              {['generating', 'describing'].includes(job.status) && (
+                <StatusIcon className={`h-5 w-5 animate-spin ${statusInfo?.color}`} />
+              )}
+              {job.status === 'completed' && (
+                <Check className="h-5 w-5 text-green-500" />
+              )}
+              {job.status === 'failed' && (
+                <X className="h-5 w-5 text-destructive" />
+              )}
+            </div>
           </div>
-          {!['completed', 'failed'].includes(job.status) && (
+          
+          {/* Progress bar */}
+          {['generating', 'describing'].includes(job.status) && (
             <Progress 
               className="mt-3"
               value={
                 job.status === 'generating' && totalOutputs.total > 0
                   ? ((totalOutputs.completed + totalOutputs.failed) / totalOutputs.total) * 100
                   : job.total_pairings > 0 
-                    ? (job.progress / job.total_pairings) * 100 
+                    ? (pairings.filter(p => p.outfit_description_status === 'completed').length / job.total_pairings) * 100 
                     : 0
               } 
             />
@@ -1164,166 +1376,148 @@ function ImagePairingReview({ jobId, onStartGeneration }: ImagePairingReviewProp
         </Card>
       )}
 
-      {/* Group By Toggle */}
-      <div className="flex gap-2">
-        <Button 
-          variant={groupBy === 'talent' ? 'default' : 'outline'} 
-          size="sm"
-          onClick={() => setGroupBy('talent')}
-        >
-          Group by Talent
-        </Button>
-        <Button 
-          variant={groupBy === 'identity' ? 'default' : 'outline'} 
-          size="sm"
-          onClick={() => setGroupBy('identity')}
-        >
-          Group by Identity
-        </Button>
+      {/* Controls Row */}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-2">
+          <Button 
+            variant={groupBy === 'talent' ? 'default' : 'outline'} 
+            size="sm"
+            onClick={() => setGroupBy('talent')}
+          >
+            <User className="h-3 w-3 mr-1" />
+            Group by Talent
+          </Button>
+          <Button 
+            variant={groupBy === 'identity' ? 'default' : 'outline'} 
+            size="sm"
+            onClick={() => setGroupBy('identity')}
+          >
+            <Users className="h-3 w-3 mr-1" />
+            Group by Identity
+          </Button>
+        </div>
+        
+        {allCompletedOutputs.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={selectAllCompleted}>
+              Select All ({allCompletedOutputs.length})
+            </Button>
+            {selectedOutputs.size > 0 && (
+              <Button size="sm" onClick={downloadSelected}>
+                <Download className="h-3 w-3 mr-1" />
+                Download ({selectedOutputs.size})
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Pairings Grid */}
+      {/* Grouped Results */}
       <ScrollArea className="h-[600px]">
-        <div className="space-y-4">
-          {pairings.map(pairing => {
-            const pairingOutputs = outputs[pairing.id] || [];
-            const sourceImage = pairing.face_scrape_images;
-            const talent = pairing.digital_talents;
-            const identityName = sourceImage?.face_identity_images?.[0]?.face_identities?.name || 'Unknown';
+        <div className="space-y-6">
+          {groupedData.map((group, groupIndex) => {
+            const groupLabel = groupBy === 'talent' 
+              ? group.talent?.name || 'Unknown Talent'
+              : group.identity?.name || 'Unknown Identity';
             
-            // Get the cropped image URL if available
-            const faceCrop = sourceImage?.face_crops?.[0];
-            const croppedUrl = faceCrop?.cropped_stored_url;
-            const originalUrl = sourceImage?.stored_url || sourceImage?.source_url;
-
+            const groupOutputs = group.pairings.flatMap(p => outputs[p.id] || []);
+            const completedCount = groupOutputs.filter(o => o.status === 'completed').length;
+            
             return (
-              <Card key={pairing.id} className="p-4">
-                <div className="grid grid-cols-6 gap-4">
-                  {/* Source Image - use cropped version if available */}
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">Source</p>
-                    <div className="aspect-[3/4] rounded-md overflow-hidden bg-muted">
-                      {croppedUrl ? (
-                        <img 
-                          src={croppedUrl} 
-                          alt="" 
-                          className="w-full h-full object-cover"
-                        />
-                      ) : faceCrop ? (
-                        <CroppedFacePreview
-                          imageUrl={originalUrl}
-                          crop={faceCrop}
-                        />
-                      ) : sourceImage ? (
-                        <img 
-                          src={originalUrl} 
-                          alt="" 
-                          className="w-full h-full object-cover"
-                        />
-                      ) : null}
-                    </div>
-                    <p className="text-xs truncate">{identityName}</p>
-                  </div>
-
-                  {/* Digital Talent */}
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">Digital Talent</p>
-                    <div className="aspect-square rounded-md overflow-hidden bg-muted">
-                      {talent?.front_face_url ? (
-                        <img 
-                          src={talent.front_face_url} 
-                          alt={talent.name} 
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <User className="w-6 h-6 text-muted-foreground" />
+              <Collapsible key={groupIndex} defaultOpen>
+                <CollapsibleTrigger className="w-full">
+                  <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors">
+                    <div className="flex items-center gap-3">
+                      {groupBy === 'talent' && group.talent?.front_face_url && (
+                        <div className="w-8 h-8 rounded-full overflow-hidden bg-muted">
+                          <img src={group.talent.front_face_url} alt="" className="w-full h-full object-cover" />
                         </div>
                       )}
+                      <span className="font-medium">{groupLabel}</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {completedCount}/{groupOutputs.length} outputs
+                      </Badge>
                     </div>
-                    <p className="text-xs truncate">{talent?.name || 'Unknown'}</p>
+                    <ChevronDown className="h-4 w-4" />
                   </div>
+                </CollapsibleTrigger>
+                
+                <CollapsibleContent>
+                  <div className="grid grid-cols-6 gap-3 mt-3">
+                    {group.pairings.map(pairing => {
+                      const pairingOutputs = outputs[pairing.id] || [];
+                      const sourceImage = pairing.face_scrape_images;
+                      const faceCrop = sourceImage?.face_crops?.[0];
+                      const croppedUrl = faceCrop?.cropped_stored_url;
+                      const originalUrl = sourceImage?.stored_url || sourceImage?.source_url;
 
-                  {/* Outfit Description */}
-                  <div className="col-span-2 space-y-1">
-                    <p className="text-xs text-muted-foreground">Outfit Description</p>
-                    <p className="text-xs bg-muted p-2 rounded-md h-20 overflow-y-auto">
-                      {pairing.outfit_description || 'Pending...'}
-                    </p>
-                    <Badge variant="secondary" className="text-xs capitalize">
-                      {pairing.outfit_description_status}
-                    </Badge>
-                  </div>
-
-                  {/* Outputs */}
-                  <div className="col-span-2 space-y-1">
-                    <p className="text-xs text-muted-foreground">Outputs ({pairingOutputs.length})</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {pairingOutputs.map(output => (
-                        <div key={output.id} className="aspect-[3/4] rounded-md overflow-hidden bg-muted relative">
-                          {output.stored_url ? (
-                            <img 
-                              src={output.stored_url} 
-                              alt="" 
-                              className="w-full h-full object-cover"
-                            />
+                      return pairingOutputs.map(output => (
+                        <div 
+                          key={output.id} 
+                          className={`relative group aspect-[3/4] rounded-lg overflow-hidden bg-muted border-2 transition-colors cursor-pointer ${
+                            selectedOutputs.has(output.id) ? 'border-primary' : 'border-transparent hover:border-muted-foreground/30'
+                          }`}
+                          onClick={() => output.status === 'completed' && toggleOutputSelection(output.id)}
+                        >
+                          {output.status === 'completed' && output.stored_url ? (
+                            <>
+                              <img 
+                                src={output.stored_url} 
+                                alt="" 
+                                className="w-full h-full object-cover"
+                              />
+                              {/* Hover overlay with source images */}
+                              <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity p-2 flex flex-col justify-end">
+                                <div className="flex gap-1">
+                                  <div className="w-8 h-10 rounded overflow-hidden bg-muted/20">
+                                    {croppedUrl ? (
+                                      <img src={croppedUrl} alt="Source" className="w-full h-full object-cover" />
+                                    ) : faceCrop && originalUrl ? (
+                                      <CroppedFacePreview imageUrl={originalUrl} crop={faceCrop} />
+                                    ) : originalUrl ? (
+                                      <img src={originalUrl} alt="Source" className="w-full h-full object-cover" />
+                                    ) : null}
+                                  </div>
+                                  {pairing.digital_talents?.front_face_url && (
+                                    <div className="w-8 h-8 rounded-full overflow-hidden bg-muted/20">
+                                      <img src={pairing.digital_talents.front_face_url} alt="Talent" className="w-full h-full object-cover" />
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              {/* Selection indicator */}
+                              {selectedOutputs.has(output.id) && (
+                                <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                                  <Check className="h-3 w-3 text-primary-foreground" />
+                                </div>
+                              )}
+                            </>
+                          ) : output.status === 'running' ? (
+                            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
+                              <Loader2 className="h-6 w-6 animate-spin mb-2" />
+                              <span className="text-xs">Generating...</span>
+                            </div>
                           ) : output.status === 'failed' ? (
-                            <div className="w-full h-full flex items-center justify-center text-destructive">
-                              <X className="w-4 h-4" />
+                            <div className="w-full h-full flex flex-col items-center justify-center text-destructive">
+                              <X className="h-6 w-6 mb-2" />
+                              <span className="text-xs">Failed</span>
                             </div>
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                            </div>
-                          )}
-                          {output.status === 'completed' && (
-                            <div className="absolute top-1 right-1">
-                              <Check className="w-3 h-3 text-green-500" />
+                            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
+                              <Clock className="h-6 w-6 mb-2" />
+                              <span className="text-xs">Pending</span>
                             </div>
                           )}
                         </div>
-                      ))}
-                    </div>
+                      ));
+                    })}
                   </div>
-                </div>
-              </Card>
+                </CollapsibleContent>
+              </Collapsible>
             );
           })}
         </div>
       </ScrollArea>
-    </div>
-  );
-}
-
-// Component to show CSS-based cropped face preview
-function CroppedFacePreview({ 
-  imageUrl, 
-  crop 
-}: { 
-  imageUrl: string; 
-  crop: { crop_x: number; crop_y: number; crop_width: number; crop_height: number; aspect_ratio: string };
-}) {
-  // Crop values are stored as percentages (0-100)
-  const scaleX = 100 / crop.crop_width;
-  
-  return (
-    <div 
-      className="w-full overflow-hidden relative bg-muted"
-      style={{ 
-        aspectRatio: crop.aspect_ratio === '4:5' ? '4/5' : '1/1'
-      }}
-    >
-      <img
-        src={imageUrl}
-        alt=""
-        className="absolute w-full h-auto"
-        style={{
-          transformOrigin: 'top left',
-          transform: `scale(${scaleX})`,
-          left: `${-crop.crop_x * scaleX}%`,
-          top: `${-crop.crop_y * scaleX}%`,
-        }}
-      />
     </div>
   );
 }
