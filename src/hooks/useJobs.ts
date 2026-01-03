@@ -174,10 +174,17 @@ export function useUpdateJobStatus() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ jobId, status }: { jobId: string; status: JobStatus }) => {
+    mutationFn: async ({ jobId, status, assignedUserId }: { jobId: string; status: JobStatus; assignedUserId?: string }) => {
+      const updateData: { status: JobStatus; assigned_user_id?: string } = { status };
+      
+      // If starting a job (IN_PROGRESS) and assignedUserId is provided, set it
+      if (assignedUserId !== undefined) {
+        updateData.assigned_user_id = assignedUserId;
+      }
+      
       const { data, error } = await supabase
         .from("unified_jobs")
-        .update({ status })
+        .update(updateData)
         .eq("id", jobId)
         .select()
         .single();
