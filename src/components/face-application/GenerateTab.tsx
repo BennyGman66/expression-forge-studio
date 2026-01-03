@@ -25,10 +25,16 @@ interface GenerateTabProps {
 
 const ATTEMPT_OPTIONS = [1, 2, 4, 6, 8, 12, 24];
 
+const MODEL_OPTIONS = [
+  { value: "google/gemini-2.5-flash-image-preview", label: "Nano Fast" },
+  { value: "google/gemini-3-pro-image-preview", label: "Nano Pro" },
+];
+
 export function GenerateTab({ projectId, lookId, talentId, onContinue }: GenerateTabProps) {
   const [looks, setLooks] = useState<LookWithImages[]>([]);
   const [faceFoundations, setFaceFoundations] = useState<FaceFoundation[]>([]);
   const [attemptsPerView, setAttemptsPerView] = useState(4);
+  const [selectedModel, setSelectedModel] = useState("google/gemini-3-pro-image-preview");
   const [jobs, setJobs] = useState<FaceApplicationJob[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [talentInfo, setTalentInfo] = useState<{ name: string; front_face_url: string | null } | null>(null);
@@ -220,6 +226,7 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
             look_id: look.id,
             digital_talent_id: talentId,
             attempts_per_view: attemptsPerView,
+            model: selectedModel,
             total: look.sourceImages.length * attemptsPerView,
             status: "pending",
           })
@@ -277,7 +284,27 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
             ) : (
               <div className="space-y-6">
                 {/* Settings */}
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-3 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Model</label>
+                    <Select
+                      value={selectedModel}
+                      onValueChange={setSelectedModel}
+                      disabled={isGenerating}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MODEL_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Options per View</label>
                     <Select

@@ -73,9 +73,12 @@ serve(async (req) => {
 
     console.log(`Processing ${sourceImages.length} source images with ${job.attempts_per_view} attempts each`);
 
+    // Get model from job (or use default)
+    const model = job.model || "google/gemini-2.5-flash-image-preview";
+
     // Process in background using setTimeout (Deno pattern)
     setTimeout(() => {
-      processGeneration(supabase, job, sourceImages, outfitDescriptions, LOVABLE_API_KEY);
+      processGeneration(supabase, job, sourceImages, outfitDescriptions, LOVABLE_API_KEY, model);
     }, 0);
 
     return new Response(
@@ -97,7 +100,8 @@ async function processGeneration(
   job: any,
   sourceImages: any[],
   outfitDescriptions: Record<string, string>,
-  apiKey: string
+  apiKey: string,
+  model: string
 ) {
   let progress = 0;
 
@@ -193,7 +197,8 @@ ${STUDIO_LIGHTING_PROMPT}`;
             bodyImageUrl, // CROPPED head image
             faceUrl, // Face foundation
             prompt,
-            apiKey
+            apiKey,
+            model
           );
 
           if (generatedUrl) {
@@ -251,7 +256,8 @@ async function generateImage(
   bodyImageUrl: string,
   faceImageUrl: string,
   prompt: string,
-  apiKey: string
+  apiKey: string,
+  model: string
 ): Promise<string | null> {
   try {
     console.log(`Generating with body: ${bodyImageUrl.substring(0, 80)}...`);
@@ -264,7 +270,7 @@ async function generateImage(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash-image-preview",
+        model: model,
         messages: [
           {
             role: "user",
