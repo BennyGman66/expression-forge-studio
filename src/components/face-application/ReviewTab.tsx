@@ -2,9 +2,9 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2, MoreVertical, RefreshCw, AlertCircle, Loader2, X, Briefcase, Wrench } from "lucide-react";
+import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2, MoreVertical, RefreshCw, AlertCircle, Loader2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { FaceApplicationOutput, FaceApplicationJob } from "@/types/face-application";
+import { FaceApplicationOutput } from "@/types/face-application";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -12,9 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
-import { CreatePhotoshopJobDialog } from "./CreatePhotoshopJobDialog";
-import { CreateFoundationFaceReplaceJobDialog } from "@/components/jobs/CreateFoundationFaceReplaceJobDialog";
+import { LooksSummaryTable } from "./LooksSummaryTable";
 
 interface ReviewTabProps {
   projectId: string;
@@ -25,7 +23,6 @@ interface ReviewTabProps {
 interface LookWithOutputs {
   id: string;
   name: string;
-  status: string;
   outputs: FaceApplicationOutput[];
 }
 
@@ -34,25 +31,36 @@ interface TalentInfo {
   front_face_url: string | null;
 }
 
+// Calculate actual status from outputs, not stale job.status
+function calculateOutputsStatus(outputs: FaceApplicationOutput[]): "completed" | "running" | "pending" | "failed" {
+  if (outputs.length === 0) return "pending";
+  
+  const hasPending = outputs.some(o => o.status === "pending" || o.status === "generating" || !o.stored_url);
+  const hasFailed = outputs.some(o => o.status === "failed");
+  const allCompleted = outputs.every(o => o.status === "completed" && o.stored_url);
+  
+  if (hasPending) return "running";
+  if (hasFailed && !allCompleted) return "failed";
+  return "completed";
+}
+
 export function ReviewTab({ projectId }: ReviewTabProps) {
   const [looks, setLooks] = useState<LookWithOutputs[]>([]);
   const [saving, setSaving] = useState(false);
   const [talentInfo, setTalentInfo] = useState<TalentInfo | null>(null);
   const [currentViewIndex, setCurrentViewIndex] = useState(0);
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
-  const [showJobDialog, setShowJobDialog] = useState(false);
-  const [showFoundationJobDialog, setShowFoundationJobDialog] = useState(false);
   const { toast } = useToast();
 
-  // Fetch all jobs and outputs for this project (regardless of status)
+  // Fetch all jobs and outputs for this project
   useEffect(() => {
     if (!projectId) return;
 
     const fetchOutputs = async () => {
-      // Get ALL jobs for this project (not just completed)
+      // Get ALL jobs for this project
       const { data: jobsData } = await supabase
         .from("face_application_jobs")
-        .select("id, look_id, digital_talent_id, status")
+        .select("id, look_id, digital_talent_id")
         .eq("project_id", projectId);
 
       if (!jobsData || jobsData.length === 0) {
@@ -81,7 +89,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
       const lookNameMap: Record<string, string> = {};
       looksData?.forEach(l => { lookNameMap[l.id] = l.name; });
 
-      // Get all outputs for these jobs (all statuses for visibility)
+      // Get all outputs for these jobs
       const jobIds = jobsData.map(j => j.id);
       const { data: outputsData } = await supabase
         .from("face_application_outputs")
@@ -90,20 +98,11 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
         .order("view")
         .order("attempt_index");
 
-      // Group outputs by look with job status
-      const outputsByLook: Record<string, { outputs: FaceApplicationOutput[]; status: string }> = {};
+      // Group outputs by look
+      const outputsByLook: Record<string, FaceApplicationOutput[]> = {};
       for (const job of jobsData) {
         if (!outputsByLook[job.look_id]) {
-          outputsByLook[job.look_id] = { outputs: [], status: job.status };
-        }
-        // Take worst status: failed > running > pending > completed
-        const current = outputsByLook[job.look_id].status;
-        if (job.status === "failed" || current === "failed") {
-          outputsByLook[job.look_id].status = "failed";
-        } else if (job.status === "running" || current === "running") {
-          outputsByLook[job.look_id].status = "running";
-        } else if (job.status === "pending" || current === "pending") {
-          outputsByLook[job.look_id].status = "pending";
+          outputsByLook[job.look_id] = [];
         }
       }
 
@@ -112,17 +111,16 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
         for (const output of outputsData) {
           const job = jobsData.find(j => j.id === output.job_id);
           if (job && outputsByLook[job.look_id]) {
-            outputsByLook[job.look_id].outputs.push(output as FaceApplicationOutput);
+            outputsByLook[job.look_id].push(output as FaceApplicationOutput);
           }
         }
       }
 
       // Build looks array
-      const looksWithOutputs: LookWithOutputs[] = Object.entries(outputsByLook).map(([lookId, data]) => ({
+      const looksWithOutputs: LookWithOutputs[] = Object.entries(outputsByLook).map(([lookId, outputs]) => ({
         id: lookId,
         name: lookNameMap[lookId] || "Unknown Look",
-        status: data.status,
-        outputs: data.outputs,
+        outputs,
       }));
 
       setLooks(looksWithOutputs);
@@ -130,13 +128,13 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
 
     fetchOutputs();
     
-    // Poll for updates if any looks are running
+    // Poll for updates
     const interval = setInterval(fetchOutputs, 3000);
     return () => clearInterval(interval);
   }, [projectId]);
 
   // Build view list for navigation - group by look + view
-  const allViews: { lookId: string; lookName: string; lookStatus: string; view: string; outputs: FaceApplicationOutput[] }[] = [];
+  const allViews: { lookId: string; lookName: string; view: string; outputs: FaceApplicationOutput[] }[] = [];
   looks.forEach(look => {
     const viewGroups: Record<string, FaceApplicationOutput[]> = {};
     look.outputs.forEach(o => {
@@ -144,12 +142,13 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
       viewGroups[o.view].push(o);
     });
     Object.entries(viewGroups).forEach(([view, outputs]) => {
-      allViews.push({ lookId: look.id, lookName: look.name, lookStatus: look.status, view, outputs });
+      allViews.push({ lookId: look.id, lookName: look.name, view, outputs });
     });
   });
 
   const currentView = allViews[currentViewIndex];
   const currentOutputs = currentView?.outputs || [];
+  const currentViewStatus = currentView ? calculateOutputsStatus(currentOutputs) : "pending";
 
   const handleSelect = async (outputId: string) => {
     if (!currentView) return;
@@ -408,6 +407,9 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
           </div>
         </div>
 
+        {/* Per-Look Summary Table */}
+        <LooksSummaryTable looks={looks} projectId={projectId} />
+
         {/* Current view - GRID STYLE */}
         {currentView && (
           <Card>
@@ -416,7 +418,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
                 <CardTitle className="text-base">
                   {currentView.lookName} — <span className="capitalize">{currentView.view}</span> View
                 </CardTitle>
-                {getStatusBadge(currentView.lookStatus)}
+                {getStatusBadge(currentViewStatus)}
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-sm text-muted-foreground">{currentOutputs.length} options</span>
@@ -446,7 +448,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
                           }
                         `}
                       >
-                        {regeneratingIds.has(output.id) || output.status === "pending" ? (
+                        {regeneratingIds.has(output.id) || output.status === "pending" || output.status === "generating" ? (
                           <div className="w-full h-full bg-muted flex flex-col items-center justify-center">
                             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                           </div>
@@ -477,7 +479,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
                           size="sm"
                           onClick={() => handleSelect(output.id)}
                           className={`h-8 w-8 p-0 ${output.is_selected ? "bg-primary hover:bg-primary/90" : ""}`}
-                          disabled={regeneratingIds.has(output.id) || output.status === "pending"}
+                          disabled={regeneratingIds.has(output.id) || output.status === "pending" || output.status === "generating"}
                         >
                           <Check className="h-4 w-4" />
                         </Button>
@@ -525,14 +527,9 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
             <div className="flex flex-wrap gap-2">
               {allViews.map((v, idx) => {
                 const hasSelection = v.outputs.some(o => o.is_selected);
-                
-                // Calculate status from actual outputs, not job status
-                const completedOutputs = v.outputs.filter(o => o.stored_url && o.status === "completed");
-                const pendingOutputs = v.outputs.filter(o => !o.stored_url || o.status === "pending");
-                const failedOutputs = v.outputs.filter(o => o.status === "failed");
-                
-                const isRunning = pendingOutputs.length > 0;
-                const isFailed = failedOutputs.length > 0 && completedOutputs.length === 0;
+                const viewStatus = calculateOutputsStatus(v.outputs);
+                const isRunning = viewStatus === "running";
+                const isFailed = viewStatus === "failed";
                 
                 return (
                   <button
@@ -563,29 +560,11 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
           </CardContent>
         </Card>
 
-        {/* Actions */}
+        {/* Actions - simplified, job creation is now per-look in the summary table */}
         <div className="flex justify-end gap-3">
           <Button variant="outline" size="lg">
             <Download className="h-4 w-4 mr-2" />
             Download Selected
-          </Button>
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={() => setShowFoundationJobDialog(true)}
-            disabled={selectedCount === 0}
-          >
-            <Wrench className="h-4 w-4 mr-2" />
-            Create Job: Foundation Face Replace
-          </Button>
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={() => setShowJobDialog(true)}
-            disabled={selectedCount === 0}
-          >
-            <Briefcase className="h-4 w-4 mr-2" />
-            Create Photoshop Job
           </Button>
           <Button
             size="lg"
@@ -596,33 +575,6 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
             {saving ? "Saving..." : "Save to Look"}
           </Button>
         </div>
-
-        {/* Photoshop Job Dialog */}
-        {currentView && (
-          <CreatePhotoshopJobDialog
-            open={showJobDialog}
-            onOpenChange={setShowJobDialog}
-            projectId={projectId}
-            lookId={currentView.lookId}
-            lookName={currentView.lookName}
-            talentName={talentInfo?.name || 'Unknown'}
-            selectedOutputUrls={allViews
-              .flatMap(v => v.outputs.filter(o => o.is_selected && o.stored_url).map(o => o.stored_url!))
-            }
-            faceFoundationUrls={talentInfo?.front_face_url ? [talentInfo.front_face_url] : []}
-          />
-        )}
-
-        {/* Foundation Face Replace Job Dialog */}
-        {currentView && (
-          <CreateFoundationFaceReplaceJobDialog
-            open={showFoundationJobDialog}
-            onOpenChange={setShowFoundationJobDialog}
-            lookId={currentView.lookId}
-            lookName={currentView.lookName}
-            projectId={projectId}
-          />
-        )}
       </div>
 
       {/* Talent reference sidebar */}
