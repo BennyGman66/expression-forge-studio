@@ -193,11 +193,13 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
         
         toast({ title: "Analyzing outfits...", description: `Processing ${look.name}` });
         
-        // Describe in parallel
+        // Describe in parallel - use CROPPED image for outfit description
         const results = await Promise.all(
           look.sourceImages.map(async (img) => {
+            // Use the cropped head image to describe outfit (visible clothing)
+            const imageToDescribe = img.head_cropped_url || img.source_url;
             const response = await supabase.functions.invoke("generate-outfit-description", {
-              body: { imageUrl: img.source_url },
+              body: { imageUrl: imageToDescribe },
             });
             return {
               id: img.id,
@@ -210,18 +212,7 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
           if (description) outfitDescriptions[id] = description;
         });
 
-        // Build face matches from foundations
-        const faceMatches: Record<string, string> = {};
-        look.sourceImages.forEach((img) => {
-          const matchingFace = faceFoundations.find(f => f.view === img.view);
-          if (matchingFace) {
-            faceMatches[img.id] = matchingFace.stored_url;
-          } else if (faceFoundations.length > 0) {
-            faceMatches[img.id] = faceFoundations[0].stored_url;
-          }
-        });
-
-        // Create job
+        // Create job - edge function will handle face foundation matching from database
         const { data: newJob, error: jobError } = await supabase
           .from("face_application_jobs")
           .insert({
@@ -237,12 +228,11 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
 
         if (jobError) throw jobError;
 
-        // Trigger generation
+        // Trigger generation - face matching is now handled by edge function
         await supabase.functions.invoke("generate-face-application", {
           body: {
             jobId: newJob.id,
             outfitDescriptions,
-            faceMatches,
           },
         });
       }
