@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, ArrowRight } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { JOB_TYPE_CONFIG } from '@/lib/jobTypes';
@@ -41,26 +41,23 @@ export function CreateFoundationFaceReplaceJobDialog({
   );
 
   const allAssetsValid = assets.length > 0 && assets.every((a) => a.exists);
+  const headRenders = assets.filter(a => a.key.startsWith('HEAD_RENDER'));
+  const originalLook = assets.find(a => a.key === 'LOOK_ORIGINAL');
 
   useEffect(() => {
-    if (open) {
+    if (open && lookId) {
       validateAssets();
     }
   }, [open, lookId]);
 
   const validateAssets = async () => {
+    if (!lookId) return;
+    
     setValidating(true);
     const validations: AssetValidation[] = [];
 
     try {
-      // Fetch selected outputs for each view (front, side, back)
-      const { data: selectedOutputs } = await supabase
-        .from('face_application_outputs')
-        .select('id, view, stored_url, is_selected')
-        .eq('is_selected', true)
-        .in('view', ['front', 'side', 'back']);
-
-      // Filter by look_id through the job
+      // Get jobs for this look
       const { data: jobs } = await supabase
         .from('face_application_jobs')
         .select('id')
@@ -68,6 +65,13 @@ export function CreateFoundationFaceReplaceJobDialog({
 
       const jobIds = jobs?.map((j) => j.id) || [];
 
+      if (jobIds.length === 0) {
+        setAssets([]);
+        setValidating(false);
+        return;
+      }
+
+      // Fetch selected outputs for each view
       const { data: lookOutputs } = await supabase
         .from('face_application_outputs')
         .select('id, view, stored_url, is_selected, job_id')
@@ -87,7 +91,7 @@ export function CreateFoundationFaceReplaceJobDialog({
         const output = outputsByView[view];
         validations.push({
           key: `HEAD_RENDER_${view.toUpperCase()}`,
-          label: `Head Render (${view.charAt(0).toUpperCase() + view.slice(1)})`,
+          label: view.charAt(0).toUpperCase() + view.slice(1),
           view,
           exists: !!output,
           url: output?.url,
@@ -105,7 +109,7 @@ export function CreateFoundationFaceReplaceJobDialog({
 
       validations.push({
         key: 'LOOK_ORIGINAL',
-        label: 'Original Look Image',
+        label: 'Original Look',
         view: 'front',
         exists: !!lookSource?.source_url,
         url: lookSource?.source_url,
@@ -127,7 +131,6 @@ export function CreateFoundationFaceReplaceJobDialog({
     setLoading(true);
     try {
       const config = JOB_TYPE_CONFIG.FOUNDATION_FACE_REPLACE;
-      const title = config.titleFormat(lookName);
 
       // Create the job
       const { data: job, error: jobError } = await supabase
@@ -190,72 +193,133 @@ export function CreateFoundationFaceReplaceJobDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Create Job: Foundation Face Replace</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="text-sm text-muted-foreground">
             Look: <span className="font-medium text-foreground">{lookName}</span>
           </div>
 
-          {/* Asset Validation */}
-          <div className="space-y-2">
-            <Label>Required Assets</Label>
-            {validating ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Validating assets...
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {assets.map((asset) => (
-                  <div
-                    key={asset.key}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    {asset.exists ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-destructive" />
-                    )}
-                    <span className={asset.exists ? '' : 'text-destructive'}>
-                      {asset.label}
-                    </span>
-                    {asset.exists && asset.url && (
-                      <img
-                        src={asset.url}
-                        alt={asset.label}
-                        className="h-8 w-8 rounded object-cover ml-auto"
-                      />
-                    )}
+          {validating ? (
+            <div className="flex items-center justify-center py-8 gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Validating assets...
+            </div>
+          ) : (
+            <>
+              {/* Visual Manifest Preview */}
+              <div className="space-y-4">
+                <Label className="text-sm font-medium">Job Manifest Preview</Label>
+                
+                <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-center p-4 bg-muted/50 rounded-lg">
+                  {/* Head Renders */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Selected Head Renders
+                    </p>
+                    <div className="flex gap-2">
+                      {headRenders.map((asset) => (
+                        <div key={asset.key} className="flex flex-col items-center gap-1">
+                          <div className={`
+                            w-20 h-20 rounded-lg overflow-hidden border-2
+                            ${asset.exists ? 'border-green-500/50' : 'border-destructive/50 bg-destructive/10'}
+                          `}>
+                            {asset.exists && asset.url ? (
+                              <img
+                                src={asset.url}
+                                alt={asset.label}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <XCircle className="h-6 w-6 text-destructive" />
+                              </div>
+                            )}
+                          </div>
+                          <span className={`text-xs ${asset.exists ? 'text-foreground' : 'text-destructive'}`}>
+                            {asset.label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
+
+                  {/* Arrow */}
+                  <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                    <ArrowRight className="h-6 w-6" />
+                    <span className="text-xs">+</span>
+                  </div>
+
+                  {/* Original Look */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Original Look Image
+                    </p>
+                    <div className="flex flex-col items-center gap-1">
+                      <div className={`
+                        w-24 h-32 rounded-lg overflow-hidden border-2
+                        ${originalLook?.exists ? 'border-green-500/50' : 'border-destructive/50 bg-destructive/10'}
+                      `}>
+                        {originalLook?.exists && originalLook.url ? (
+                          <img
+                            src={originalLook.url}
+                            alt="Original Look"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <XCircle className="h-6 w-6 text-destructive" />
+                          </div>
+                        )}
+                      </div>
+                      <span className={`text-xs ${originalLook?.exists ? 'text-foreground' : 'text-destructive'}`}>
+                        Source
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Validation Status */}
+                <div className="flex items-center gap-2 text-sm">
+                  {allAssetsValid ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      <span className="text-green-600">All 4 assets ready for job creation</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="h-4 w-4 text-destructive" />
+                      <span className="text-destructive">Missing required assets</span>
+                    </>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
 
-          {!allAssetsValid && !validating && (
-            <Alert variant="destructive">
-              <AlertDescription>
-                Cannot create job. Please select outputs for all required views
-                (Front, Side, Back) in the Review tab first.
-              </AlertDescription>
-            </Alert>
+              {!allAssetsValid && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Cannot create job. Please select outputs for all required views
+                    (Front, Side, Back) in the Review tab first.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Instructions */}
+              <div className="space-y-2">
+                <Label htmlFor="instructions">Instructions for Freelancer</Label>
+                <Textarea
+                  id="instructions"
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  rows={4}
+                  className="resize-none"
+                />
+              </div>
+            </>
           )}
-
-          {/* Instructions */}
-          <div className="space-y-2">
-            <Label htmlFor="instructions">Instructions</Label>
-            <Textarea
-              id="instructions"
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              rows={4}
-              className="resize-none"
-            />
-          </div>
         </div>
 
         <DialogFooter>
@@ -265,6 +329,7 @@ export function CreateFoundationFaceReplaceJobDialog({
           <Button
             onClick={handleCreate}
             disabled={loading || validating || !allAssetsValid}
+            className={allAssetsValid ? "bg-green-600 hover:bg-green-700" : ""}
           >
             {loading ? (
               <>
