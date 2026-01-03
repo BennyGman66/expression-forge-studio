@@ -3,7 +3,7 @@ import { HubHeader } from "@/components/layout/HubHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrandIngestPanel } from "@/components/avatar-repose/BrandIngestPanel";
 import { ClayGenerationPanel } from "@/components/avatar-repose/ClayGenerationPanel";
-import { ClayPoseLibrary } from "@/components/avatar-repose/ClayPoseLibrary";
+import { ClayPoseLibraryReview } from "@/components/brand-pose-library/ClayPoseLibraryReview";
 import { Globe, Palette, Library } from "lucide-react";
 
 const VALID_TABS = ["ingest", "clay", "library"];
@@ -54,8 +54,8 @@ export default function BrandPoseLibrary() {
               <ClayGenerationPanel />
             </TabsContent>
 
-            <TabsContent value="library">
-              <ClayPoseLibrary />
+            <TabsContent value="library" className="mt-0">
+              <ClayPoseLibraryReview />
             </TabsContent>
           </Tabs>
         </div>
