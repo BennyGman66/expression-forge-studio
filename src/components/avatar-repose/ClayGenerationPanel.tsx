@@ -185,6 +185,9 @@ export function ClayGenerationPanel() {
 
     // Client-side orchestration: process one image at a time
     let processed = 0;
+    let successCount = 0;
+    let failCount = 0;
+
     for (const img of imagesToProcess) {
       // Check if user requested stop
       if (shouldStopRef.current) {
@@ -202,7 +205,14 @@ export function ClayGenerationPanel() {
 
         if (error) {
           console.error(`Error generating clay for ${img.id}:`, error);
+          failCount++;
+          toast.error(`Failed to generate clay for image ${processed + 1}`);
+        } else if (data?.error) {
+          console.error(`API error for ${img.id}:`, data.error);
+          failCount++;
+          toast.error(`Failed: ${data.error}`);
         } else if (data?.storedUrl) {
+          successCount++;
           // Add to local state immediately
           if (!data.skipped) {
             setClayImages((prev) => [
@@ -210,9 +220,13 @@ export function ClayGenerationPanel() {
               { id: crypto.randomUUID(), product_image_id: img.id, stored_url: data.storedUrl, created_at: new Date().toISOString() } as ClayImage
             ]);
           }
+        } else if (data?.skipped) {
+          successCount++; // Count skipped as success
         }
       } catch (err) {
         console.error(`Failed to process ${img.id}:`, err);
+        failCount++;
+        toast.error(`Error processing image ${processed + 1}`);
       }
 
       processed++;
@@ -226,7 +240,13 @@ export function ClayGenerationPanel() {
 
     setIsGenerating(false);
     if (!shouldStopRef.current) {
-      toast.success("Clay generation complete!");
+      if (failCount === 0) {
+        toast.success(`Clay generation complete! ${successCount} images processed.`);
+      } else if (successCount === 0) {
+        toast.error(`All ${failCount} images failed to generate.`);
+      } else {
+        toast.warning(`Generated ${successCount} images, ${failCount} failed.`);
+      }
     }
   };
 
