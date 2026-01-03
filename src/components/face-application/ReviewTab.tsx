@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2, MoreVertical, RefreshCw, AlertCircle, Loader2, X } from "lucide-react";
+import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2, MoreVertical, RefreshCw, AlertCircle, Loader2, X, Briefcase } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FaceApplicationOutput, FaceApplicationJob } from "@/types/face-application";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
+import { CreatePhotoshopJobDialog } from "./CreatePhotoshopJobDialog";
 
 interface ReviewTabProps {
   projectId: string;
@@ -38,6 +39,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
   const [talentInfo, setTalentInfo] = useState<TalentInfo | null>(null);
   const [currentViewIndex, setCurrentViewIndex] = useState(0);
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
+  const [showJobDialog, setShowJobDialog] = useState(false);
   const { toast } = useToast();
 
   // Fetch all jobs and outputs for this project (regardless of status)
@@ -566,6 +568,15 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
             Download Selected
           </Button>
           <Button
+            variant="outline"
+            size="lg"
+            onClick={() => setShowJobDialog(true)}
+            disabled={selectedCount === 0}
+          >
+            <Briefcase className="h-4 w-4 mr-2" />
+            Create Photoshop Job
+          </Button>
+          <Button
             size="lg"
             onClick={handleSaveToLook}
             disabled={selectedCount === 0 || saving}
@@ -574,6 +585,22 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
             {saving ? "Saving..." : "Save to Look"}
           </Button>
         </div>
+
+        {/* Photoshop Job Dialog */}
+        {currentView && (
+          <CreatePhotoshopJobDialog
+            open={showJobDialog}
+            onOpenChange={setShowJobDialog}
+            projectId={projectId}
+            lookId={currentView.lookId}
+            lookName={currentView.lookName}
+            talentName={talentInfo?.name || 'Unknown'}
+            selectedOutputUrls={allViews
+              .flatMap(v => v.outputs.filter(o => o.is_selected && o.stored_url).map(o => o.stored_url!))
+            }
+            faceFoundationUrls={talentInfo?.front_face_url ? [talentInfo.front_face_url] : []}
+          />
+        )}
       </div>
 
       {/* Talent reference sidebar */}

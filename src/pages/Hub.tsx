@@ -45,6 +45,14 @@ const adminApps = [
     path: "/users",
     adminOnly: true,
   },
+  {
+    id: "freelancer-portal",
+    title: "Freelancer Portal",
+    description: "Preview the freelancer job management portal.",
+    icon: Users,
+    path: "/freelancer",
+    adminOnly: true,
+  },
 ];
 
 const avatarToPdpApps = [

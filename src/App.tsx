@@ -21,6 +21,9 @@ import Unauthorized from "./pages/Unauthorized";
 import NotFound from "./pages/NotFound";
 import JobBoard from "./pages/JobBoard";
 import UserManagement from "./pages/UserManagement";
+import FreelancerDashboard from "./pages/FreelancerDashboard";
+import FreelancerJobList from "./pages/FreelancerJobList";
+import FreelancerJobDetail from "./pages/FreelancerJobDetail";
 
 const queryClient = new QueryClient();
 
@@ -142,6 +145,32 @@ const App = () => (
               element={
                 <ProtectedRoute requiredRoles={['admin']}>
                   <UserManagement />
+                </ProtectedRoute>
+              } 
+            />
+            
+            {/* Freelancer routes */}
+            <Route 
+              path="/freelancer" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal', 'freelancer']}>
+                  <FreelancerDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/freelancer/jobs" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal', 'freelancer']}>
+                  <FreelancerJobList />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/freelancer/jobs/:jobId" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal', 'freelancer']}>
+                  <FreelancerJobDetail />
                 </ProtectedRoute>
               } 
             />
