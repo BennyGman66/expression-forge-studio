@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { UserMenu } from "./UserMenu";
 
 interface HubHeaderProps {
   currentApp?: string;
@@ -32,10 +33,7 @@ export function HubHeader({ currentApp, currentProject }: HubHeaderProps) {
       </nav>
 
       <div className="flex items-center gap-4">
-        <div className="user-avatar">BG</div>
-        <span className="text-sm text-muted-foreground">ben.garton@leapfroginc.ai</span>
-        <span className="text-sm text-muted-foreground">Leapfrog Inc</span>
-        <button className="btn-outline text-sm py-1.5">Sign Out</button>
+        <UserMenu />
       </div>
     </header>
   );
