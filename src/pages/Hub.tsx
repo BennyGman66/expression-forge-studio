@@ -1,11 +1,20 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
-import { Grid3X3, Users, ExternalLink, User, Briefcase, Shield } from "lucide-react";
+import { 
+  Grid3X3, 
+  User, 
+  Briefcase, 
+  Shield, 
+  Users, 
+  ExternalLink,
+  Eye
+} from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 
-const generalApps = [
+const internalApps = [
   {
     id: "expression-map",
     title: "Expression Map",
@@ -19,39 +28,6 @@ const generalApps = [
     description: "Manage digital talent identities and track their usage.",
     icon: User,
     path: "/digital-talent",
-  },
-  {
-    id: "external",
-    title: "External",
-    description: "Share curated selections with clients for review.",
-    icon: ExternalLink,
-    path: "/external",
-  },
-  {
-    id: "jobs",
-    title: "Job Board",
-    description: "Manage external jobs and freelancer assignments.",
-    icon: Briefcase,
-    path: "/jobs",
-  },
-];
-
-const adminApps = [
-  {
-    id: "users",
-    title: "User Management",
-    description: "Manage users and their roles.",
-    icon: Shield,
-    path: "/users",
-    adminOnly: true,
-  },
-  {
-    id: "freelancer-portal",
-    title: "Freelancer Portal",
-    description: "Preview the freelancer job management portal.",
-    icon: Users,
-    path: "/freelancer",
-    adminOnly: true,
   },
 ];
 
@@ -82,19 +58,44 @@ const avatarToPdpApps = [
   },
 ];
 
+const freelanceApps = [
+  {
+    id: "jobs",
+    title: "Job Board",
+    description: "Manage external jobs and freelancer assignments.",
+    icon: Briefcase,
+    path: "/jobs",
+  },
+];
+
+const clientApps = [
+  {
+    id: "external",
+    title: "External Reviews",
+    description: "Share curated selections with clients for review.",
+    icon: ExternalLink,
+    path: "/external",
+  },
+];
+
+const adminApps = [
+  {
+    id: "users",
+    title: "User Management",
+    description: "Manage users and their roles.",
+    icon: Shield,
+    path: "/users",
+  },
+];
+
 export default function Hub() {
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState("internal");
 
   const handleAppClick = (path: string) => {
     navigate(path);
   };
-
-  // Combine general apps with admin apps if user is admin
-  const allGeneralApps = isAdmin 
-    ? [...generalApps, ...adminApps]
-    : generalApps;
 
   return (
     <div className="min-h-screen bg-background">
@@ -103,46 +104,146 @@ export default function Hub() {
       <main className="px-6 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-6">
-            <TabsTrigger value="general">General</TabsTrigger>
-            <TabsTrigger value="avatar-to-pdp">Avatar to PDP</TabsTrigger>
+            <TabsTrigger value="internal">Leapfrog Internal</TabsTrigger>
+            <TabsTrigger value="freelance">Freelance</TabsTrigger>
+            <TabsTrigger value="client">Client</TabsTrigger>
+            {isAdmin && <TabsTrigger value="admin">Admin</TabsTrigger>}
           </TabsList>
 
-          <TabsContent value="general">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {allGeneralApps.map((app) => (
-                <button
-                  key={app.id}
-                  onClick={() => handleAppClick(app.path)}
-                  className="app-card text-left"
-                >
-                  <h3 className="app-card-title">{app.title}</h3>
-                  <p className="app-card-description">{app.description}</p>
-                </button>
-              ))}
+          {/* Leapfrog Internal Tab */}
+          <TabsContent value="internal">
+            <div className="space-y-8">
+              {/* Production Tools */}
+              <section>
+                <h2 className="text-lg font-medium text-foreground mb-4">Production Tools</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {internalApps.map((app) => (
+                    <button
+                      key={app.id}
+                      onClick={() => handleAppClick(app.path)}
+                      className="app-card text-left"
+                    >
+                      <h3 className="app-card-title">{app.title}</h3>
+                      <p className="app-card-description">{app.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {/* Avatar to PDP Workflow */}
+              <section>
+                <h2 className="text-lg font-medium text-foreground mb-4">Avatar to PDP</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {avatarToPdpApps.map((app) => (
+                    <button
+                      key={app.id}
+                      onClick={() => handleAppClick(app.path)}
+                      className="app-card text-left relative"
+                    >
+                      <div className="absolute top-4 left-4 w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <span className="text-xl font-serif font-medium text-primary">
+                          {app.stepNumber}
+                        </span>
+                      </div>
+                      <div className="pt-12">
+                        <h3 className="app-card-title">{app.title}</h3>
+                        <p className="app-card-description">{app.description}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
             </div>
           </TabsContent>
 
-          <TabsContent value="avatar-to-pdp">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {avatarToPdpApps.map((app) => (
-                <button
-                  key={app.id}
-                  onClick={() => handleAppClick(app.path)}
-                  className="app-card text-left relative"
+          {/* Freelance Tab */}
+          <TabsContent value="freelance">
+            <div className="space-y-8">
+              <section>
+                <h2 className="text-lg font-medium text-foreground mb-4">Job Management</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {freelanceApps.map((app) => (
+                    <button
+                      key={app.id}
+                      onClick={() => handleAppClick(app.path)}
+                      className="app-card text-left"
+                    >
+                      <h3 className="app-card-title">{app.title}</h3>
+                      <p className="app-card-description">{app.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <h2 className="text-lg font-medium text-foreground mb-4">Portal Preview</h2>
+                <Button
+                  variant="outline"
+                  onClick={() => handleAppClick("/freelancer")}
+                  className="gap-2"
                 >
-                  <div className="absolute top-4 left-4 w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                    <span className="text-xl font-serif font-medium text-primary">
-                      {app.stepNumber}
-                    </span>
-                  </div>
-                  <div className="pt-12">
-                    <h3 className="app-card-title">{app.title}</h3>
-                    <p className="app-card-description">{app.description}</p>
-                  </div>
-                </button>
-              ))}
+                  <Eye className="h-4 w-4" />
+                  Preview Freelancer Portal
+                </Button>
+              </section>
             </div>
           </TabsContent>
+
+          {/* Client Tab */}
+          <TabsContent value="client">
+            <div className="space-y-8">
+              <section>
+                <h2 className="text-lg font-medium text-foreground mb-4">Client Reviews</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {clientApps.map((app) => (
+                    <button
+                      key={app.id}
+                      onClick={() => handleAppClick(app.path)}
+                      className="app-card text-left"
+                    >
+                      <h3 className="app-card-title">{app.title}</h3>
+                      <p className="app-card-description">{app.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <h2 className="text-lg font-medium text-foreground mb-4">Portal Preview</h2>
+                <Button
+                  variant="outline"
+                  onClick={() => handleAppClick("/client")}
+                  className="gap-2"
+                >
+                  <Eye className="h-4 w-4" />
+                  Preview Client Portal
+                </Button>
+              </section>
+            </div>
+          </TabsContent>
+
+          {/* Admin Tab */}
+          {isAdmin && (
+            <TabsContent value="admin">
+              <div className="space-y-8">
+                <section>
+                  <h2 className="text-lg font-medium text-foreground mb-4">Administration</h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {adminApps.map((app) => (
+                      <button
+                        key={app.id}
+                        onClick={() => handleAppClick(app.path)}
+                        className="app-card text-left"
+                      >
+                        <h3 className="app-card-title">{app.title}</h3>
+                        <p className="app-card-description">{app.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
       </main>
     </div>
