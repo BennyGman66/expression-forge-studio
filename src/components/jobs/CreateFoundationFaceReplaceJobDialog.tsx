@@ -18,6 +18,7 @@ interface CreateFoundationFaceReplaceJobDialogProps {
   lookId: string;
   lookName: string;
   projectId?: string;
+  onJobCreated?: () => void;
 }
 
 interface AssetValidation {
@@ -41,6 +42,7 @@ export function CreateFoundationFaceReplaceJobDialog({
   lookId,
   lookName,
   projectId,
+  onJobCreated,
 }: CreateFoundationFaceReplaceJobDialogProps) {
   const [loading, setLoading] = useState(false);
   const [validating, setValidating] = useState(true);
@@ -214,6 +216,7 @@ export function CreateFoundationFaceReplaceJobDialog({
         description: `"${title}" has been added to the Job Board and is ready for assignment.`,
         duration: 5000,
       });
+      onJobCreated?.();
       onOpenChange(false);
     } catch (error) {
       console.error('Error creating job:', error);
