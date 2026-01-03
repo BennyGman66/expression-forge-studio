@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { Check, Download, Save, ChevronLeft, ChevronRight, User } from "lucide-react";
+import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FaceApplicationOutput } from "@/types/face-application";
 
@@ -124,28 +124,64 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
   const handleSelect = async (outputId: string) => {
     if (!currentView) return;
     
-    // Deselect all in this view, select this one
-    for (const output of currentView.outputs) {
+    const clickedOutput = currentView.outputs.find(o => o.id === outputId);
+    const isCurrentlySelected = clickedOutput?.is_selected;
+
+    if (isCurrentlySelected) {
+      // Deselect this one
       await supabase
         .from("face_application_outputs")
-        .update({ is_selected: output.id === outputId })
-        .eq("id", output.id);
+        .update({ is_selected: false })
+        .eq("id", outputId);
+
+      setLooks(prev => prev.map(look => ({
+        ...look,
+        outputs: look.outputs.map(o => 
+          o.id === outputId ? { ...o, is_selected: false } : o
+        ),
+      })));
+    } else {
+      // Deselect all in this view, select this one
+      for (const output of currentView.outputs) {
+        await supabase
+          .from("face_application_outputs")
+          .update({ is_selected: output.id === outputId })
+          .eq("id", output.id);
+      }
+
+      setLooks(prev => prev.map(look => ({
+        ...look,
+        outputs: look.outputs.map(o => 
+          currentView.outputs.some(cv => cv.id === o.id)
+            ? { ...o, is_selected: o.id === outputId }
+            : o
+        ),
+      })));
+
+      // Auto-advance to next view only when selecting
+      if (currentViewIndex < allViews.length - 1) {
+        setTimeout(() => setCurrentViewIndex(i => i + 1), 300);
+      }
+    }
+  };
+
+  const handleDelete = async (outputId: string) => {
+    const { error } = await supabase
+      .from("face_application_outputs")
+      .delete()
+      .eq("id", outputId);
+
+    if (error) {
+      toast({ title: "Error", description: "Failed to delete output", variant: "destructive" });
+      return;
     }
 
-    // Update local state
     setLooks(prev => prev.map(look => ({
       ...look,
-      outputs: look.outputs.map(o => 
-        currentView.outputs.some(cv => cv.id === o.id)
-          ? { ...o, is_selected: o.id === outputId }
-          : o
-      ),
+      outputs: look.outputs.filter(o => o.id !== outputId),
     })));
 
-    // Auto-advance to next view
-    if (currentViewIndex < allViews.length - 1) {
-      setTimeout(() => setCurrentViewIndex(i => i + 1), 300);
-    }
+    toast({ title: "Deleted", description: "Output removed" });
   };
 
   const handleSaveToLook = async () => {
@@ -255,37 +291,47 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {currentView.outputs.map((output) => (
-                  <button
-                    key={output.id}
-                    onClick={() => handleSelect(output.id)}
-                    className={`
-                      relative aspect-square rounded-lg overflow-hidden border-2 transition-all
-                      ${output.is_selected
-                        ? "border-primary ring-2 ring-primary/30"
-                        : "border-transparent hover:border-muted-foreground/50"
-                      }
-                    `}
-                  >
-                    {output.stored_url ? (
-                      <img
-                        src={output.stored_url}
-                        alt={`${currentView.view} attempt ${output.attempt_index + 1}`}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-muted flex items-center justify-center">
-                        <span className="text-muted-foreground">No image</span>
+                  <div key={output.id} className="relative group">
+                    <button
+                      onClick={() => handleSelect(output.id)}
+                      className={`
+                        relative aspect-square rounded-lg overflow-hidden border-2 transition-all w-full
+                        ${output.is_selected
+                          ? "border-primary ring-2 ring-primary/30"
+                          : "border-transparent hover:border-muted-foreground/50"
+                        }
+                      `}
+                    >
+                      {output.stored_url ? (
+                        <img
+                          src={output.stored_url}
+                          alt={`${currentView.view} attempt ${output.attempt_index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-muted flex items-center justify-center">
+                          <span className="text-muted-foreground">No image</span>
+                        </div>
+                      )}
+                      {output.is_selected && (
+                        <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1">
+                          <Check className="h-4 w-4" />
+                        </div>
+                      )}
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs py-1 text-center">
+                        Option {output.attempt_index + 1}
                       </div>
-                    )}
-                    {output.is_selected && (
-                      <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1">
-                        <Check className="h-4 w-4" />
-                      </div>
-                    )}
-                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs py-1 text-center">
-                      Option {output.attempt_index + 1}
-                    </div>
-                  </button>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(output.id);
+                      }}
+                      className="absolute top-2 left-2 bg-destructive/80 hover:bg-destructive text-destructive-foreground rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 ))}
               </div>
             </CardContent>
