@@ -8,6 +8,7 @@ import { LookSourceImage, FaceFoundation } from "@/types/face-application";
 interface LookWithImages {
   id: string;
   name: string;
+  digital_talent_id: string | null;
   sourceImages: LookSourceImage[];
 }
 
@@ -27,36 +28,28 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
   const [faceFoundations, setFaceFoundations] = useState<FaceFoundation[]>([]);
   const [matches, setMatches] = useState<Record<string, string>>({}); // sourceImageId -> faceUrl
   const [talentInfo, setTalentInfo] = useState<TalentInfo | null>(null);
+  const [talentIds, setTalentIds] = useState<string[]>([]);
 
-  // Fetch talent info for reference sidebar
+  // Fetch ALL looks for this PROJECT with their source images
   useEffect(() => {
-    if (!talentId) return;
-    const fetchTalentInfo = async () => {
-      const { data } = await supabase
-        .from("digital_talents")
-        .select("name, front_face_url")
-        .eq("id", talentId)
-        .single();
-      if (data) setTalentInfo(data);
-    };
-    fetchTalentInfo();
-  }, [talentId]);
-
-  // Fetch ALL looks for this talent with their source images
-  useEffect(() => {
-    if (!talentId) return;
+    if (!projectId) return;
     const fetchLooks = async () => {
-      // Get all looks for this talent
+      // Get all looks for this project
       const { data: looksData } = await supabase
         .from("talent_looks")
-        .select("id, name")
-        .eq("digital_talent_id", talentId)
+        .select("id, name, digital_talent_id")
+        .eq("project_id", projectId)
         .order("created_at");
 
       if (!looksData || looksData.length === 0) {
         setLooks([]);
+        setTalentIds([]);
         return;
       }
+
+      // Extract unique talent IDs from looks
+      const uniqueTalentIds = [...new Set(looksData.map(l => l.digital_talent_id).filter(Boolean))] as string[];
+      setTalentIds(uniqueTalentIds);
 
       // For each look, fetch its source images with crops
       const looksWithImages: LookWithImages[] = [];
@@ -72,6 +65,7 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
           looksWithImages.push({
             id: look.id,
             name: look.name,
+            digital_talent_id: look.digital_talent_id,
             sourceImages: images as LookSourceImage[],
           });
         }
@@ -79,11 +73,25 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
       setLooks(looksWithImages);
     };
     fetchLooks();
-  }, [talentId]);
+  }, [projectId]);
 
-  // Fetch face foundations for the talent
+  // Fetch talent info from first derived talentId
   useEffect(() => {
-    if (!talentId) return;
+    if (talentIds.length === 0) return;
+    const fetchTalentInfo = async () => {
+      const { data } = await supabase
+        .from("digital_talents")
+        .select("name, front_face_url")
+        .eq("id", talentIds[0])
+        .single();
+      if (data) setTalentInfo(data);
+    };
+    fetchTalentInfo();
+  }, [talentIds]);
+
+  // Fetch face foundations for ALL talents in the project
+  useEffect(() => {
+    if (talentIds.length === 0) return;
     const fetchFaceFoundations = async () => {
       const { data } = await supabase
         .from("face_pairing_outputs")
@@ -104,18 +112,19 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
 
         for (const output of data) {
           const pairing = output.pairing as any;
-          if (pairing?.digital_talent_id === talentId && output.stored_url) {
+          // Check if this foundation belongs to ANY talent in the project
+          if (pairing?.digital_talent_id && talentIds.includes(pairing.digital_talent_id) && output.stored_url) {
             const { data: identityImage } = await supabase
               .from("face_identity_images")
               .select("view")
               .eq("scrape_image_id", pairing.cropped_face_id)
-              .single();
+              .maybeSingle();
 
             foundations.push({
               id: output.id,
               stored_url: output.stored_url,
               view: (identityImage?.view as any) || "unknown",
-              digital_talent_id: talentId,
+              digital_talent_id: pairing.digital_talent_id,
             });
           }
         }
@@ -137,7 +146,7 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
       }
     };
     fetchFaceFoundations();
-  }, [talentId, looks]);
+  }, [talentIds, looks]);
 
   // Toggle face selection (click again to deselect)
   const handleSelectFace = (sourceImageId: string, faceUrl: string) => {
