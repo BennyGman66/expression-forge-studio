@@ -19,6 +19,8 @@ import Auth from "./pages/Auth";
 import SetupAdmin from "./pages/SetupAdmin";
 import Unauthorized from "./pages/Unauthorized";
 import NotFound from "./pages/NotFound";
+import JobBoard from "./pages/JobBoard";
+import UserManagement from "./pages/UserManagement";
 
 const queryClient = new QueryClient();
 
@@ -124,6 +126,22 @@ const App = () => (
               element={
                 <ProtectedRoute requiredRoles={['admin', 'internal']}>
                   <TommyHilfiger />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/jobs" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <JobBoard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/users" 
+              element={
+                <ProtectedRoute requiredRoles={['admin']}>
+                  <UserManagement />
                 </ProtectedRoute>
               } 
             />

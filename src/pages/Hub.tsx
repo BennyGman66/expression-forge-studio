@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
-import { Grid3X3, Users, ExternalLink, User } from "lucide-react";
+import { Grid3X3, Users, ExternalLink, User, Briefcase, Shield } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuth } from "@/contexts/AuthContext";
 
 const generalApps = [
   {
@@ -25,6 +26,24 @@ const generalApps = [
     description: "Share curated selections with clients for review.",
     icon: ExternalLink,
     path: "/external",
+  },
+  {
+    id: "jobs",
+    title: "Job Board",
+    description: "Manage external jobs and freelancer assignments.",
+    icon: Briefcase,
+    path: "/jobs",
+  },
+];
+
+const adminApps = [
+  {
+    id: "users",
+    title: "User Management",
+    description: "Manage users and their roles.",
+    icon: Shield,
+    path: "/users",
+    adminOnly: true,
   },
 ];
 
@@ -57,11 +76,17 @@ const avatarToPdpApps = [
 
 export default function Hub() {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState("general");
 
   const handleAppClick = (path: string) => {
     navigate(path);
   };
+
+  // Combine general apps with admin apps if user is admin
+  const allGeneralApps = isAdmin 
+    ? [...generalApps, ...adminApps]
+    : generalApps;
 
   return (
     <div className="min-h-screen bg-background">
@@ -76,7 +101,7 @@ export default function Hub() {
 
           <TabsContent value="general">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {generalApps.map((app) => (
+              {allGeneralApps.map((app) => (
                 <button
                   key={app.id}
                   onClick={() => handleAppClick(app.path)}
