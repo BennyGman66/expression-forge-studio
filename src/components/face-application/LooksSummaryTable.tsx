@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Check, AlertCircle, Loader2, Briefcase } from "lucide-react";
+import { Check, AlertCircle, Loader2, Briefcase, ExternalLink, CheckCircle2 } from "lucide-react";
 import { FaceApplicationOutput } from "@/types/face-application";
 import { CreateFoundationFaceReplaceJobDialog } from "@/components/jobs/CreateFoundationFaceReplaceJobDialog";
+import { supabase } from "@/integrations/supabase/client";
+import { useNavigate } from "react-router-dom";
 import {
   Table,
   TableBody,
@@ -24,6 +26,12 @@ interface LookSummary {
   isGenerating: boolean;
 }
 
+interface LookJobInfo {
+  lookId: string;
+  jobId: string;
+  status: string;
+}
+
 interface LooksSummaryTableProps {
   looks: Array<{
     id: string;
@@ -43,8 +51,40 @@ function calculateViewStatus(outputs: FaceApplicationOutput[], view: string) {
 }
 
 export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) {
+  const navigate = useNavigate();
   const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
   const [selectedLookName, setSelectedLookName] = useState<string>("");
+  const [lookJobs, setLookJobs] = useState<LookJobInfo[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(true);
+
+  // Fetch existing jobs for each look
+  const fetchLookJobs = useCallback(async () => {
+    if (looks.length === 0) {
+      setLoadingJobs(false);
+      return;
+    }
+    
+    const lookIds = looks.map(l => l.id);
+    
+    const { data: jobs } = await supabase
+      .from('unified_jobs')
+      .select('id, look_id, status')
+      .eq('type', 'FOUNDATION_FACE_REPLACE')
+      .in('look_id', lookIds);
+
+    if (jobs) {
+      setLookJobs(jobs.map(j => ({
+        lookId: j.look_id!,
+        jobId: j.id,
+        status: j.status,
+      })));
+    }
+    setLoadingJobs(false);
+  }, [looks]);
+
+  useEffect(() => {
+    fetchLookJobs();
+  }, [fetchLookJobs]);
 
   // Build summary data for each look
   const lookSummaries: LookSummary[] = looks.map(look => {
@@ -73,6 +113,8 @@ export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) 
     setSelectedLookName(lookName);
   };
 
+  const getJobForLook = (lookId: string) => lookJobs.find(j => j.lookId === lookId);
+
   const ViewStatusIcon = ({ status }: { status: { hasSelection: boolean; isGenerating: boolean; outputCount: number } }) => {
     if (status.outputCount === 0) {
       return <span className="text-muted-foreground text-xs">—</span>;
@@ -90,6 +132,14 @@ export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) 
     return null;
   }
 
+  if (loadingJobs) {
+    return (
+      <div className="rounded-lg border bg-card p-8 flex items-center justify-center">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="rounded-lg border bg-card">
@@ -105,55 +155,79 @@ export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) 
             </TableRow>
           </TableHeader>
           <TableBody>
-            {lookSummaries.map(look => (
-              <TableRow key={look.id}>
-                <TableCell className="font-medium">{look.name}</TableCell>
-                <TableCell className="text-center">
-                  <div className="flex justify-center">
-                    <ViewStatusIcon status={look.views.front} />
-                  </div>
-                </TableCell>
-                <TableCell className="text-center">
-                  <div className="flex justify-center">
-                    <ViewStatusIcon status={look.views.side} />
-                  </div>
-                </TableCell>
-                <TableCell className="text-center">
-                  <div className="flex justify-center">
-                    <ViewStatusIcon status={look.views.back} />
-                  </div>
-                </TableCell>
-                <TableCell className="text-center">
-                  {look.isGenerating ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-blue-600">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      Running
-                    </span>
-                  ) : look.isReady ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-green-600">
-                      <Check className="h-3 w-3" />
-                      Ready
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      Needs selection
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  <Button
-                    size="sm"
-                    variant={look.isReady ? "default" : "outline"}
-                    disabled={!look.isReady || look.isGenerating}
-                    onClick={() => handleCreateJob(look.id, look.name)}
-                    className={look.isReady ? "bg-green-600 hover:bg-green-700" : ""}
-                  >
-                    <Briefcase className="h-4 w-4 mr-1.5" />
-                    Create Job
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            {lookSummaries.map(look => {
+              const existingJob = getJobForLook(look.id);
+              const hasJob = !!existingJob;
+              
+              return (
+                <TableRow 
+                  key={look.id}
+                  className={hasJob ? "bg-muted/30" : ""}
+                >
+                  <TableCell className="font-medium">{look.name}</TableCell>
+                  <TableCell className="text-center">
+                    <div className="flex justify-center">
+                      <ViewStatusIcon status={look.views.front} />
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <div className="flex justify-center">
+                      <ViewStatusIcon status={look.views.side} />
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <div className="flex justify-center">
+                      <ViewStatusIcon status={look.views.back} />
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {hasJob ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-primary">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Job Created
+                      </span>
+                    ) : look.isGenerating ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-blue-600">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Running
+                      </span>
+                    ) : look.isReady ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-green-600">
+                        <Check className="h-3 w-3" />
+                        Ready
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        Needs selection
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {hasJob ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate(`/job-board?job=${existingJob.jobId}`)}
+                      >
+                        <ExternalLink className="h-4 w-4 mr-1.5" />
+                        View Job
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant={look.isReady ? "default" : "outline"}
+                        disabled={!look.isReady || look.isGenerating}
+                        onClick={() => handleCreateJob(look.id, look.name)}
+                        className={look.isReady ? "bg-green-600 hover:bg-green-700" : ""}
+                      >
+                        <Briefcase className="h-4 w-4 mr-1.5" />
+                        Create Job
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
@@ -170,6 +244,7 @@ export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) 
         lookId={selectedLookId || ""}
         lookName={selectedLookName}
         projectId={projectId}
+        onJobCreated={fetchLookJobs}
       />
     </>
   );
