@@ -1,12 +1,20 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { supabase } from "@/integrations/supabase/client";
+import { Plus, ArrowRight, Image as ImageIcon, FolderOpen } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { BulkUploadZone } from "./BulkUploadZone";
+import { LooksTable, LookData, TalentOption } from "./LooksTable";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { supabase } from "@/integrations/supabase/client";
-import { Upload, Plus, ArrowRight, Image as ImageIcon } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
 
 interface LooksUploadTabProps {
   projectId: string;
@@ -17,26 +25,6 @@ interface LooksUploadTabProps {
   onContinue: () => void;
 }
 
-interface DigitalTalent {
-  id: string;
-  name: string;
-  front_face_url: string | null;
-}
-
-interface TalentLook {
-  id: string;
-  name: string;
-  product_type: string | null;
-}
-
-interface LookSourceImage {
-  id: string;
-  view: string;
-  source_url: string;
-}
-
-const VIEWS = ['front', 'back', 'side', 'detail'] as const;
-
 export function LooksUploadTab({
   projectId,
   selectedLookId,
@@ -45,16 +33,19 @@ export function LooksUploadTab({
   setSelectedTalentId,
   onContinue,
 }: LooksUploadTabProps) {
-  const [talents, setTalents] = useState<DigitalTalent[]>([]);
-  const [looks, setLooks] = useState<TalentLook[]>([]);
-  const [sourceImages, setSourceImages] = useState<LookSourceImage[]>([]);
+  const [talents, setTalents] = useState<TalentOption[]>([]);
+  const [looks, setLooks] = useState<LookData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploadingViews, setUploadingViews] = useState<Record<string, boolean>>({});
+  const [bulkUploadState, setBulkUploadState] = useState<{
+    isUploading: boolean;
+    progress: { current: number; total: number };
+  }>({ isUploading: false, progress: { current: 0, total: 0 } });
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newLookName, setNewLookName] = useState("");
-  const [showNewLookForm, setShowNewLookForm] = useState(false);
-  const [uploading, setUploading] = useState<Record<string, boolean>>({});
-  const [dragOver, setDragOver] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
-  // Fetch digital talents
+  // Fetch talents
   useEffect(() => {
     const fetchTalents = async () => {
       const { data } = await supabase
@@ -66,60 +57,53 @@ export function LooksUploadTab({
     fetchTalents();
   }, []);
 
-  // Fetch looks for selected talent within this project
-  useEffect(() => {
-    if (!selectedTalentId || !projectId) {
-      setLooks([]);
-      setSelectedLookId(null);
-      return;
-    }
-    const fetchLooks = async () => {
-      const { data } = await supabase
-        .from("talent_looks")
-        .select("id, name, product_type")
-        .eq("digital_talent_id", selectedTalentId)
-        .eq("project_id", projectId)
-        .order("name");
-      if (data) {
-        setLooks(data);
-        // Auto-select first look if none selected, or clear if no looks
-        if (data.length > 0 && !data.find(l => l.id === selectedLookId)) {
-          setSelectedLookId(data[0].id);
-        } else if (data.length === 0) {
-          setSelectedLookId(null);
-        }
-      }
-    };
-    fetchLooks();
-  }, [selectedTalentId, projectId]);
+  // Fetch all looks for this project with their source images
+  const fetchLooks = useCallback(async () => {
+    if (!projectId) return;
 
-  // Fetch source images for selected look
-  useEffect(() => {
-    if (!selectedLookId) {
-      setSourceImages([]);
+    setLoading(true);
+    const { data: looksData } = await supabase
+      .from("talent_looks")
+      .select("id, name, product_type, digital_talent_id")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false });
+
+    if (!looksData) {
+      setLooks([]);
+      setLoading(false);
       return;
     }
-    const fetchSourceImages = async () => {
-      const { data } = await supabase
-        .from("look_source_images")
-        .select("id, view, source_url")
-        .eq("look_id", selectedLookId);
-      if (data) setSourceImages(data);
-    };
-    fetchSourceImages();
-  }, [selectedLookId]);
+
+    // Fetch source images for all looks
+    const lookIds = looksData.map((l) => l.id);
+    const { data: imagesData } = await supabase
+      .from("look_source_images")
+      .select("id, look_id, view, source_url")
+      .in("look_id", lookIds);
+
+    const looksWithImages: LookData[] = looksData.map((look) => ({
+      ...look,
+      sourceImages: (imagesData || []).filter((img) => img.look_id === look.id),
+    }));
+
+    setLooks(looksWithImages);
+    setLoading(false);
+  }, [projectId]);
+
+  useEffect(() => {
+    fetchLooks();
+  }, [fetchLooks]);
+
+  // Get a default talent_id for legacy table
+  const getDefaultTalentId = async () => {
+    const { data } = await supabase.from("talents").select("id").limit(1).single();
+    return data?.id;
+  };
 
   const handleCreateLook = async () => {
-    if (!selectedTalentId || !newLookName.trim()) return;
-    
-    // Get the talent_id from talents table (for legacy compatibility)
-    const { data: talentData } = await supabase
-      .from("talents")
-      .select("id")
-      .limit(1)
-      .single();
-    
-    const talentId = talentData?.id;
+    if (!newLookName.trim()) return;
+
+    const talentId = await getDefaultTalentId();
     if (!talentId) {
       toast({ title: "Error", description: "No talent found", variant: "destructive" });
       return;
@@ -129,9 +113,9 @@ export function LooksUploadTab({
       .from("talent_looks")
       .insert({
         name: newLookName.trim(),
-        digital_talent_id: selectedTalentId,
         talent_id: talentId,
         project_id: projectId,
+        digital_talent_id: null,
       })
       .select()
       .single();
@@ -141,276 +125,435 @@ export function LooksUploadTab({
       return;
     }
 
-    setLooks([...looks, data]);
-    setSelectedLookId(data.id);
+    setLooks((prev) => [{ ...data, sourceImages: [] }, ...prev]);
     setNewLookName("");
-    setShowNewLookForm(false);
+    setShowCreateDialog(false);
     toast({ title: "Look created", description: `"${data.name}" has been created.` });
   };
 
-  const handleUpload = async (view: typeof VIEWS[number], file: File) => {
-    if (!selectedLookId || !selectedTalentId) return;
+  const handleUpdateLook = async (lookId: string, updates: Partial<LookData>) => {
+    const { error } = await supabase
+      .from("talent_looks")
+      .update({
+        name: updates.name,
+        digital_talent_id: updates.digital_talent_id,
+      })
+      .eq("id", lookId);
 
-    setUploading((prev) => ({ ...prev, [view]: true }));
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    setLooks((prev) =>
+      prev.map((look) => (look.id === lookId ? { ...look, ...updates } : look))
+    );
+  };
+
+  const handleDeleteLook = async (lookId: string) => {
+    const { error } = await supabase.from("talent_looks").delete().eq("id", lookId);
+
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    setLooks((prev) => prev.filter((look) => look.id !== lookId));
+    toast({ title: "Deleted", description: "Look has been deleted." });
+  };
+
+  const handleDuplicateLook = async (lookId: string) => {
+    const original = looks.find((l) => l.id === lookId);
+    if (!original) return;
+
+    const talentId = await getDefaultTalentId();
+    if (!talentId) return;
+
+    const { data, error } = await supabase
+      .from("talent_looks")
+      .insert({
+        name: `${original.name} (copy)`,
+        talent_id: talentId,
+        project_id: projectId,
+        digital_talent_id: original.digital_talent_id,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    // Duplicate images
+    if (original.sourceImages.length > 0) {
+      const newImages = original.sourceImages.map((img) => ({
+        look_id: data.id,
+        view: img.view,
+        source_url: img.source_url,
+        digital_talent_id: original.digital_talent_id,
+      }));
+
+      const { data: insertedImages } = await supabase
+        .from("look_source_images")
+        .insert(newImages)
+        .select();
+
+      setLooks((prev) => [
+        { ...data, sourceImages: insertedImages || [] },
+        ...prev,
+      ]);
+    } else {
+      setLooks((prev) => [{ ...data, sourceImages: [] }, ...prev]);
+    }
+
+    toast({ title: "Duplicated", description: `"${data.name}" has been created.` });
+  };
+
+  const handleUploadImage = async (lookId: string, view: string, file: File) => {
+    const look = looks.find((l) => l.id === lookId);
+    if (!look) return;
+
+    const uploadKey = `${lookId}-${view}`;
+    setUploadingViews((prev) => ({ ...prev, [uploadKey]: true }));
 
     try {
-      // Upload to storage
-      const fileName = `${selectedLookId}/${view}-${Date.now()}.${file.name.split('.').pop()}`;
+      const fileName = `${lookId}/${view}-${Date.now()}.${file.name.split(".").pop()}`;
       const { error: uploadError } = await supabase.storage
         .from("images")
         .upload(fileName, file);
 
       if (uploadError) throw uploadError;
 
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from("images")
-        .getPublicUrl(fileName);
-
-      // Check if image already exists for this view
-      const existingImage = sourceImages.find((img) => img.view === view);
+      const { data: urlData } = supabase.storage.from("images").getPublicUrl(fileName);
+      const existingImage = look.sourceImages.find((img) => img.view === view);
 
       if (existingImage) {
-        // Update existing
         await supabase
           .from("look_source_images")
           .update({ source_url: urlData.publicUrl })
           .eq("id", existingImage.id);
 
-        setSourceImages((prev) =>
-          prev.map((img) =>
-            img.id === existingImage.id
-              ? { ...img, source_url: urlData.publicUrl }
-              : img
+        setLooks((prev) =>
+          prev.map((l) =>
+            l.id === lookId
+              ? {
+                  ...l,
+                  sourceImages: l.sourceImages.map((img) =>
+                    img.id === existingImage.id
+                      ? { ...img, source_url: urlData.publicUrl }
+                      : img
+                  ),
+                }
+              : l
           )
         );
       } else {
-        // Insert new
         const { data: newImage } = await supabase
           .from("look_source_images")
           .insert({
-            look_id: selectedLookId,
-            digital_talent_id: selectedTalentId,
+            look_id: lookId,
             view,
             source_url: urlData.publicUrl,
+            digital_talent_id: look.digital_talent_id,
           })
           .select()
           .single();
 
         if (newImage) {
-          setSourceImages((prev) => [...prev, newImage]);
+          setLooks((prev) =>
+            prev.map((l) =>
+              l.id === lookId
+                ? { ...l, sourceImages: [...l.sourceImages, newImage] }
+                : l
+            )
+          );
         }
       }
 
-      toast({ title: "Uploaded", description: `${view} image uploaded successfully.` });
+      toast({ title: "Uploaded", description: `${view} image uploaded.` });
     } catch (error: any) {
       toast({ title: "Upload failed", description: error.message, variant: "destructive" });
     } finally {
-      setUploading((prev) => ({ ...prev, [view]: false }));
+      setUploadingViews((prev) => ({ ...prev, [uploadKey]: false }));
     }
   };
 
-  const getImageForView = (view: string) => {
-    return sourceImages.find((img) => img.view === view)?.source_url;
+  const handleRemoveImage = async (lookId: string, imageId: string) => {
+    const { error } = await supabase.from("look_source_images").delete().eq("id", imageId);
+
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    setLooks((prev) =>
+      prev.map((look) =>
+        look.id === lookId
+          ? { ...look, sourceImages: look.sourceImages.filter((img) => img.id !== imageId) }
+          : look
+      )
+    );
   };
 
-  const hasMinimumImages = sourceImages.length >= 1;
+  const handleBulkUpload = async (files: File[]) => {
+    if (files.length === 0) return;
+
+    // Parse filenames to group by look
+    // Expected patterns: "look-name-front.jpg", "look-name_back.png", etc.
+    const viewPatterns = /(front|back|side|detail)/i;
+    const groups: Record<string, { view: string; file: File }[]> = {};
+
+    files.forEach((file) => {
+      const baseName = file.name.replace(/\.[^.]+$/, ""); // Remove extension
+      const viewMatch = baseName.match(viewPatterns);
+      const view = viewMatch ? viewMatch[1].toLowerCase() : "front";
+      
+      // Extract look name by removing the view suffix
+      let lookName = baseName
+        .replace(viewPatterns, "")
+        .replace(/[-_]+$/, "")
+        .replace(/^[-_]+/, "")
+        .trim();
+      
+      if (!lookName) lookName = `Look ${Object.keys(groups).length + 1}`;
+
+      if (!groups[lookName]) groups[lookName] = [];
+      groups[lookName].push({ view, file });
+    });
+
+    const lookNames = Object.keys(groups);
+    setBulkUploadState({
+      isUploading: true,
+      progress: { current: 0, total: files.length },
+    });
+
+    const talentId = await getDefaultTalentId();
+    if (!talentId) {
+      toast({ title: "Error", description: "No talent found", variant: "destructive" });
+      setBulkUploadState({ isUploading: false, progress: { current: 0, total: 0 } });
+      return;
+    }
+
+    let processedCount = 0;
+
+    for (const lookName of lookNames) {
+      // Create the look
+      const { data: lookData, error: lookError } = await supabase
+        .from("talent_looks")
+        .insert({
+          name: lookName,
+          talent_id: talentId,
+          project_id: projectId,
+          digital_talent_id: null,
+        })
+        .select()
+        .single();
+
+      if (lookError) {
+        console.error("Error creating look:", lookError);
+        continue;
+      }
+
+      const newLook: LookData = { ...lookData, sourceImages: [] };
+
+      // Upload images for this look
+      for (const { view, file } of groups[lookName]) {
+        try {
+          const fileName = `${lookData.id}/${view}-${Date.now()}.${file.name.split(".").pop()}`;
+          await supabase.storage.from("images").upload(fileName, file);
+          const { data: urlData } = supabase.storage.from("images").getPublicUrl(fileName);
+
+          const { data: imageData } = await supabase
+            .from("look_source_images")
+            .insert({
+              look_id: lookData.id,
+              view,
+              source_url: urlData.publicUrl,
+            })
+            .select()
+            .single();
+
+          if (imageData) {
+            newLook.sourceImages.push(imageData);
+          }
+        } catch (err) {
+          console.error("Error uploading image:", err);
+        }
+
+        processedCount++;
+        setBulkUploadState((prev) => ({
+          ...prev,
+          progress: { ...prev.progress, current: processedCount },
+        }));
+      }
+
+      setLooks((prev) => [newLook, ...prev]);
+    }
+
+    setBulkUploadState({ isUploading: false, progress: { current: 0, total: 0 } });
+    toast({
+      title: "Bulk upload complete",
+      description: `Created ${lookNames.length} looks from ${files.length} images.`,
+    });
+  };
+
+  const hasAnyLooksWithImages = looks.some((look) => look.sourceImages.length > 0);
+  const completeLooksCount = looks.filter((look) => {
+    const views = look.sourceImages.map((img) => img.view);
+    return views.includes("front") && views.includes("back");
+  }).length;
+
+  const assignedTalentsCount = new Set(
+    looks.filter((l) => l.digital_talent_id).map((l) => l.digital_talent_id)
+  ).size;
+
+  // Empty state
+  if (!loading && looks.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col items-center justify-center py-16 gap-6">
+          <div className="text-center space-y-2">
+            <FolderOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-lg font-semibold">No looks yet</h3>
+            <p className="text-muted-foreground text-sm max-w-md">
+              Drag outfit images here to create looks automatically, or create a look manually.
+            </p>
+          </div>
+
+          <BulkUploadZone
+            onFilesSelected={handleBulkUpload}
+            isUploading={bulkUploadState.isUploading}
+            uploadProgress={bulkUploadState.progress}
+          />
+
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>or</span>
+          </div>
+
+          <Button variant="outline" onClick={() => setShowCreateDialog(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Create Look Manually
+          </Button>
+        </div>
+
+        <CreateLookDialog
+          open={showCreateDialog}
+          onOpenChange={setShowCreateDialog}
+          name={newLookName}
+          setName={setNewLookName}
+          onCreate={handleCreateLook}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-6">
-        {/* Left: Talent & Look Selection */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Select Digital Talent & Look</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Digital Talent</Label>
-              <Select value={selectedTalentId || ""} onValueChange={setSelectedTalentId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a talent..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {talents.map((talent) => (
-                    <SelectItem key={talent.id} value={talent.id}>
-                      {talent.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {selectedTalentId && (
-              <div className="space-y-2">
-                <Label>Look</Label>
-                <Select value={selectedLookId || ""} onValueChange={setSelectedLookId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a look..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {looks.map((look) => (
-                      <SelectItem key={look.id} value={look.id}>
-                        {look.name} {look.product_type && `(${look.product_type})`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {!showNewLookForm ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full mt-2"
-                    onClick={() => setShowNewLookForm(true)}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create New Look
-                  </Button>
-                ) : (
-                  <div className="flex gap-2 mt-2">
-                    <Input
-                      placeholder="Look name..."
-                      value={newLookName}
-                      onChange={(e) => setNewLookName(e.target.value)}
-                    />
-                    <Button size="sm" onClick={handleCreateLook}>
-                      Create
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setShowNewLookForm(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                )}
-
-                {/* Quick-access look tabs */}
-                {looks.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-border">
-                    <Label className="text-xs text-muted-foreground mb-2 block">Quick Access</Label>
-                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
-                      {looks.map((look) => (
-                        <Button
-                          key={look.id}
-                          variant={selectedLookId === look.id ? "default" : "outline"}
-                          size="sm"
-                          className="whitespace-nowrap flex-shrink-0"
-                          onClick={() => setSelectedLookId(look.id)}
-                        >
-                          {look.name}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Right: Upload Slots */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Upload Look Images</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!selectedLookId ? (
-              <p className="text-muted-foreground text-center py-8">
-                Select a talent and look to upload images
-              </p>
-            ) : (
-              <div className="grid grid-cols-2 gap-4">
-                {VIEWS.map((view) => {
-                  const imageUrl = getImageForView(view);
-                  const isDragOver = dragOver[view];
-                  return (
-                    <div key={view} className="space-y-2">
-                      <Label className="capitalize">{view}</Label>
-                      <label
-                        className={`
-                          relative aspect-[3/4] border-2 border-dashed rounded-lg 
-                          flex items-center justify-center cursor-pointer
-                          transition-all overflow-hidden
-                          ${isDragOver ? "border-primary bg-primary/5 scale-[1.02]" : "hover:border-primary"}
-                          ${imageUrl ? "border-solid border-muted" : "border-muted-foreground/30"}
-                        `}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setDragOver((prev) => ({ ...prev, [view]: true }));
-                        }}
-                        onDragEnter={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setDragOver((prev) => ({ ...prev, [view]: true }));
-                        }}
-                        onDragLeave={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setDragOver((prev) => ({ ...prev, [view]: false }));
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setDragOver((prev) => ({ ...prev, [view]: false }));
-                          const file = e.dataTransfer.files?.[0];
-                          if (file && file.type.startsWith('image/')) {
-                            handleUpload(view, file);
-                          }
-                        }}
-                      >
-                        {imageUrl ? (
-                          <img
-                            src={imageUrl}
-                            alt={view}
-                            className="absolute inset-0 w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                            {uploading[view] ? (
-                              <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
-                            ) : (
-                              <>
-                                <ImageIcon className="h-8 w-8" />
-                                <span className="text-xs">{isDragOver ? "Drop here" : "Upload"}</span>
-                              </>
-                            )}
-                          </div>
-                        )}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          disabled={uploading[view]}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) handleUpload(view, file);
-                          }}
-                        />
-                      </label>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+    <div className="space-y-4">
+      {/* Header with stats */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            {looks.length} look{looks.length !== 1 ? "s" : ""} · {assignedTalentsCount} model
+            {assignedTalentsCount !== 1 ? "s" : ""} · {completeLooksCount} complete
+          </span>
+        </div>
+        <Button size="sm" onClick={() => setShowCreateDialog(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Look
+        </Button>
       </div>
 
-      {/* Continue Button */}
-      <div className="flex justify-end">
-        <Button
-          size="lg"
-          disabled={!hasMinimumImages}
-          onClick={onContinue}
-        >
+      {/* Compact bulk upload */}
+      <BulkUploadZone
+        onFilesSelected={handleBulkUpload}
+        isUploading={bulkUploadState.isUploading}
+        uploadProgress={bulkUploadState.progress}
+        compact
+      />
+
+      {/* Looks table */}
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
+        </div>
+      ) : (
+        <LooksTable
+          looks={looks}
+          talents={talents}
+          onUpdateLook={handleUpdateLook}
+          onDeleteLook={handleDeleteLook}
+          onDuplicateLook={handleDuplicateLook}
+          onUploadImage={handleUploadImage}
+          onRemoveImage={handleRemoveImage}
+          uploadingViews={uploadingViews}
+        />
+      )}
+
+      {/* Continue button */}
+      <div className="flex justify-end pt-4">
+        <Button size="lg" disabled={!hasAnyLooksWithImages} onClick={onContinue}>
           Continue to Head Crop
           <ArrowRight className="h-4 w-4 ml-2" />
         </Button>
       </div>
+
+      <CreateLookDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        name={newLookName}
+        setName={setNewLookName}
+        onCreate={handleCreateLook}
+      />
     </div>
+  );
+}
+
+function CreateLookDialog({
+  open,
+  onOpenChange,
+  name,
+  setName,
+  onCreate,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  name: string;
+  setName: (name: string) => void;
+  onCreate: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create New Look</DialogTitle>
+          <DialogDescription>
+            Enter a name for the new look. You can upload images after creating it.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="look-name">Look Name</Label>
+            <Input
+              id="look-name"
+              placeholder="e.g., Summer Dress 01"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && name.trim()) onCreate();
+              }}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={onCreate} disabled={!name.trim()}>
+            Create Look
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
