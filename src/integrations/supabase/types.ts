@@ -52,6 +52,50 @@ export type Database = {
           },
         ]
       }
+      brand_pose_libraries: {
+        Row: {
+          brand_id: string
+          config_json: Json | null
+          created_at: string
+          id: string
+          locked_at: string | null
+          locked_by: string | null
+          status: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          brand_id: string
+          config_json?: Json | null
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          brand_id?: string
+          config_json?: Json | null
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          locked_by?: string | null
+          status?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brand_pose_libraries_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       brand_refs: {
         Row: {
           created_at: string
@@ -1829,6 +1873,60 @@ export type Database = {
           },
         ]
       }
+      library_poses: {
+        Row: {
+          clay_image_id: string
+          created_at: string
+          curation_status: string
+          gender: string | null
+          id: string
+          library_id: string
+          notes: string | null
+          product_type: string | null
+          slot: string
+          updated_at: string
+        }
+        Insert: {
+          clay_image_id: string
+          created_at?: string
+          curation_status?: string
+          gender?: string | null
+          id?: string
+          library_id: string
+          notes?: string | null
+          product_type?: string | null
+          slot: string
+          updated_at?: string
+        }
+        Update: {
+          clay_image_id?: string
+          created_at?: string
+          curation_status?: string
+          gender?: string | null
+          id?: string
+          library_id?: string
+          notes?: string | null
+          product_type?: string | null
+          slot?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "library_poses_clay_image_id_fkey"
+            columns: ["clay_image_id"]
+            isOneToOne: false
+            referencedRelation: "clay_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "library_poses_library_id_fkey"
+            columns: ["library_id"]
+            isOneToOne: false
+            referencedRelation: "brand_pose_libraries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       look_source_images: {
         Row: {
           created_at: string | null
@@ -2523,6 +2621,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      initialize_library_from_clay_poses: {
+        Args: { p_brand_id: string; p_library_id: string }
+        Returns: number
       }
       is_internal_user: { Args: { _user_id: string }; Returns: boolean }
     }
