@@ -104,7 +104,7 @@ export default function FreelancerJobDetail() {
 
   const handleStartJob = () => {
     updateStatus.mutate(
-      { jobId: jobId!, status: 'IN_PROGRESS' },
+      { jobId: jobId!, status: 'IN_PROGRESS', assignedUserId: user?.id },
       { onSuccess: () => toast.success('Job started!') }
     );
   };
