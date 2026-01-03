@@ -17,23 +17,23 @@ export default function SetupAdmin() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  // Check if any admin exists
+  // Check if any admin exists by querying the database directly
   useEffect(() => {
     const checkAdminExists = async () => {
       try {
-        // Use edge function to check (since RLS might block direct check)
-        const { data, error } = await supabase.functions.invoke('assign-role', {
-          body: { userId: 'check', role: 'admin' }
-        });
+        const { data, error } = await supabase
+          .from('user_roles')
+          .select('id')
+          .eq('role', 'admin')
+          .limit(1);
         
-        // If we get a 403 "admin already exists" error, an admin exists
-        if (error?.message?.includes('already exists')) {
-          setAdminExists(true);
-        } else {
+        if (error) {
+          console.error('Error checking for admin:', error);
           setAdminExists(false);
+        } else {
+          setAdminExists(data && data.length > 0);
         }
       } catch {
-        // If we can't check, assume no admin
         setAdminExists(false);
       }
       setIsChecking(false);
