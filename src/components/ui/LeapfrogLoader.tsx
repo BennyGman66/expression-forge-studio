@@ -15,20 +15,20 @@ export const LeapfrogLoader = React.forwardRef<HTMLDivElement, LeapfrogLoaderPro
     };
 
     return (
-      <div ref={ref} className="flex flex-col items-center justify-center gap-2">
-        <div className="relative">
+      <span ref={ref} className="inline-flex flex-col items-center justify-center gap-2">
+        <span className="relative inline-block">
           <img
             src={leapfrogLogo}
             alt="Loading"
             className={`${sizeClasses[size]} animate-leapfrog-hop`}
           />
           {/* Shadow that shrinks when frog jumps */}
-          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-1.5 bg-black/20 rounded-full animate-leapfrog-shadow" />
-        </div>
+          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-1.5 bg-black/20 rounded-full animate-leapfrog-shadow" />
+        </span>
         {message && (
           <span className="text-xs text-muted-foreground animate-pulse">{message}</span>
         )}
-      </div>
+      </span>
     );
   }
 );
