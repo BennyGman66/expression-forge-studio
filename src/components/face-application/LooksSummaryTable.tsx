@@ -96,7 +96,7 @@ export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) 
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[200px]">Look</TableHead>
+              <TableHead className="w-[200px]">Product</TableHead>
               <TableHead className="text-center w-[80px]">Front</TableHead>
               <TableHead className="text-center w-[80px]">Side</TableHead>
               <TableHead className="text-center w-[80px]">Back</TableHead>

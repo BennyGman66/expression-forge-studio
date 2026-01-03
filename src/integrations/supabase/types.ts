@@ -2254,8 +2254,10 @@ export type Database = {
           id: string
           instructions: string | null
           look_id: string | null
+          priority: number | null
           project_id: string | null
           status: Database["public"]["Enums"]["job_status"] | null
+          title: string | null
           type: Database["public"]["Enums"]["job_type"]
           updated_at: string | null
         }
@@ -2267,8 +2269,10 @@ export type Database = {
           id?: string
           instructions?: string | null
           look_id?: string | null
+          priority?: number | null
           project_id?: string | null
           status?: Database["public"]["Enums"]["job_status"] | null
+          title?: string | null
           type: Database["public"]["Enums"]["job_type"]
           updated_at?: string | null
         }
@@ -2280,8 +2284,10 @@ export type Database = {
           id?: string
           instructions?: string | null
           look_id?: string | null
+          priority?: number | null
           project_id?: string | null
           status?: Database["public"]["Enums"]["job_status"] | null
+          title?: string | null
           type?: Database["public"]["Enums"]["job_type"]
           updated_at?: string | null
         }
