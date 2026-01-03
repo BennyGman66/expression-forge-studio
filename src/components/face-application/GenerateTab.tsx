@@ -39,6 +39,7 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
   const [isGenerating, setIsGenerating] = useState(false);
   const [talentInfo, setTalentInfo] = useState<{ name: string; front_face_url: string | null } | null>(null);
   const [talentIds, setTalentIds] = useState<string[]>([]);
+  const [currentBatchJobIds, setCurrentBatchJobIds] = useState<string[]>([]);
   const { toast } = useToast();
 
   // Fetch ALL looks for this PROJECT with their source images
@@ -188,8 +189,10 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
   const handleStartGeneration = async () => {
     if (looks.length === 0 || talentIds.length === 0) return;
     setIsGenerating(true);
+    setCurrentBatchJobIds([]); // Reset current batch
 
     try {
+      const newBatchJobIds: string[] = [];
       // Create jobs for each look
       for (const look of looks) {
         const talentId = look.digital_talent_id || talentIds[0];
@@ -234,6 +237,8 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
           .single();
 
         if (jobError) throw jobError;
+        
+        newBatchJobIds.push(newJob.id);
 
         // Trigger generation - face matching is now handled by edge function
         await supabase.functions.invoke("generate-face-application", {
@@ -243,6 +248,9 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
           },
         });
       }
+
+      // Set the current batch job IDs for progress tracking
+      setCurrentBatchJobIds(newBatchJobIds);
 
       // Refresh jobs
       const { data } = await supabase
@@ -258,15 +266,20 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
     }
   };
 
-  // Calculate totals
+  // Calculate totals - only for current batch when generating
   const allSourceImages = looks.flatMap(l => l.sourceImages);
   const totalGenerations = allSourceImages.length * attemptsPerView;
-  const totalProgress = jobs.reduce((sum, j) => sum + (j.progress || 0), 0);
-  const totalJobItems = jobs.reduce((sum, j) => sum + (j.total || 0), 0);
-  const overallProgress = totalJobItems > 0 ? (totalProgress / totalJobItems) * 100 : 0;
+  
+  // Filter to current batch jobs for progress display
+  const currentBatchJobs = currentBatchJobIds.length > 0 
+    ? jobs.filter(j => currentBatchJobIds.includes(j.id))
+    : [];
+  const batchProgress = currentBatchJobs.reduce((sum, j) => sum + (j.progress || 0), 0);
+  const batchTotal = currentBatchJobs.reduce((sum, j) => sum + (j.total || 0), 0);
+  const overallProgress = batchTotal > 0 ? (batchProgress / batchTotal) * 100 : 0;
+  
   const allJobsCompleted = jobs.length > 0 && jobs.every(j => j.status === "completed");
   const hasRunningJobs = jobs.some(j => j.status === "running" || j.status === "pending");
-
   return (
     <div className="flex gap-6">
       {/* Main content */}
@@ -361,14 +374,14 @@ export function GenerateTab({ projectId, lookId, talentId, onContinue }: Generat
                 </div>
 
                 {/* Progress */}
-                {hasRunningJobs && (
+                {hasRunningJobs && currentBatchJobIds.length > 0 && (
                   <div className="space-y-3 p-4 bg-muted/30 rounded-lg">
                     <div className="flex items-center gap-4">
                       <LeapfrogLoader message="" size="sm" />
                       <div className="flex-1">
                         <div className="flex justify-between text-sm mb-1">
                           <span>Generating faces...</span>
-                          <span className="font-medium">{totalProgress} / {totalJobItems}</span>
+                          <span className="font-medium">{batchProgress} / {batchTotal}</span>
                         </div>
                         <Progress value={overallProgress} className="h-2" />
                       </div>

@@ -86,3 +86,6 @@ verify_jwt = false
 
 [functions.generate-more-outputs]
 verify_jwt = false
+
+[functions.regenerate-face-output]
+verify_jwt = false
