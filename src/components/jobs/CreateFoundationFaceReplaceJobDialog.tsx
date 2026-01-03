@@ -8,6 +8,7 @@ import { CheckCircle2, XCircle, Loader2, ArrowRight } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { JOB_TYPE_CONFIG } from '@/lib/jobTypes';
+import { ArtifactType } from '@/types/jobs';
 
 interface CreateFoundationFaceReplaceJobDialogProps {
   open: boolean;
@@ -18,12 +19,18 @@ interface CreateFoundationFaceReplaceJobDialogProps {
 }
 
 interface AssetValidation {
-  key: string;
+  key: ArtifactType;
   label: string;
   view: string;
   exists: boolean;
   url?: string;
   sourceId?: string;
+}
+
+interface ViewPairing {
+  view: string;
+  headRender: AssetValidation | undefined;
+  sourceImage: AssetValidation | undefined;
 }
 
 export function CreateFoundationFaceReplaceJobDialog({
@@ -40,9 +47,14 @@ export function CreateFoundationFaceReplaceJobDialog({
     JOB_TYPE_CONFIG.FOUNDATION_FACE_REPLACE.defaultInstructions
   );
 
-  const allAssetsValid = assets.length > 0 && assets.every((a) => a.exists);
-  const headRenders = assets.filter(a => a.key.startsWith('HEAD_RENDER'));
-  const originalLook = assets.find(a => a.key === 'LOOK_ORIGINAL');
+  const allAssetsValid = assets.length === 6 && assets.every((a) => a.exists);
+  
+  // Group assets into view pairings
+  const viewPairings: ViewPairing[] = ['front', 'side', 'back'].map(view => ({
+    view,
+    headRender: assets.find(a => a.key === `HEAD_RENDER_${view.toUpperCase()}`),
+    sourceImage: assets.find(a => a.key === `LOOK_ORIGINAL_${view.toUpperCase()}`),
+  }));
 
   useEffect(() => {
     if (open && lookId) {
@@ -65,56 +77,62 @@ export function CreateFoundationFaceReplaceJobDialog({
 
       const jobIds = jobs?.map((j) => j.id) || [];
 
-      if (jobIds.length === 0) {
-        setAssets([]);
-        setValidating(false);
-        return;
+      // Fetch selected outputs for each view (head renders)
+      let outputsByView: Record<string, { id: string; url: string }> = {};
+      
+      if (jobIds.length > 0) {
+        const { data: lookOutputs } = await supabase
+          .from('face_application_outputs')
+          .select('id, view, stored_url, is_selected, job_id')
+          .in('job_id', jobIds)
+          .eq('is_selected', true);
+
+        lookOutputs?.forEach((o) => {
+          if (o.is_selected && o.stored_url) {
+            outputsByView[o.view] = { id: o.id, url: o.stored_url };
+          }
+        });
       }
 
-      // Fetch selected outputs for each view
-      const { data: lookOutputs } = await supabase
-        .from('face_application_outputs')
-        .select('id, view, stored_url, is_selected, job_id')
-        .in('job_id', jobIds)
-        .eq('is_selected', true);
+      // Fetch all source images for this look (front, side, back)
+      const { data: lookSources } = await supabase
+        .from('look_source_images')
+        .select('id, source_url, view')
+        .eq('look_id', lookId);
 
-      const outputsByView: Record<string, { id: string; url: string }> = {};
-      lookOutputs?.forEach((o) => {
-        if (o.is_selected && o.stored_url) {
-          outputsByView[o.view] = { id: o.id, url: o.stored_url };
+      const sourcesByView: Record<string, { id: string; url: string }> = {};
+      lookSources?.forEach((s) => {
+        if (s.source_url) {
+          sourcesByView[s.view] = { id: s.id, url: s.source_url };
         }
       });
 
-      // Check head renders
-      const headViews = ['front', 'side', 'back'];
-      for (const view of headViews) {
+      // Build validations for each view
+      const views = ['front', 'side', 'back'];
+      for (const view of views) {
         const output = outputsByView[view];
+        const source = sourcesByView[view];
+        
+        // Head render
         validations.push({
-          key: `HEAD_RENDER_${view.toUpperCase()}`,
-          label: view.charAt(0).toUpperCase() + view.slice(1),
+          key: `HEAD_RENDER_${view.toUpperCase()}` as ArtifactType,
+          label: `Head (${view.charAt(0).toUpperCase() + view.slice(1)})`,
           view,
           exists: !!output,
           url: output?.url,
           sourceId: output?.id,
         });
+
+        // Original source image
+        validations.push({
+          key: `LOOK_ORIGINAL_${view.toUpperCase()}` as ArtifactType,
+          label: `Source (${view.charAt(0).toUpperCase() + view.slice(1)})`,
+          view,
+          exists: !!source,
+          url: source?.url,
+          sourceId: source?.id,
+        });
       }
-
-      // Fetch original look image (front source)
-      const { data: lookSource } = await supabase
-        .from('look_source_images')
-        .select('id, source_url, view')
-        .eq('look_id', lookId)
-        .eq('view', 'front')
-        .maybeSingle();
-
-      validations.push({
-        key: 'LOOK_ORIGINAL',
-        label: 'Original Look',
-        view: 'front',
-        exists: !!lookSource?.source_url,
-        url: lookSource?.source_url,
-        sourceId: lookSource?.id,
-      });
 
       setAssets(validations);
     } catch (error) {
@@ -130,8 +148,6 @@ export function CreateFoundationFaceReplaceJobDialog({
 
     setLoading(true);
     try {
-      const config = JOB_TYPE_CONFIG.FOUNDATION_FACE_REPLACE;
-
       // Create the job
       const { data: job, error: jobError } = await supabase
         .from('unified_jobs')
@@ -151,16 +167,18 @@ export function CreateFoundationFaceReplaceJobDialog({
       for (const asset of assets) {
         if (!asset.exists || !asset.url) continue;
 
+        const isHeadRender = asset.key.startsWith('HEAD_RENDER');
+        
         // Create artifact
         const { data: artifact, error: artifactError } = await supabase
           .from('unified_artifacts')
           .insert({
-            type: asset.key as any,
+            type: asset.key,
             file_url: asset.url,
             preview_url: asset.url,
             look_id: lookId,
             project_id: projectId || null,
-            source_table: asset.key === 'LOOK_ORIGINAL' ? 'look_source_images' : 'face_application_outputs',
+            source_table: isHeadRender ? 'face_application_outputs' : 'look_source_images',
             source_id: asset.sourceId,
             metadata: { view: asset.view },
           })
@@ -191,9 +209,42 @@ export function CreateFoundationFaceReplaceJobDialog({
     }
   };
 
+  const AssetThumbnail = ({ asset, size = 'sm' }: { asset: AssetValidation | undefined; size?: 'sm' | 'lg' }) => {
+    const sizeClasses = size === 'sm' ? 'w-16 h-16' : 'w-20 h-24';
+    
+    if (!asset) {
+      return (
+        <div className={`${sizeClasses} rounded-lg border-2 border-dashed border-muted-foreground/30 flex items-center justify-center`}>
+          <XCircle className="h-5 w-5 text-muted-foreground/50" />
+        </div>
+      );
+    }
+
+    return (
+      <div className={`
+        ${sizeClasses} rounded-lg overflow-hidden border-2
+        ${asset.exists ? 'border-green-500/50' : 'border-destructive/50 bg-destructive/10'}
+      `}>
+        {asset.exists && asset.url ? (
+          <img
+            src={asset.url}
+            alt={asset.label}
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <XCircle className="h-5 w-5 text-destructive" />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const validCount = assets.filter(a => a.exists).length;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Create Job: Foundation Face Replace</DialogTitle>
         </DialogHeader>
@@ -210,76 +261,38 @@ export function CreateFoundationFaceReplaceJobDialog({
             </div>
           ) : (
             <>
-              {/* Visual Manifest Preview */}
+              {/* Visual Manifest Preview - 3 View Pairings */}
               <div className="space-y-4">
                 <Label className="text-sm font-medium">Job Manifest Preview</Label>
                 
-                <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-center p-4 bg-muted/50 rounded-lg">
-                  {/* Head Renders */}
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Selected Head Renders
-                    </p>
-                    <div className="flex gap-2">
-                      {headRenders.map((asset) => (
-                        <div key={asset.key} className="flex flex-col items-center gap-1">
-                          <div className={`
-                            w-20 h-20 rounded-lg overflow-hidden border-2
-                            ${asset.exists ? 'border-green-500/50' : 'border-destructive/50 bg-destructive/10'}
-                          `}>
-                            {asset.exists && asset.url ? (
-                              <img
-                                src={asset.url}
-                                alt={asset.label}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <XCircle className="h-6 w-6 text-destructive" />
-                              </div>
-                            )}
-                          </div>
-                          <span className={`text-xs ${asset.exists ? 'text-foreground' : 'text-destructive'}`}>
-                            {asset.label}
+                <div className="grid grid-cols-3 gap-4 p-4 bg-muted/50 rounded-lg">
+                  {viewPairings.map((pairing) => (
+                    <div key={pairing.view} className="flex flex-col items-center gap-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        {pairing.view} View
+                      </p>
+                      
+                      <div className="flex items-center gap-2">
+                        {/* Head Render */}
+                        <div className="flex flex-col items-center gap-1">
+                          <AssetThumbnail asset={pairing.headRender} size="sm" />
+                          <span className={`text-[10px] ${pairing.headRender?.exists ? 'text-foreground' : 'text-destructive'}`}>
+                            Head
                           </span>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Arrow */}
-                  <div className="flex flex-col items-center gap-1 text-muted-foreground">
-                    <ArrowRight className="h-6 w-6" />
-                    <span className="text-xs">+</span>
-                  </div>
-
-                  {/* Original Look */}
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Original Look Image
-                    </p>
-                    <div className="flex flex-col items-center gap-1">
-                      <div className={`
-                        w-24 h-32 rounded-lg overflow-hidden border-2
-                        ${originalLook?.exists ? 'border-green-500/50' : 'border-destructive/50 bg-destructive/10'}
-                      `}>
-                        {originalLook?.exists && originalLook.url ? (
-                          <img
-                            src={originalLook.url}
-                            alt="Original Look"
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <XCircle className="h-6 w-6 text-destructive" />
-                          </div>
-                        )}
+                        
+                        <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                        
+                        {/* Source Image */}
+                        <div className="flex flex-col items-center gap-1">
+                          <AssetThumbnail asset={pairing.sourceImage} size="lg" />
+                          <span className={`text-[10px] ${pairing.sourceImage?.exists ? 'text-foreground' : 'text-destructive'}`}>
+                            Source
+                          </span>
+                        </div>
                       </div>
-                      <span className={`text-xs ${originalLook?.exists ? 'text-foreground' : 'text-destructive'}`}>
-                        Source
-                      </span>
                     </div>
-                  </div>
+                  ))}
                 </div>
 
                 {/* Validation Status */}
@@ -287,12 +300,14 @@ export function CreateFoundationFaceReplaceJobDialog({
                   {allAssetsValid ? (
                     <>
                       <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      <span className="text-green-600">All 4 assets ready for job creation</span>
+                      <span className="text-green-600">All 6 assets ready for job creation</span>
                     </>
                   ) : (
                     <>
                       <XCircle className="h-4 w-4 text-destructive" />
-                      <span className="text-destructive">Missing required assets</span>
+                      <span className="text-destructive">
+                        {validCount}/6 assets available — missing required assets
+                      </span>
                     </>
                   )}
                 </div>
@@ -301,8 +316,11 @@ export function CreateFoundationFaceReplaceJobDialog({
               {!allAssetsValid && (
                 <Alert variant="destructive">
                   <AlertDescription>
-                    Cannot create job. Please select outputs for all required views
-                    (Front, Side, Back) in the Review tab first.
+                    Cannot create job. Ensure all 3 views have:
+                    <ul className="list-disc list-inside mt-1">
+                      <li>A selected head render from the Review grid</li>
+                      <li>An original source image uploaded in the Looks tab</li>
+                    </ul>
                   </AlertDescription>
                 </Alert>
               )}

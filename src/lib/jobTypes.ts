@@ -20,9 +20,11 @@ export const JOB_TYPE_CONFIG: Record<JobType, JobTypeConfig> = {
       { key: 'HEAD_RENDER_FRONT', label: 'Head Render (Front)', view: 'front' },
       { key: 'HEAD_RENDER_SIDE', label: 'Head Render (Side)', view: 'side' },
       { key: 'HEAD_RENDER_BACK', label: 'Head Render (Back)', view: 'back' },
-      { key: 'LOOK_ORIGINAL', label: 'Original Look Image', view: 'front' },
+      { key: 'LOOK_ORIGINAL_FRONT', label: 'Original Look (Front)', view: 'front' },
+      { key: 'LOOK_ORIGINAL_SIDE', label: 'Original Look (Side)', view: 'side' },
+      { key: 'LOOK_ORIGINAL_BACK', label: 'Original Look (Back)', view: 'back' },
     ],
-    defaultInstructions: `Replace the face on the original look using the supplied head renders (front/side/back). Keep clothing, body, crop, and background unchanged. Match lighting and realism.`,
+    defaultInstructions: `Replace the face on each original look view using the corresponding head render (front→front, side→side, back→back). Keep clothing, body, crop, and background unchanged. Match lighting and realism.`,
     titleFormat: (lookName: string) => `Foundation Face Replace — ${lookName}`,
   },
   PHOTOSHOP_FACE_APPLY: {

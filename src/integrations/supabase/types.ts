@@ -2386,6 +2386,9 @@ export type Database = {
         | "HEAD_RENDER_SIDE"
         | "HEAD_RENDER_BACK"
         | "LOOK_ORIGINAL"
+        | "LOOK_ORIGINAL_FRONT"
+        | "LOOK_ORIGINAL_SIDE"
+        | "LOOK_ORIGINAL_BACK"
       job_status:
         | "OPEN"
         | "ASSIGNED"
@@ -2538,6 +2541,9 @@ export const Constants = {
         "HEAD_RENDER_SIDE",
         "HEAD_RENDER_BACK",
         "LOOK_ORIGINAL",
+        "LOOK_ORIGINAL_FRONT",
+        "LOOK_ORIGINAL_SIDE",
+        "LOOK_ORIGINAL_BACK",
       ],
       job_status: [
         "OPEN",
