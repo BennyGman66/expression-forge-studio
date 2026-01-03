@@ -31,10 +31,23 @@ serve(async (req) => {
   }
 
   try {
-    const { jobId } = await req.json();
+    const body = await req.json();
+    const { jobId, imageUrl } = body;
 
+    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY')!;
+
+    // MODE 1: Single image description (for Face Application GenerateTab)
+    if (imageUrl) {
+      console.log('[generate-outfit-description] Single image mode:', imageUrl);
+      const description = await generateOutfitDescription(imageUrl, lovableApiKey);
+      return new Response(JSON.stringify({ description }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // MODE 2: Batch job processing (for Talent Face Library)
     if (!jobId) {
-      return new Response(JSON.stringify({ error: 'jobId is required' }), {
+      return new Response(JSON.stringify({ error: 'jobId or imageUrl is required' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -42,7 +55,6 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Update job status
