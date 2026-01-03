@@ -3,7 +3,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CheckCircle2, XCircle, Loader2, ArrowRight } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -43,9 +45,16 @@ export function CreateFoundationFaceReplaceJobDialog({
   const [loading, setLoading] = useState(false);
   const [validating, setValidating] = useState(true);
   const [assets, setAssets] = useState<AssetValidation[]>([]);
+  const [title, setTitle] = useState(`Foundation Face Replace - ${lookName}`);
+  const [priority, setPriority] = useState('2');
   const [instructions, setInstructions] = useState(
     JOB_TYPE_CONFIG.FOUNDATION_FACE_REPLACE.defaultInstructions
   );
+
+  // Update title when lookName changes
+  useEffect(() => {
+    setTitle(`Foundation Face Replace - ${lookName}`);
+  }, [lookName]);
 
   const allAssetsValid = assets.length === 6 && assets.every((a) => a.exists);
   
@@ -154,6 +163,8 @@ export function CreateFoundationFaceReplaceJobDialog({
         .insert({
           type: 'FOUNDATION_FACE_REPLACE',
           status: 'OPEN',
+          title: title,
+          priority: parseInt(priority),
           look_id: lookId,
           project_id: projectId || null,
           instructions: instructions,
@@ -250,8 +261,38 @@ export function CreateFoundationFaceReplaceJobDialog({
         </DialogHeader>
 
         <div className="space-y-6">
-          <div className="text-sm text-muted-foreground">
-            Look: <span className="font-medium text-foreground">{lookName}</span>
+          {/* Job Title */}
+          <div className="space-y-2">
+            <Label htmlFor="title">Job Title</Label>
+            <Input
+              id="title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Enter job title..."
+            />
+          </div>
+
+          {/* Priority and Product Row */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="priority">Priority</Label>
+              <Select value={priority} onValueChange={setPriority}>
+                <SelectTrigger id="priority">
+                  <SelectValue placeholder="Select priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">P1 - High</SelectItem>
+                  <SelectItem value="2">P2 - Medium</SelectItem>
+                  <SelectItem value="3">P3 - Low</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Product</Label>
+              <div className="h-10 px-3 py-2 rounded-md border bg-muted/50 text-sm">
+                {lookName}
+              </div>
+            </div>
           </div>
 
           {validating ? (
