@@ -210,7 +210,10 @@ export function CreateFoundationFaceReplaceJobDialog({
         if (inputError) throw inputError;
       }
 
-      toast.success('Job created successfully');
+      toast.success('Job created!', {
+        description: `"${title}" has been added to the Job Board and is ready for assignment.`,
+        duration: 5000,
+      });
       onOpenChange(false);
     } catch (error) {
       console.error('Error creating job:', error);
