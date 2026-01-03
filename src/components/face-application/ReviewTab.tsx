@@ -521,8 +521,15 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
             <div className="flex flex-wrap gap-2">
               {allViews.map((v, idx) => {
                 const hasSelection = v.outputs.some(o => o.is_selected);
-                const isRunning = v.lookStatus === "running" || v.lookStatus === "pending";
-                const isFailed = v.lookStatus === "failed";
+                
+                // Calculate status from actual outputs, not job status
+                const completedOutputs = v.outputs.filter(o => o.stored_url && o.status === "completed");
+                const pendingOutputs = v.outputs.filter(o => !o.stored_url || o.status === "pending");
+                const failedOutputs = v.outputs.filter(o => o.status === "failed");
+                
+                const isRunning = pendingOutputs.length > 0;
+                const isFailed = failedOutputs.length > 0 && completedOutputs.length === 0;
+                
                 return (
                   <button
                     key={`${v.lookId}-${v.view}`}
