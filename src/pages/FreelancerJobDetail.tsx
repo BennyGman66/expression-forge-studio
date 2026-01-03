@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useJob, useJobInputs, useJobOutputs, useJobNotes, useUpdateJobStatus, useAddJobNote } from '@/hooks/useJobs';
@@ -10,9 +10,31 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
-import { ArrowLeft, Download, Upload, Send, Clock, CheckCircle, Play, FileImage } from 'lucide-react';
+import { ArrowLeft, Download, Upload, Send, Clock, CheckCircle, Play, FileImage, ArrowRight, AlertTriangle, DownloadCloud } from 'lucide-react';
 import { format } from 'date-fns';
+
+// Group inputs by view for Foundation Face Replace jobs
+interface GroupedInput {
+  view: string;
+  headRender?: {
+    id: string;
+    label: string | null;
+    artifact?: {
+      file_url: string;
+      preview_url: string | null;
+    };
+  };
+  originalSource?: {
+    id: string;
+    label: string | null;
+    artifact?: {
+      file_url: string;
+      preview_url: string | null;
+    };
+  };
+}
 
 export default function FreelancerJobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -30,6 +52,45 @@ export default function FreelancerJobDetail() {
   const [noteText, setNoteText] = useState('');
   const [uploading, setUploading] = useState(false);
 
+  // Group inputs by view (Front, Side, Back) for Foundation Face Replace
+  const groupedInputs = useMemo(() => {
+    if (job?.type !== 'FOUNDATION_FACE_REPLACE') return null;
+    
+    const groups: Record<string, GroupedInput> = {};
+    
+    inputs.forEach(input => {
+      const label = input.label?.toLowerCase() || '';
+      let view = '';
+      let isHead = false;
+      
+      if (label.includes('front')) view = 'Front';
+      else if (label.includes('side')) view = 'Side';
+      else if (label.includes('back')) view = 'Back';
+      
+      if (label.includes('head') || label.includes('render')) isHead = true;
+      
+      if (view) {
+        if (!groups[view]) {
+          groups[view] = { view };
+        }
+        if (isHead) {
+          groups[view].headRender = input;
+        } else {
+          groups[view].originalSource = input;
+        }
+      }
+    });
+    
+    return Object.values(groups).sort((a, b) => {
+      const order = { Front: 0, Side: 1, Back: 2 };
+      return (order[a.view as keyof typeof order] || 0) - (order[b.view as keyof typeof order] || 0);
+    });
+  }, [inputs, job?.type]);
+
+  // Expected outputs for Foundation Face Replace
+  const expectedOutputs = job?.type === 'FOUNDATION_FACE_REPLACE' ? 3 : 1;
+  const uploadProgress = Math.round((outputs.length / expectedOutputs) * 100);
+
   const handleStartJob = () => {
     updateStatus.mutate(
       { jobId: jobId!, status: 'IN_PROGRESS' },
@@ -40,6 +101,10 @@ export default function FreelancerJobDetail() {
   const handleSubmitJob = () => {
     if (outputs.length === 0) {
       toast.error('Please upload at least one output before submitting');
+      return;
+    }
+    if (outputs.length < expectedOutputs) {
+      toast.error(`Please upload all ${expectedOutputs} outputs before submitting`);
       return;
     }
     updateStatus.mutate(
@@ -97,6 +162,15 @@ export default function FreelancerJobDetail() {
     }
   };
 
+  const handleDownloadAll = async () => {
+    for (const input of inputs) {
+      const url = input.artifact?.file_url;
+      if (url) {
+        window.open(url, '_blank');
+      }
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'OPEN': return 'bg-blue-500/20 text-blue-400';
@@ -109,6 +183,27 @@ export default function FreelancerJobDetail() {
       default: return 'bg-muted text-muted-foreground';
     }
   };
+
+  const getPriorityBadge = (priority?: number) => {
+    if (priority === 1) return <Badge className="bg-red-500/20 text-red-400">URGENT</Badge>;
+    return null;
+  };
+
+  const getJobTitle = () => {
+    return job?.title || job?.type.replace(/_/g, ' ') || 'Job';
+  };
+
+  const getJobTypeBadge = () => {
+    if (job?.type === 'FOUNDATION_FACE_REPLACE') return 'Foundation Face Replace';
+    return job?.type?.replace(/_/g, ' ') || '';
+  };
+
+  // Get admin feedback for NEEDS_CHANGES status
+  const adminFeedback = useMemo(() => {
+    if (job?.status !== 'NEEDS_CHANGES') return null;
+    // Find the most recent note that isn't from the current user
+    return notes.find(note => note.author_id !== user?.id);
+  }, [notes, job?.status, user?.id]);
 
   if (jobLoading) {
     return (
@@ -129,26 +224,65 @@ export default function FreelancerJobDetail() {
     );
   }
 
+  const isReadOnly = job.status === 'SUBMITTED' || job.status === 'APPROVED' || job.status === 'CLOSED';
+  const canUpload = job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES';
+
   return (
     <div className="min-h-screen bg-background">
+      {/* Needs Changes Banner */}
+      {job.status === 'NEEDS_CHANGES' && (
+        <div className="bg-orange-500/20 border-b border-orange-500/30 px-6 py-3">
+          <div className="container mx-auto flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-orange-400" />
+            <div>
+              <p className="font-medium text-orange-200">Changes Requested</p>
+              <p className="text-sm text-orange-300/80">
+                Review the feedback below and update your submission.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Submitted Banner */}
+      {job.status === 'SUBMITTED' && (
+        <div className="bg-purple-500/20 border-b border-purple-500/30 px-6 py-3">
+          <div className="container mx-auto flex items-center gap-3">
+            <Clock className="h-5 w-5 text-purple-400" />
+            <div>
+              <p className="font-medium text-purple-200">Submitted - Awaiting Review</p>
+              <p className="text-sm text-purple-300/80">
+                Your work has been submitted. You'll be notified once it's reviewed.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="border-b border-border bg-card">
         <div className="container mx-auto px-6 py-4">
           <Button variant="ghost" onClick={() => navigate('/freelancer/jobs')} className="mb-2">
             <ArrowLeft className="mr-2 h-4 w-4" /> Back to Jobs
           </Button>
-            <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">
-                {job.type === 'FOUNDATION_FACE_REPLACE' 
-                  ? 'Foundation Face Replace' 
-                  : job.type.replace(/_/g, ' ')}
-              </h1>
-              <p className="text-muted-foreground">
-                Created {format(new Date(job.created_at!), 'MMM d, yyyy')}
-                {job.due_date && ` • Due ${format(new Date(job.due_date), 'MMM d, yyyy')}`}
-              </p>
+              <div className="flex items-center gap-3 mb-1">
+                <h1 className="text-2xl font-bold text-foreground">{getJobTitle()}</h1>
+                {getPriorityBadge(job.priority)}
+              </div>
+              <div className="flex items-center gap-3">
+                <Badge variant="outline" className="text-muted-foreground">
+                  {getJobTypeBadge()}
+                </Badge>
+                <span className="text-muted-foreground text-sm">
+                  Created {format(new Date(job.created_at!), 'MMM d, yyyy')}
+                  {job.due_date && ` • Due ${format(new Date(job.due_date), 'MMM d, yyyy')}`}
+                </span>
+              </div>
             </div>
-            <Badge className={`${getStatusColor(job.status)} text-sm px-3 py-1`}>{job.status}</Badge>
+            <Badge className={`${getStatusColor(job.status)} text-sm px-3 py-1`}>
+              {job.status === 'NEEDS_CHANGES' ? 'NEEDS CHANGES' : job.status}
+            </Badge>
           </div>
         </div>
       </header>
@@ -157,6 +291,24 @@ export default function FreelancerJobDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Admin Feedback - Show prominently for NEEDS_CHANGES */}
+            {job.status === 'NEEDS_CHANGES' && adminFeedback && (
+              <Card className="bg-orange-500/10 border-orange-500/30">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2 text-orange-300">
+                    <AlertTriangle className="h-5 w-5" />
+                    Reviewer Feedback
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-foreground">{adminFeedback.body}</p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {format(new Date(adminFeedback.created_at!), 'MMM d, yyyy h:mm a')}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Instructions */}
             <Card className="bg-card border-border">
               <CardHeader>
@@ -169,16 +321,96 @@ export default function FreelancerJobDetail() {
               </CardContent>
             </Card>
 
-            {/* Inputs */}
+            {/* Inputs - Grouped by View for Foundation Face Replace */}
             <Card className="bg-card border-border">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Download className="h-5 w-5" /> Inputs
                 </CardTitle>
+                {inputs.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={handleDownloadAll}>
+                    <DownloadCloud className="h-4 w-4 mr-2" />
+                    Download All ({inputs.length})
+                  </Button>
+                )}
               </CardHeader>
               <CardContent>
                 {inputs.length === 0 ? (
                   <p className="text-muted-foreground text-sm">No input files attached</p>
+                ) : groupedInputs && groupedInputs.length > 0 ? (
+                  <div className="space-y-6">
+                    {groupedInputs.map(group => (
+                      <div key={group.view} className="p-4 rounded-lg bg-muted/30 border border-border">
+                        <h4 className="font-medium text-foreground mb-4 uppercase tracking-wide text-sm">
+                          {group.view} View
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                          {/* Head Render */}
+                          <div className="p-3 rounded-lg bg-background border border-border">
+                            <p className="text-xs font-medium text-muted-foreground mb-2 uppercase">
+                              Head Render
+                            </p>
+                            {group.headRender?.artifact?.preview_url ? (
+                              <img
+                                src={group.headRender.artifact.preview_url}
+                                alt="Head Render"
+                                className="w-full h-32 object-contain rounded mb-3 bg-muted"
+                              />
+                            ) : (
+                              <div className="w-full h-32 bg-muted rounded mb-3 flex items-center justify-center">
+                                <FileImage className="h-8 w-8 text-muted-foreground" />
+                              </div>
+                            )}
+                            <a
+                              href={group.headRender?.artifact?.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              download
+                            >
+                              <Button variant="outline" size="sm" className="w-full">
+                                <Download className="h-4 w-4 mr-2" />
+                                Download
+                              </Button>
+                            </a>
+                          </div>
+
+                          {/* Arrow */}
+                          <div className="hidden md:flex items-center justify-center absolute left-1/2 -translate-x-1/2">
+                            <ArrowRight className="h-6 w-6 text-muted-foreground" />
+                          </div>
+
+                          {/* Original Source */}
+                          <div className="p-3 rounded-lg bg-background border border-border">
+                            <p className="text-xs font-medium text-muted-foreground mb-2 uppercase">
+                              Apply to Body
+                            </p>
+                            {group.originalSource?.artifact?.preview_url ? (
+                              <img
+                                src={group.originalSource.artifact.preview_url}
+                                alt="Source Body"
+                                className="w-full h-32 object-contain rounded mb-3 bg-muted"
+                              />
+                            ) : (
+                              <div className="w-full h-32 bg-muted rounded mb-3 flex items-center justify-center">
+                                <FileImage className="h-8 w-8 text-muted-foreground" />
+                              </div>
+                            )}
+                            <a
+                              href={group.originalSource?.artifact?.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              download
+                            >
+                              <Button variant="outline" size="sm" className="w-full">
+                                <Download className="h-4 w-4 mr-2" />
+                                Download
+                              </Button>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-4">
                     {inputs.map(input => (
@@ -217,12 +449,19 @@ export default function FreelancerJobDetail() {
             </Card>
 
             {/* Outputs */}
-            <Card className="bg-card border-border">
+            <Card className={`bg-card border-border ${isReadOnly ? 'opacity-75' : ''}`}>
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Upload className="h-5 w-5" /> Outputs
-                </CardTitle>
-                {job.status === 'IN_PROGRESS' && (
+                <div>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Upload className="h-5 w-5" /> Outputs
+                  </CardTitle>
+                  {job.type === 'FOUNDATION_FACE_REPLACE' && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {outputs.length} of {expectedOutputs} outputs uploaded
+                    </p>
+                  )}
+                </div>
+                {canUpload && (
                   <div>
                     <Input
                       type="file"
@@ -242,9 +481,33 @@ export default function FreelancerJobDetail() {
                 )}
               </CardHeader>
               <CardContent>
-                {outputs.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No outputs uploaded yet</p>
-                ) : (
+                {/* Upload Progress */}
+                {job.type === 'FOUNDATION_FACE_REPLACE' && canUpload && (
+                  <div className="mb-4">
+                    <Progress value={uploadProgress} className="h-2" />
+                  </div>
+                )}
+
+                {/* Expected outputs guidance */}
+                {outputs.length === 0 && canUpload && (
+                  <div className="p-4 rounded-lg bg-muted/30 border border-dashed border-border mb-4">
+                    <p className="text-sm text-muted-foreground text-center">
+                      {job.type === 'FOUNDATION_FACE_REPLACE' ? (
+                        <>
+                          Upload <strong>3 outputs</strong>: Front, Side, and Back views
+                          <br />
+                          <span className="text-xs">Accepted: PSD, PNG, JPG, TIFF</span>
+                        </>
+                      ) : (
+                        'Upload your completed work files'
+                      )}
+                    </p>
+                  </div>
+                )}
+
+                {outputs.length === 0 && !canUpload ? (
+                  <p className="text-muted-foreground text-sm">No outputs uploaded</p>
+                ) : outputs.length > 0 && (
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {outputs.map(output => (
                       <a
@@ -279,15 +542,33 @@ export default function FreelancerJobDetail() {
                 <CardTitle className="text-lg">Actions</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {job.status === 'OPEN' && (
+                {(job.status === 'OPEN' || job.status === 'ASSIGNED') && (
                   <Button onClick={handleStartJob} className="w-full" disabled={updateStatus.isPending}>
                     <Play className="mr-2 h-4 w-4" /> Start Working
                   </Button>
                 )}
                 {job.status === 'IN_PROGRESS' && (
-                  <Button onClick={handleSubmitJob} className="w-full" disabled={updateStatus.isPending}>
-                    <CheckCircle className="mr-2 h-4 w-4" /> Submit for Review
-                  </Button>
+                  <>
+                    {/* Pre-submit checklist */}
+                    <div className="p-3 rounded-lg bg-muted/30 border border-border text-sm space-y-2">
+                      <p className="font-medium text-muted-foreground">Before submitting:</p>
+                      <div className="flex items-center gap-2">
+                        <div className={`h-4 w-4 rounded-full flex items-center justify-center ${outputs.length >= expectedOutputs ? 'bg-green-500' : 'bg-muted'}`}>
+                          {outputs.length >= expectedOutputs && <CheckCircle className="h-3 w-3 text-white" />}
+                        </div>
+                        <span className={outputs.length >= expectedOutputs ? 'text-foreground' : 'text-muted-foreground'}>
+                          {expectedOutputs} outputs uploaded
+                        </span>
+                      </div>
+                    </div>
+                    <Button 
+                      onClick={handleSubmitJob} 
+                      className="w-full" 
+                      disabled={updateStatus.isPending || outputs.length < expectedOutputs}
+                    >
+                      <CheckCircle className="mr-2 h-4 w-4" /> Submit for Review
+                    </Button>
+                  </>
                 )}
                 {job.status === 'SUBMITTED' && (
                   <div className="text-center text-muted-foreground py-4">
@@ -296,9 +577,14 @@ export default function FreelancerJobDetail() {
                   </div>
                 )}
                 {job.status === 'NEEDS_CHANGES' && (
-                  <Button onClick={handleStartJob} variant="outline" className="w-full" disabled={updateStatus.isPending}>
-                    <Play className="mr-2 h-4 w-4" /> Resume Working
-                  </Button>
+                  <>
+                    <Button onClick={handleStartJob} className="w-full" disabled={updateStatus.isPending}>
+                      <Play className="mr-2 h-4 w-4" /> Resume Working
+                    </Button>
+                    <p className="text-xs text-muted-foreground text-center">
+                      Make the requested changes and resubmit
+                    </p>
+                  </>
                 )}
                 {job.status === 'APPROVED' && (
                   <div className="text-center text-green-400 py-4">
@@ -320,10 +606,17 @@ export default function FreelancerJobDetail() {
                     <p className="text-muted-foreground text-sm">No notes yet</p>
                   ) : (
                     notes.map(note => (
-                      <div key={note.id} className="p-3 rounded-lg bg-muted/50">
+                      <div 
+                        key={note.id} 
+                        className={`p-3 rounded-lg ${
+                          note.author_id !== user?.id 
+                            ? 'bg-orange-500/10 border border-orange-500/20' 
+                            : 'bg-muted/50'
+                        }`}
+                      >
                         <p className="text-sm text-foreground">{note.body}</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          {format(new Date(note.created_at!), 'MMM d, h:mm a')}
+                          {note.author?.display_name || 'Unknown'} • {format(new Date(note.created_at!), 'MMM d, h:mm a')}
                         </p>
                       </div>
                     ))

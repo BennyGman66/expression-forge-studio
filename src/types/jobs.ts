@@ -37,6 +37,8 @@ export interface UnifiedJob {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  title?: string | null;
+  priority?: number | null;
   // Joined fields
   assigned_user?: {
     id: string;
