@@ -1,22 +1,30 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useValidateInvite, useMarkInviteUsed } from '@/hooks/useInvites';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Mail, Lock, User, Sparkles } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, Mail, Lock, User, Sparkles, UserPlus } from 'lucide-react';
 import { z } from 'zod';
 
 const emailSchema = z.string().email('Please enter a valid email address');
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
 
 export default function Auth() {
-  const { user, signIn, signUp, signInWithMagicLink } = useAuth();
+  const { user, roles, signIn, signUp, signInWithMagicLink, isFreelancer } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  
+  const inviteToken = searchParams.get('invite');
+  const { data: invite, isLoading: inviteLoading } = useValidateInvite(inviteToken);
+  const markInviteUsed = useMarkInviteUsed();
   
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,13 +35,25 @@ export default function Auth() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
 
+  // Pre-fill email from invite if specified
+  useEffect(() => {
+    if (invite?.email) {
+      setEmail(invite.email);
+    }
+  }, [invite]);
+
   // Redirect if already authenticated
   useEffect(() => {
-    if (user) {
-      const from = (location.state as { from?: Location })?.from?.pathname || '/';
-      navigate(from, { replace: true });
+    if (user && roles.length > 0) {
+      // Role-based redirect
+      if (isFreelancer && !roles.includes('admin') && !roles.includes('internal')) {
+        navigate('/freelancer', { replace: true });
+      } else {
+        const from = (location.state as { from?: Location })?.from?.pathname || '/';
+        navigate(from, { replace: true });
+      }
     }
-  }, [user, navigate, location]);
+  }, [user, roles, isFreelancer, navigate, location]);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +82,12 @@ export default function Auth() {
     e.preventDefault();
     setError(null);
     
+    // Validate invite email match if specified
+    if (invite?.email && email.toLowerCase() !== invite.email.toLowerCase()) {
+      setError(`This invite is only valid for ${invite.email}`);
+      return;
+    }
+    
     try {
       emailSchema.parse(email);
       passwordSchema.parse(password);
@@ -80,18 +106,44 @@ export default function Auth() {
     }
     
     setIsLoading(true);
-    const { error } = await signUp(email, password, displayName);
-    setIsLoading(false);
+    const { error: signUpError } = await signUp(email, password, displayName);
     
-    if (error) {
-      if (error.message.includes('already registered')) {
+    if (signUpError) {
+      setIsLoading(false);
+      if (signUpError.message.includes('already registered')) {
         setError('This email is already registered. Please sign in instead.');
       } else {
-        setError(error.message);
+        setError(signUpError.message);
       }
-    } else {
-      setSuccess('Account created successfully! You can now sign in.');
+      return;
     }
+    
+    // If there's a valid invite, assign the role after signup
+    if (invite && inviteToken) {
+      try {
+        // Get the newly created user
+        const { data: { user: newUser } } = await supabase.auth.getUser();
+        
+        if (newUser) {
+          // Assign the role from the invite
+          const { error: roleError } = await supabase.functions.invoke('assign-role', {
+            body: { userId: newUser.id, role: invite.role },
+          });
+          
+          if (roleError) {
+            console.error('Failed to assign role:', roleError);
+          }
+          
+          // Mark invite as used
+          await markInviteUsed.mutateAsync(inviteToken);
+        }
+      } catch (roleAssignError) {
+        console.error('Error assigning role from invite:', roleAssignError);
+      }
+    }
+    
+    setIsLoading(false);
+    setSuccess('Account created successfully! You can now sign in.');
   };
 
   const handleMagicLink = async (e: React.FormEvent) => {
@@ -118,6 +170,16 @@ export default function Auth() {
     }
   };
 
+  const getRoleBadgeColor = (role: string) => {
+    switch (role) {
+      case 'admin': return 'bg-red-500/20 text-red-400';
+      case 'internal': return 'bg-blue-500/20 text-blue-400';
+      case 'freelancer': return 'bg-green-500/20 text-green-400';
+      case 'client': return 'bg-purple-500/20 text-purple-400';
+      default: return 'bg-muted text-muted-foreground';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -135,9 +197,36 @@ export default function Auth() {
         <Card>
           <CardHeader className="text-center">
             <CardTitle>Welcome</CardTitle>
-            <CardDescription>Sign in to access the platform</CardDescription>
+            <CardDescription>
+              {invite ? (
+                <span className="flex flex-col items-center gap-2">
+                  <span>You've been invited to join as</span>
+                  <Badge className={getRoleBadgeColor(invite.role)}>
+                    <UserPlus className="w-3 h-3 mr-1" />
+                    {invite.role.charAt(0).toUpperCase() + invite.role.slice(1)}
+                  </Badge>
+                </span>
+              ) : (
+                'Sign in to access the platform'
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent>
+            {inviteLoading && inviteToken && (
+              <div className="flex items-center justify-center py-4 text-muted-foreground">
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Validating invite...
+              </div>
+            )}
+            
+            {inviteToken && !inviteLoading && !invite && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertDescription>
+                  This invite link is invalid or has expired.
+                </AlertDescription>
+              </Alert>
+            )}
+
             {error && (
               <Alert variant="destructive" className="mb-4">
                 <AlertDescription>{error}</AlertDescription>
@@ -150,7 +239,7 @@ export default function Auth() {
               </Alert>
             )}
 
-            <Tabs defaultValue="signin" className="w-full">
+            <Tabs defaultValue={invite ? 'signup' : 'signin'} className="w-full">
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="signin">Sign In</TabsTrigger>
                 <TabsTrigger value="signup">Sign Up</TabsTrigger>
