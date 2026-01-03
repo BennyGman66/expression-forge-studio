@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useJob, useJobInputs, useJobOutputs, useJobNotes, useUpdateJobStatus, useAddJobNote } from '@/hooks/useJobs';
@@ -11,9 +11,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, Download, Upload, Send, Clock, CheckCircle, Play, FileImage, ArrowRight, AlertTriangle, DownloadCloud } from 'lucide-react';
+import { ArrowLeft, Download, Upload, Send, Clock, CheckCircle, Play, FileImage, ArrowRight, AlertTriangle, DownloadCloud, X } from 'lucide-react';
 import { format } from 'date-fns';
+
+// Pending upload with view assignment
+interface PendingUpload {
+  id: string;
+  file: File;
+  view: 'front' | 'side' | 'back' | null;
+  preview: string;
+}
 
 // Group inputs by view for Foundation Face Replace jobs
 interface GroupedInput {
@@ -51,6 +60,8 @@ export default function FreelancerJobDetail() {
   
   const [noteText, setNoteText] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Group inputs by view (Front, Side, Back) for Foundation Face Replace
   const groupedInputs = useMemo(() => {
@@ -126,17 +137,81 @@ export default function FreelancerJobDetail() {
     );
   };
 
-  const handleUploadOutput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Drag and drop handlers
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    
+    const files = Array.from(e.dataTransfer.files);
+    addFilesToPending(files);
+  }, []);
+
+  const addFilesToPending = (files: File[]) => {
+    const imageFiles = files.filter(file => 
+      file.type.startsWith('image/') || 
+      file.name.endsWith('.psd') || 
+      file.name.endsWith('.tiff') ||
+      file.name.endsWith('.ai') ||
+      file.name.endsWith('.pdf')
+    );
+    
+    const newUploads: PendingUpload[] = imageFiles.map(file => ({
+      id: crypto.randomUUID(),
+      file,
+      view: null,
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+    }));
+    
+    setPendingUploads(prev => [...prev, ...newUploads]);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files?.length) return;
+    addFilesToPending(Array.from(files));
+    e.target.value = ''; // Reset input
+  };
+
+  const updatePendingView = (fileId: string, view: 'front' | 'side' | 'back') => {
+    setPendingUploads(prev => prev.map(f => 
+      f.id === fileId ? { ...f, view } : f
+    ));
+  };
+
+  const removePendingFile = (fileId: string) => {
+    setPendingUploads(prev => {
+      const file = prev.find(f => f.id === fileId);
+      if (file?.preview) {
+        URL.revokeObjectURL(file.preview);
+      }
+      return prev.filter(f => f.id !== fileId);
+    });
+  };
+
+  const handleUploadPending = async () => {
+    const filesToUpload = pendingUploads.filter(f => f.view !== null);
+    if (filesToUpload.length === 0) {
+      toast.error('Please assign a view (Front/Side/Back) to each file');
+      return;
+    }
 
     setUploading(true);
     try {
-      for (const file of Array.from(files)) {
-        const fileName = `${jobId}/${Date.now()}-${file.name}`;
+      for (const pending of filesToUpload) {
+        const fileName = `${jobId}/${Date.now()}-${pending.view}-${pending.file.name}`;
         const { error: uploadError } = await supabase.storage
           .from('images')
-          .upload(fileName, file);
+          .upload(fileName, pending.file);
 
         if (uploadError) throw uploadError;
 
@@ -147,16 +222,23 @@ export default function FreelancerJobDetail() {
         await supabase.from('job_outputs').insert({
           job_id: jobId,
           file_url: publicUrl,
-          label: file.name,
+          label: `${pending.view?.charAt(0).toUpperCase()}${pending.view?.slice(1)} View - ${pending.file.name}`,
           uploaded_by: user?.id,
         });
+
+        // Clean up preview URL
+        if (pending.preview) {
+          URL.revokeObjectURL(pending.preview);
+        }
       }
       
+      // Remove uploaded files from pending
+      setPendingUploads(prev => prev.filter(f => f.view === null));
       refetchOutputs();
-      toast.success('Output uploaded successfully');
+      toast.success(`${filesToUpload.length} output(s) uploaded successfully`);
     } catch (error) {
       console.error('Upload error:', error);
-      toast.error('Failed to upload output');
+      toast.error('Failed to upload outputs');
     } finally {
       setUploading(false);
     }
@@ -170,6 +252,29 @@ export default function FreelancerJobDetail() {
       }
     }
   };
+
+  // Check which views are already uploaded
+  const uploadedViews = useMemo(() => {
+    const views = new Set<string>();
+    outputs.forEach(output => {
+      const label = output.label?.toLowerCase() || '';
+      if (label.includes('front')) views.add('front');
+      if (label.includes('side')) views.add('side');
+      if (label.includes('back')) views.add('back');
+    });
+    return views;
+  }, [outputs]);
+
+  // Check which views are pending
+  const pendingViews = useMemo(() => {
+    const views = new Set<string>();
+    pendingUploads.forEach(p => {
+      if (p.view) views.add(p.view);
+    });
+    return views;
+  }, [pendingUploads]);
+
+  const pendingWithViews = pendingUploads.filter(f => f.view !== null);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -466,57 +571,43 @@ export default function FreelancerJobDetail() {
                     <Input
                       type="file"
                       multiple
-                      accept="image/*,.psd,.ai,.pdf"
-                      onChange={handleUploadOutput}
+                      accept="image/*,.psd,.ai,.pdf,.tiff"
+                      onChange={handleFileInputChange}
                       disabled={uploading}
                       className="hidden"
                       id="output-upload"
                     />
                     <Label htmlFor="output-upload">
                       <Button variant="outline" size="sm" asChild disabled={uploading}>
-                        <span>{uploading ? 'Uploading...' : 'Upload Files'}</span>
+                        <span>Browse Files</span>
                       </Button>
                     </Label>
                   </div>
                 )}
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 {/* Upload Progress */}
-                {job.type === 'FOUNDATION_FACE_REPLACE' && canUpload && (
-                  <div className="mb-4">
+                {job.type === 'FOUNDATION_FACE_REPLACE' && (
+                  <div>
                     <Progress value={uploadProgress} className="h-2" />
                   </div>
                 )}
 
-                {/* Expected outputs guidance */}
-                {outputs.length === 0 && canUpload && (
-                  <div className="p-4 rounded-lg bg-muted/30 border border-dashed border-border mb-4">
-                    <p className="text-sm text-muted-foreground text-center">
-                      {job.type === 'FOUNDATION_FACE_REPLACE' ? (
-                        <>
-                          Upload <strong>3 outputs</strong>: Front, Side, and Back views
-                          <br />
-                          <span className="text-xs">Accepted: PSD, PNG, JPG, TIFF</span>
-                        </>
-                      ) : (
-                        'Upload your completed work files'
-                      )}
-                    </p>
-                  </div>
-                )}
-
-                {outputs.length === 0 && !canUpload ? (
-                  <p className="text-muted-foreground text-sm">No outputs uploaded</p>
-                ) : outputs.length > 0 && (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {/* Already uploaded outputs */}
+                {outputs.length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
                     {outputs.map(output => (
                       <a
                         key={output.id}
                         href={output.file_url || output.artifact?.file_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
+                        className="block p-3 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 transition-colors"
                       >
+                        <div className="flex items-center gap-2 mb-2">
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          <span className="text-xs text-green-400 font-medium">Uploaded</span>
+                        </div>
                         <img
                           src={output.file_url || output.artifact?.file_url}
                           alt={output.label || 'Output'}
@@ -529,6 +620,166 @@ export default function FreelancerJobDetail() {
                       </a>
                     ))}
                   </div>
+                )}
+
+                {/* Pending uploads with view selector */}
+                {pendingUploads.length > 0 && canUpload && (
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-muted-foreground">Files ready to upload:</p>
+                    {pendingUploads.map(pending => (
+                      <div 
+                        key={pending.id} 
+                        className="flex items-center gap-4 p-3 border rounded-lg bg-muted/30"
+                      >
+                        {/* Preview */}
+                        <div className="w-16 h-16 bg-muted rounded flex-shrink-0 overflow-hidden">
+                          {pending.preview ? (
+                            <img 
+                              src={pending.preview} 
+                              alt={pending.file.name}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <FileImage className="h-6 w-6 text-muted-foreground" />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* File Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{pending.file.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(pending.file.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                        </div>
+
+                        {/* View Selector Dropdown */}
+                        <Select
+                          value={pending.view || 'none'}
+                          onValueChange={(value) => {
+                            if (value !== 'none') {
+                              updatePendingView(pending.id, value as 'front' | 'side' | 'back');
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="w-32">
+                            <SelectValue placeholder="Select view" />
+                          </SelectTrigger>
+                          <SelectContent className="bg-background border shadow-lg z-50">
+                            <SelectItem value="none" disabled>Select view</SelectItem>
+                            <SelectItem 
+                              value="front" 
+                              disabled={uploadedViews.has('front') || (pendingViews.has('front') && pending.view !== 'front')}
+                            >
+                              Front {uploadedViews.has('front') && '(uploaded)'}
+                            </SelectItem>
+                            <SelectItem 
+                              value="side"
+                              disabled={uploadedViews.has('side') || (pendingViews.has('side') && pending.view !== 'side')}
+                            >
+                              Side {uploadedViews.has('side') && '(uploaded)'}
+                            </SelectItem>
+                            <SelectItem 
+                              value="back"
+                              disabled={uploadedViews.has('back') || (pendingViews.has('back') && pending.view !== 'back')}
+                            >
+                              Back {uploadedViews.has('back') && '(uploaded)'}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+
+                        {/* Status indicator */}
+                        {pending.view ? (
+                          <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
+                        ) : (
+                          <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0" />
+                        )}
+
+                        {/* Remove button */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removePendingFile(pending.id)}
+                          className="flex-shrink-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+
+                    {/* Upload pending button */}
+                    <Button 
+                      onClick={handleUploadPending} 
+                      disabled={uploading || pendingWithViews.length === 0}
+                      className="w-full"
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      {uploading ? 'Uploading...' : `Upload ${pendingWithViews.length} File(s)`}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Drag and Drop Zone */}
+                {canUpload && (
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`
+                      border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer
+                      ${isDragOver 
+                        ? 'border-primary bg-primary/5' 
+                        : 'border-muted-foreground/30 bg-muted/30 hover:border-muted-foreground/50'
+                      }
+                    `}
+                    onClick={() => document.getElementById('output-upload')?.click()}
+                  >
+                    <Upload className={`h-8 w-8 mx-auto mb-3 ${isDragOver ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <p className="font-medium">
+                      {isDragOver ? 'Drop files here' : 'Drag and drop files here'}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {job.type === 'FOUNDATION_FACE_REPLACE' ? (
+                        <>Upload <strong>3 outputs</strong>: Front, Side, and Back views</>
+                      ) : (
+                        'Upload your completed work files'
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Accepted: PSD, PNG, JPG, TIFF
+                    </p>
+                  </div>
+                )}
+
+                {/* Pre-submission Checklist for Foundation Face Replace */}
+                {job.type === 'FOUNDATION_FACE_REPLACE' && canUpload && (outputs.length > 0 || pendingWithViews.length > 0) && (
+                  <div className="border rounded-lg p-4 bg-muted/20">
+                    <h4 className="font-medium text-sm mb-3">Pre-submission Checklist</h4>
+                    <div className="space-y-2">
+                      {(['front', 'side', 'back'] as const).map(view => {
+                        const isUploaded = uploadedViews.has(view);
+                        const isPending = pendingViews.has(view);
+                        const hasView = isUploaded || isPending;
+                        return (
+                          <div key={view} className="flex items-center gap-2 text-sm">
+                            {hasView ? (
+                              <CheckCircle className={`h-4 w-4 ${isUploaded ? 'text-green-600' : 'text-amber-500'}`} />
+                            ) : (
+                              <div className="h-4 w-4 border rounded-full" />
+                            )}
+                            <span className={hasView ? 'text-foreground' : 'text-muted-foreground'}>
+                              {view.charAt(0).toUpperCase() + view.slice(1)} view {isUploaded ? '(uploaded)' : isPending ? '(pending)' : ''}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {outputs.length === 0 && pendingUploads.length === 0 && !canUpload && (
+                  <p className="text-muted-foreground text-sm">No outputs uploaded</p>
                 )}
               </CardContent>
             </Card>
