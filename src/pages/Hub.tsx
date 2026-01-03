@@ -49,12 +49,22 @@ const avatarToPdpApps = [
     stepNumber: 2,
   },
   {
-    id: "avatar-repose",
-    title: "Avatar Repose",
-    description: "Ingest open poses, generate clay poses, transfer to digital talent.",
+    id: "repose-production",
+    title: "Repose Production",
+    description: "Apply brand clay pose libraries to approved job outputs.",
     icon: Users,
-    path: "/avatar-repose",
+    path: "/repose-production",
     stepNumber: 3,
+  },
+];
+
+const utilityApps = [
+  {
+    id: "brand-pose-library",
+    title: "Brand Pose Libraries",
+    description: "Scrape brands, generate clay poses, curate reusable libraries.",
+    icon: Grid3X3,
+    path: "/brand-pose-library",
   },
 ];
 
@@ -149,6 +159,23 @@ export default function Hub() {
                         <h3 className="app-card-title">{app.title}</h3>
                         <p className="app-card-description">{app.description}</p>
                       </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {/* Utility Tools */}
+              <section>
+                <h2 className="text-lg font-medium text-foreground mb-4">Utility Tools</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {utilityApps.map((app) => (
+                    <button
+                      key={app.id}
+                      onClick={() => handleAppClick(app.path)}
+                      className="app-card text-left"
+                    >
+                      <h3 className="app-card-title">{app.title}</h3>
+                      <p className="app-card-description">{app.description}</p>
                     </button>
                   ))}
                 </div>

@@ -2050,6 +2050,154 @@ export type Database = {
         }
         Relationships: []
       }
+      repose_batch_items: {
+        Row: {
+          batch_id: string
+          created_at: string | null
+          id: string
+          look_id: string | null
+          source_output_id: string | null
+          source_url: string
+          view: string
+        }
+        Insert: {
+          batch_id: string
+          created_at?: string | null
+          id?: string
+          look_id?: string | null
+          source_output_id?: string | null
+          source_url: string
+          view: string
+        }
+        Update: {
+          batch_id?: string
+          created_at?: string | null
+          id?: string
+          look_id?: string | null
+          source_output_id?: string | null
+          source_url?: string
+          view?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "repose_batch_items_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "repose_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repose_batch_items_source_output_id_fkey"
+            columns: ["source_output_id"]
+            isOneToOne: false
+            referencedRelation: "job_outputs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      repose_batches: {
+        Row: {
+          brand_id: string | null
+          config_json: Json | null
+          created_at: string | null
+          id: string
+          job_id: string
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          brand_id?: string | null
+          config_json?: Json | null
+          created_at?: string | null
+          id?: string
+          job_id: string
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          brand_id?: string | null
+          config_json?: Json | null
+          created_at?: string | null
+          id?: string
+          job_id?: string
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "repose_batches_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repose_batches_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: true
+            referencedRelation: "unified_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      repose_outputs: {
+        Row: {
+          attempt_index: number | null
+          batch_id: string
+          batch_item_id: string
+          created_at: string | null
+          id: string
+          pose_id: string | null
+          result_url: string | null
+          slot: string | null
+          status: string
+        }
+        Insert: {
+          attempt_index?: number | null
+          batch_id: string
+          batch_item_id: string
+          created_at?: string | null
+          id?: string
+          pose_id?: string | null
+          result_url?: string | null
+          slot?: string | null
+          status?: string
+        }
+        Update: {
+          attempt_index?: number | null
+          batch_id?: string
+          batch_item_id?: string
+          created_at?: string | null
+          id?: string
+          pose_id?: string | null
+          result_url?: string | null
+          slot?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "repose_outputs_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "repose_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repose_outputs_batch_item_id_fkey"
+            columns: ["batch_item_id"]
+            isOneToOne: false
+            referencedRelation: "repose_batch_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repose_outputs_pose_id_fkey"
+            columns: ["pose_id"]
+            isOneToOne: false
+            referencedRelation: "clay_images"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scrape_jobs: {
         Row: {
           brand_id: string
