@@ -20,7 +20,10 @@ export type ArtifactType =
   | 'HEAD_RENDER_FRONT'
   | 'HEAD_RENDER_SIDE'
   | 'HEAD_RENDER_BACK'
-  | 'LOOK_ORIGINAL';
+  | 'LOOK_ORIGINAL'
+  | 'LOOK_ORIGINAL_FRONT'
+  | 'LOOK_ORIGINAL_SIDE'
+  | 'LOOK_ORIGINAL_BACK';
 
 export interface UnifiedJob {
   id: string;
