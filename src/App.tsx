@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import Hub from "./pages/Hub";
@@ -24,6 +24,8 @@ import UserManagement from "./pages/UserManagement";
 import FreelancerDashboard from "./pages/FreelancerDashboard";
 import FreelancerJobList from "./pages/FreelancerJobList";
 import FreelancerJobDetail from "./pages/FreelancerJobDetail";
+import BrandPoseLibrary from "./pages/BrandPoseLibrary";
+import ReposeProduction from "./pages/ReposeProduction";
 
 const queryClient = new QueryClient();
 
@@ -68,11 +70,33 @@ const App = () => (
                 </ProtectedRoute>
               } 
             />
+            {/* Legacy redirect - keep for backwards compatibility */}
             <Route 
               path="/avatar-repose" 
+              element={<Navigate to="/brand-pose-library" replace />} 
+            />
+            {/* New separated surfaces */}
+            <Route 
+              path="/brand-pose-library" 
               element={
                 <ProtectedRoute requiredRoles={['admin', 'internal']}>
-                  <AvatarRepose />
+                  <BrandPoseLibrary />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/repose-production" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <ReposeProduction />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/repose-production/batch/:batchId" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <ReposeProduction />
                 </ProtectedRoute>
               } 
             />

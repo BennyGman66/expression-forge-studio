@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Sheet,
   SheetContent,
@@ -27,6 +28,7 @@ import {
   useAddJobNote,
 } from "@/hooks/useJobs";
 import { useFreelancers } from "@/hooks/useUsers";
+import { useReposeBatchByJobId, useCreateReposeBatch } from "@/hooks/useReposeBatches";
 import { JobStatus } from "@/types/jobs";
 import {
   Clock,
@@ -36,6 +38,7 @@ import {
   Send,
   FileImage,
   Upload,
+  Sparkles,
 } from "lucide-react";
 import { format } from "date-fns";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -62,6 +65,7 @@ const typeLabels: Record<string, string> = {
 };
 
 export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
+  const navigate = useNavigate();
   const [newNote, setNewNote] = useState("");
 
   const { data: job, isLoading: jobLoading } = useJob(jobId);
@@ -69,10 +73,38 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
   const { data: outputs } = useJobOutputs(jobId);
   const { data: notes } = useJobNotes(jobId);
   const { data: freelancers } = useFreelancers();
+  const { data: existingBatch } = useReposeBatchByJobId(jobId || undefined);
 
   const updateStatus = useUpdateJobStatus();
   const assignJob = useAssignJob();
   const addNote = useAddJobNote();
+  const createBatch = useCreateReposeBatch();
+
+  const handleCreateReposeBatch = async () => {
+    if (!jobId || !job) return;
+
+    // If batch already exists, navigate to it
+    if (existingBatch) {
+      navigate(`/repose-production/batch/${existingBatch.id}?tab=setup`);
+      return;
+    }
+
+    // Create new batch with job outputs
+    const batchOutputs = outputs?.map(output => ({
+      view: output.label || 'unknown',
+      source_output_id: output.id,
+      source_url: output.file_url || '',
+    })).filter(o => o.source_url) || [];
+
+    createBatch.mutate(
+      { jobId, outputs: batchOutputs },
+      {
+        onSuccess: (batch) => {
+          navigate(`/repose-production/batch/${batch.id}?tab=setup`);
+        },
+      }
+    );
+  };
 
   const handleStatusChange = (status: JobStatus) => {
     if (jobId) {
@@ -277,6 +309,19 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">No outputs uploaded yet</p>
+                )}
+
+                {/* Create Repose Batch button - only show for APPROVED jobs with outputs */}
+                {job.status === 'APPROVED' && outputs && outputs.length > 0 && (
+                  <Button
+                    onClick={handleCreateReposeBatch}
+                    disabled={createBatch.isPending}
+                    className="w-full mt-4 gap-2"
+                    variant="outline"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    {existingBatch ? 'Open Repose Batch' : 'Create Repose Batch'}
+                  </Button>
                 )}
               </div>
 
