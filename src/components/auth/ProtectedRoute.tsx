@@ -29,6 +29,11 @@ export function ProtectedRoute({
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
 
+  // Authenticated but no roles - redirect to setup (first user gets to claim admin)
+  if (roles.length === 0) {
+    return <Navigate to="/setup-admin" replace />;
+  }
+
   // Check role requirements
   if (requiredRoles.length > 0) {
     const hasRequiredRoles = requireAnyRole

@@ -16,6 +16,7 @@ import FaceApplication from "./pages/FaceApplication";
 import DigitalTalent from "./pages/DigitalTalent";
 import TommyHilfiger from "./pages/TommyHilfiger";
 import Auth from "./pages/Auth";
+import SetupAdmin from "./pages/SetupAdmin";
 import Unauthorized from "./pages/Unauthorized";
 import NotFound from "./pages/NotFound";
 
@@ -31,6 +32,7 @@ const App = () => (
           <Routes>
             {/* Public routes */}
             <Route path="/auth" element={<Auth />} />
+            <Route path="/setup-admin" element={<SetupAdmin />} />
             <Route path="/unauthorized" element={<Unauthorized />} />
             
             {/* Client review - has its own password protection */}
