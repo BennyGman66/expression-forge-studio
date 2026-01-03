@@ -3,7 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Heart, ArrowLeft, Send, MessageSquare } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Heart, ArrowLeft, Send, MessageSquare, Lock, Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,16 @@ const SLOT_LABELS: Record<string, string> = {
 export default function ClientReview() {
   const { reviewId } = useParams<{ reviewId: string }>();
   const navigate = useNavigate();
+  
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [hasPassword, setHasPassword] = useState(false);
+  const [passwordAttempt, setPasswordAttempt] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  
   const [reviewName, setReviewName] = useState("");
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [lookInfoMap, setLookInfoMap] = useState<Record<string, LookInfo>>({});
@@ -49,17 +60,17 @@ export default function ClientReview() {
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
 
-  // Fetch review data on mount
+  // Check if review requires password and if already authenticated
   useEffect(() => {
     if (!reviewId) return;
 
-    const fetchReviewData = async () => {
-      setIsLoading(true);
+    const checkAuth = async () => {
+      setIsCheckingAuth(true);
       try {
-        // Fetch review info
+        // Check if review exists and has a password
         const { data: reviewData, error: reviewError } = await supabase
           .from("client_reviews")
-          .select("name")
+          .select("name, password_hash")
           .eq("id", reviewId)
           .maybeSingle();
 
@@ -72,8 +83,72 @@ export default function ClientReview() {
           });
           return;
         }
-        setReviewName(reviewData.name);
 
+        setReviewName(reviewData.name);
+        const reviewHasPassword = !!reviewData.password_hash;
+        setHasPassword(reviewHasPassword);
+
+        // Check sessionStorage for existing auth
+        const storedAuth = sessionStorage.getItem(`review_auth_${reviewId}`);
+        if (storedAuth === "true" || !reviewHasPassword) {
+          setIsAuthenticated(true);
+        }
+      } catch (error) {
+        console.error("Error checking auth:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load review",
+          variant: "destructive",
+        });
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+
+    checkAuth();
+  }, [reviewId]);
+
+  // Verify password using edge function
+  const verifyPassword = async () => {
+    if (!reviewId || !passwordAttempt.trim()) return;
+
+    // Rate limiting: block after 5 failed attempts for 30 seconds
+    if (failedAttempts >= 5) {
+      setAuthError("Too many failed attempts. Please wait 30 seconds.");
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "verify-review-password",
+        { body: { reviewId, password: passwordAttempt } }
+      );
+
+      if (error) throw error;
+
+      if (data?.valid) {
+        setIsAuthenticated(true);
+        sessionStorage.setItem(`review_auth_${reviewId}`, "true");
+        setAuthError("");
+        setFailedAttempts(0);
+      } else {
+        setFailedAttempts((prev) => prev + 1);
+        setAuthError("Incorrect password. Please try again.");
+        setPasswordAttempt("");
+      }
+    } catch (error) {
+      console.error("Error verifying password:", error);
+      setAuthError("Failed to verify password. Please try again.");
+    }
+  };
+
+  // Fetch review data only after authenticated
+  useEffect(() => {
+    if (!reviewId || !isAuthenticated) return;
+
+    const fetchReviewData = async () => {
+      setIsLoading(true);
+      try {
         // Fetch review items with generation URLs
         const { data: itemsData, error: itemsError } = await supabase
           .from("client_review_items")
@@ -153,7 +228,7 @@ export default function ClientReview() {
     };
 
     fetchReviewData();
-  }, [reviewId]);
+  }, [reviewId, isAuthenticated]);
 
   const toggleFavorite = (itemId: string) => {
     setFeedback((prev) => ({
@@ -287,6 +362,66 @@ export default function ClientReview() {
     });
     return images.slice(0, 4);
   };
+
+  // Checking auth state
+  if (isCheckingAuth) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
+
+  // Password prompt if not authenticated
+  if (hasPassword && !isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Card className="w-full max-w-md p-8">
+          <div className="text-center mb-6">
+            <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+              <Lock className="h-6 w-6 text-primary" />
+            </div>
+            <h1 className="text-2xl font-semibold">{reviewName}</h1>
+            <p className="text-sm text-muted-foreground mt-2">
+              This review is password protected
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                placeholder="Enter password"
+                value={passwordAttempt}
+                onChange={(e) => setPasswordAttempt(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && verifyPassword()}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+
+            {authError && (
+              <p className="text-sm text-destructive">{authError}</p>
+            )}
+
+            <Button
+              onClick={verifyPassword}
+              className="w-full"
+              disabled={!passwordAttempt.trim() || failedAttempts >= 5}
+            >
+              Access Review
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
