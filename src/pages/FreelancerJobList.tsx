@@ -14,7 +14,7 @@ import type { JobStatus, JobType } from '@/types/jobs';
 export default function FreelancerJobList() {
   const { user, isInternal } = useAuth();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'ALL'>(
@@ -31,7 +31,9 @@ export default function FreelancerJobList() {
     if (typeFilter !== 'ALL' && job.type !== typeFilter) return false;
     if (search) {
       const searchLower = search.toLowerCase();
+      const jobTitle = job.title || job.type;
       return (
+        jobTitle.toLowerCase().includes(searchLower) ||
         job.type.toLowerCase().includes(searchLower) ||
         job.instructions?.toLowerCase().includes(searchLower)
       );
@@ -42,12 +44,24 @@ export default function FreelancerJobList() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'OPEN': return 'bg-blue-500/20 text-blue-400';
+      case 'ASSIGNED': return 'bg-cyan-500/20 text-cyan-400';
       case 'IN_PROGRESS': return 'bg-yellow-500/20 text-yellow-400';
       case 'SUBMITTED': return 'bg-purple-500/20 text-purple-400';
       case 'APPROVED': return 'bg-green-500/20 text-green-400';
-      case 'REJECTED': return 'bg-red-500/20 text-red-400';
+      case 'NEEDS_CHANGES': return 'bg-orange-500/20 text-orange-400';
+      case 'CLOSED': return 'bg-muted text-muted-foreground';
       default: return 'bg-muted text-muted-foreground';
     }
+  };
+
+  const getPriorityBadge = (priority?: number) => {
+    if (priority === 1) return <Badge className="bg-red-500/20 text-red-400 text-xs">P1</Badge>;
+    if (priority === 3) return <Badge className="bg-muted text-muted-foreground text-xs">P3</Badge>;
+    return <Badge className="bg-muted/50 text-muted-foreground text-xs">P2</Badge>;
+  };
+
+  const getJobTitle = (job: typeof jobs[0]) => {
+    return job.title || job.type.replace(/_/g, ' ');
   };
 
   return (
@@ -75,16 +89,18 @@ export default function FreelancerJobList() {
           </div>
           
           <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as JobStatus | 'ALL')}>
-            <SelectTrigger className="w-[150px] bg-card border-border">
+            <SelectTrigger className="w-[180px] bg-card border-border">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Status</SelectItem>
               <SelectItem value="OPEN">Open</SelectItem>
+              <SelectItem value="ASSIGNED">Assigned</SelectItem>
               <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+              <SelectItem value="NEEDS_CHANGES">Needs Changes</SelectItem>
               <SelectItem value="SUBMITTED">Submitted</SelectItem>
               <SelectItem value="APPROVED">Approved</SelectItem>
-              <SelectItem value="REJECTED">Rejected</SelectItem>
+              <SelectItem value="CLOSED">Closed</SelectItem>
             </SelectContent>
           </Select>
           
@@ -106,23 +122,24 @@ export default function FreelancerJobList() {
           <Table>
             <TableHeader>
               <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="text-muted-foreground">Job Title</TableHead>
                 <TableHead className="text-muted-foreground">Type</TableHead>
+                <TableHead className="text-muted-foreground">Priority</TableHead>
                 <TableHead className="text-muted-foreground">Status</TableHead>
                 <TableHead className="text-muted-foreground">Due Date</TableHead>
                 <TableHead className="text-muted-foreground">Created</TableHead>
-                <TableHead className="text-muted-foreground">Instructions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                     Loading jobs...
                   </TableCell>
                 </TableRow>
               ) : filteredJobs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                     No jobs found
                   </TableCell>
                 </TableRow>
@@ -130,23 +147,30 @@ export default function FreelancerJobList() {
                 filteredJobs.map(job => (
                   <TableRow
                     key={job.id}
-                    className="border-border cursor-pointer hover:bg-muted/50"
+                    className={`border-border cursor-pointer hover:bg-muted/50 ${
+                      job.status === 'NEEDS_CHANGES' ? 'bg-orange-500/5' : ''
+                    }`}
                     onClick={() => navigate(`/freelancer/jobs/${job.id}`)}
                   >
                     <TableCell className="font-medium text-foreground">
+                      {getJobTitle(job)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
                       {job.type.replace(/_/g, ' ')}
                     </TableCell>
                     <TableCell>
-                      <Badge className={getStatusColor(job.status)}>{job.status}</Badge>
+                      {getPriorityBadge(job.priority)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={getStatusColor(job.status)}>
+                        {job.status === 'NEEDS_CHANGES' ? 'REVIEW' : job.status}
+                      </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {job.due_date ? format(new Date(job.due_date), 'MMM d, yyyy') : '-'}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {format(new Date(job.created_at!), 'MMM d, yyyy')}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground max-w-[300px] truncate">
-                      {job.instructions || '-'}
                     </TableCell>
                   </TableRow>
                 ))
