@@ -90,5 +90,8 @@ verify_jwt = false
 [functions.regenerate-face-output]
 verify_jwt = false
 
+[functions.generate-clay-single]
+verify_jwt = false
+
 [functions.assign-role]
 verify_jwt = false

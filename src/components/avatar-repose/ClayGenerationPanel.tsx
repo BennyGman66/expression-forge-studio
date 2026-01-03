@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft, CheckCircle2, Sparkles, CheckSquare, Square, X } from "lucide-react";
+import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft, CheckCircle2, Sparkles, CheckSquare, Square, X, StopCircle } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,10 +26,10 @@ export function ClayGenerationPanel() {
   const [productImages, setProductImages] = useState<ProductImage[]>([]);
   const [clayImages, setClayImages] = useState<ClayImage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const shouldStopRef = useRef(false);
   const [isOrganizing, setIsOrganizing] = useState(false);
   const [organizeJobId, setOrganizeJobId] = useState<string | null>(null);
   const [organizeProgress, setOrganizeProgress] = useState({ current: 0, total: 0 });
-  const [clayJobId, setClayJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [selectedModel, setSelectedModel] = useState("google/gemini-2.5-flash-image-preview");
@@ -50,37 +50,12 @@ export function ClayGenerationPanel() {
     }
   }, [selectedBrand, selectedGender, selectedProductType]);
 
-  // Subscribe to clay job progress
+  // Reset shouldStop when generation starts
   useEffect(() => {
-    if (!clayJobId) return;
-
-    const channel = supabase
-      .channel("clay-progress")
-      .on(
-        "postgres_changes",
-        { 
-          event: "UPDATE", 
-          schema: "public", 
-          table: "jobs",
-          filter: `id=eq.${clayJobId}`
-        },
-        (payload) => {
-          const job = payload.new as { progress: number; total: number; status: string };
-          setProgress({ current: job.progress || 0, total: job.total || 0 });
-          
-          if (job.status === "completed") {
-            setIsGenerating(false);
-            setClayJobId(null);
-            toast.success("Clay generation complete!");
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [clayJobId]);
+    if (isGenerating) {
+      shouldStopRef.current = false;
+    }
+  }, [isGenerating]);
 
   // Subscribe to new clay images in real-time
   useEffect(() => {
@@ -203,28 +178,61 @@ export function ClayGenerationPanel() {
     }
 
     setIsGenerating(true);
+    shouldStopRef.current = false;
     setProgress({ current: 0, total: imagesToProcess.length });
 
-    try {
-      const { data, error } = await supabase.functions.invoke("generate-clay", {
-        body: {
-          brandId: selectedBrand,
-          imageIds: imagesToProcess.map((img) => img.id),
-          model: selectedModel,
-        },
-      });
+    toast.info(`Generating clay for ${imagesToProcess.length} images...`);
 
-      if (error) throw error;
-
-      if (data?.jobId) {
-        setClayJobId(data.jobId);
-        toast.info(`Generating clay for ${imagesToProcess.length} images...`);
+    // Client-side orchestration: process one image at a time
+    let processed = 0;
+    for (const img of imagesToProcess) {
+      // Check if user requested stop
+      if (shouldStopRef.current) {
+        toast.info(`Stopped after ${processed} images`);
+        break;
       }
-    } catch (err) {
-      console.error("Clay generation error:", err);
-      toast.error("Failed to start clay generation");
-      setIsGenerating(false);
+
+      try {
+        const { data, error } = await supabase.functions.invoke("generate-clay-single", {
+          body: {
+            imageId: img.id,
+            model: selectedModel,
+          },
+        });
+
+        if (error) {
+          console.error(`Error generating clay for ${img.id}:`, error);
+        } else if (data?.storedUrl) {
+          // Add to local state immediately
+          if (!data.skipped) {
+            setClayImages((prev) => [
+              ...prev,
+              { id: crypto.randomUUID(), product_image_id: img.id, stored_url: data.storedUrl, created_at: new Date().toISOString() } as ClayImage
+            ]);
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to process ${img.id}:`, err);
+      }
+
+      processed++;
+      setProgress({ current: processed, total: imagesToProcess.length });
+
+      // Small delay between requests
+      if (processed < imagesToProcess.length && !shouldStopRef.current) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
     }
+
+    setIsGenerating(false);
+    if (!shouldStopRef.current) {
+      toast.success("Clay generation complete!");
+    }
+  };
+
+  const handleStopGeneration = () => {
+    shouldStopRef.current = true;
+    toast.info("Stopping generation...");
   };
 
   const handleOrganizeImages = async () => {
@@ -523,22 +531,23 @@ export function ClayGenerationPanel() {
               ))}
             </div>
           </div>
-          <Button
-            onClick={handleGenerateClay}
-            disabled={isGenerating || !selectedBrand}
-          >
-            {isGenerating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Palette className="w-4 h-4 mr-2" />
-                Generate Clay
-              </>
-            )}
-          </Button>
+          {isGenerating ? (
+            <Button
+              onClick={handleStopGeneration}
+              variant="destructive"
+            >
+              <StopCircle className="w-4 h-4 mr-2" />
+              Stop
+            </Button>
+          ) : (
+            <Button
+              onClick={handleGenerateClay}
+              disabled={!selectedBrand}
+            >
+              <Palette className="w-4 h-4 mr-2" />
+              Generate Clay
+            </Button>
+          )}
         </div>
 
         {isGenerating && (
