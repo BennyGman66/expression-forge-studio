@@ -3,6 +3,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import Hub from "./pages/Hub";
 import ExpressionMap from "./pages/ExpressionMap";
 import AvatarRepose from "./pages/AvatarRepose";
@@ -13,34 +15,123 @@ import FaceCreator from "./pages/FaceCreator";
 import FaceApplication from "./pages/FaceApplication";
 import DigitalTalent from "./pages/DigitalTalent";
 import TommyHilfiger from "./pages/TommyHilfiger";
+import Auth from "./pages/Auth";
+import Unauthorized from "./pages/Unauthorized";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Hub />} />
-          <Route path="/expression-map" element={<ExpressionMap />} />
-          <Route path="/expression-map/:projectId" element={<ExpressionMap />} />
-          <Route path="/avatar-repose" element={<AvatarRepose />} />
-          <Route path="/external" element={<External />} />
-          <Route path="/external/talent-replacement" element={<TalentReplacement />} />
-          <Route path="/review/:reviewId" element={<ClientReview />} />
-          <Route path="/face-creator" element={<FaceCreator />} />
-          <Route path="/face-application" element={<FaceApplication />} />
-          <Route path="/face-application/:projectId" element={<FaceApplication />} />
-          <Route path="/digital-talent" element={<DigitalTalent />} />
-          <Route path="/tommy-hilfiger" element={<TommyHilfiger />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
+    <AuthProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/auth" element={<Auth />} />
+            <Route path="/unauthorized" element={<Unauthorized />} />
+            
+            {/* Client review - has its own password protection */}
+            <Route path="/review/:reviewId" element={<ClientReview />} />
+            
+            {/* Protected internal routes */}
+            <Route 
+              path="/" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <Hub />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/expression-map" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <ExpressionMap />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/expression-map/:projectId" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <ExpressionMap />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/avatar-repose" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <AvatarRepose />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/external" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <External />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/external/talent-replacement" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <TalentReplacement />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/face-creator" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <FaceCreator />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/face-application" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <FaceApplication />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/face-application/:projectId" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <FaceApplication />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/digital-talent" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <DigitalTalent />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/tommy-hilfiger" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <TommyHilfiger />
+                </ProtectedRoute>
+              } 
+            />
+            
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </AuthProvider>
   </QueryClientProvider>
 );
 
