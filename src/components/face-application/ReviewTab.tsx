@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2, MoreVertical, RefreshCw, AlertCircle, Loader2 } from "lucide-react";
+import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2, MoreVertical, RefreshCw, AlertCircle, Loader2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FaceApplicationOutput, FaceApplicationJob } from "@/types/face-application";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +38,6 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
   const [talentInfo, setTalentInfo] = useState<TalentInfo | null>(null);
   const [currentViewIndex, setCurrentViewIndex] = useState(0);
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
-  const [variationIndex, setVariationIndex] = useState<Record<string, number>>({});
   const { toast } = useToast();
 
   // Fetch all jobs and outputs for this project (regardless of status)
@@ -146,21 +145,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
   });
 
   const currentView = allViews[currentViewIndex];
-  const currentVariationIdx = currentView ? (variationIndex[`${currentView.lookId}-${currentView.view}`] || 0) : 0;
   const currentOutputs = currentView?.outputs || [];
-  const currentOutput = currentOutputs[currentVariationIdx];
-
-  const handleVariationNav = (direction: 'prev' | 'next') => {
-    if (!currentView) return;
-    const key = `${currentView.lookId}-${currentView.view}`;
-    const maxIdx = currentOutputs.length - 1;
-    setVariationIndex(prev => ({
-      ...prev,
-      [key]: direction === 'next' 
-        ? Math.min((prev[key] || 0) + 1, maxIdx)
-        : Math.max((prev[key] || 0) - 1, 0)
-    }));
-  };
 
   const handleSelect = async (outputId: string) => {
     if (!currentView) return;
@@ -222,15 +207,6 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
       outputs: look.outputs.filter(o => o.id !== outputId),
     })));
 
-    // Reset variation index if needed
-    if (currentView) {
-      const key = `${currentView.lookId}-${currentView.view}`;
-      const newMax = currentOutputs.length - 2;
-      if (currentVariationIdx > newMax && newMax >= 0) {
-        setVariationIndex(prev => ({ ...prev, [key]: newMax }));
-      }
-    }
-
     toast({ title: "Deleted", description: "Output removed" });
   };
 
@@ -291,6 +267,29 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
         return next;
       });
       toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleRegenerateAll = async (lookId: string, view: string) => {
+    const viewOutputs = allViews
+      .find(v => v.lookId === lookId && v.view === view)
+      ?.outputs || [];
+    
+    if (viewOutputs.length === 0) return;
+    
+    const ids = viewOutputs.map(o => o.id);
+    setRegeneratingIds(prev => new Set([...prev, ...ids]));
+    
+    toast({ title: "Regenerating...", description: `Regenerating ${ids.length} images` });
+    
+    for (const output of viewOutputs) {
+      try {
+        await supabase.functions.invoke("regenerate-face-output", {
+          body: { outputId: output.id },
+        });
+      } catch (error) {
+        console.error("Regenerate error:", error);
+      }
     }
   };
 
@@ -405,7 +404,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
           </div>
         </div>
 
-        {/* Current view - CAROUSEL STYLE */}
+        {/* Current view - GRID STYLE */}
         {currentView && (
           <Card>
             <CardHeader className="py-3 flex-row items-center justify-between">
@@ -415,149 +414,94 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
                 </CardTitle>
                 {getStatusBadge(currentView.lookStatus)}
               </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>{currentOutputs.length} options</span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">{currentOutputs.length} options</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleRegenerateAll(currentView.lookId, currentView.view)}
+                  disabled={currentOutputs.length === 0}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Regenerate All
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
               {currentOutputs.length > 0 ? (
-                <div className="space-y-4">
-                  {/* Main carousel image */}
-                  <div className="relative">
-                    {/* Navigation arrows */}
-                    {currentOutputs.length > 1 && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="absolute left-2 top-1/2 -translate-y-1/2 z-10 bg-background/80"
-                          disabled={currentVariationIdx === 0}
-                          onClick={() => handleVariationNav('prev')}
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="absolute right-2 top-1/2 -translate-y-1/2 z-10 bg-background/80"
-                          disabled={currentVariationIdx >= currentOutputs.length - 1}
-                          onClick={() => handleVariationNav('next')}
-                        >
-                          <ChevronRight className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-
-                    {/* Main image */}
-                    {currentOutput && (
-                      <div className="relative group">
-                        <button
-                          onClick={() => handleSelect(currentOutput.id)}
-                          className={`
-                            relative w-full aspect-square max-w-md mx-auto rounded-lg overflow-hidden border-4 transition-all
-                            ${currentOutput.is_selected
-                              ? "border-primary ring-4 ring-primary/30"
-                              : "border-transparent hover:border-muted-foreground/50"
-                            }
-                          `}
-                          disabled={regeneratingIds.has(currentOutput.id) || currentOutput.status === "pending"}
-                        >
-                          {regeneratingIds.has(currentOutput.id) || currentOutput.status === "pending" ? (
-                            <div className="w-full h-full bg-muted flex flex-col items-center justify-center">
-                              <LeapfrogLoader message="Generating..." />
-                            </div>
-                          ) : currentOutput.stored_url ? (
-                            <img
-                              src={currentOutput.stored_url}
-                              alt={`${currentView.view} option ${currentVariationIdx + 1}`}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-muted flex items-center justify-center">
-                              <span className="text-muted-foreground">No image</span>
-                            </div>
-                          )}
-                          {currentOutput.is_selected && (
-                            <div className="absolute top-3 right-3 bg-primary text-primary-foreground rounded-full p-2">
-                              <Check className="h-5 w-5" />
-                            </div>
-                          )}
-                        </button>
-
-                        {/* Actions menu */}
-                        <div className="absolute top-3 left-3 z-10">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="secondary" size="icon" className="h-8 w-8 bg-background/90 shadow">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start">
-                              <DropdownMenuItem onClick={() => handleRegenerate(currentOutput.id)}>
-                                <RefreshCw className="h-4 w-4 mr-2" />
-                                Regenerate
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                onClick={() => handleDelete(currentOutput.id)}
-                                className="text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-
-                        {/* Counter */}
-                        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 text-white text-sm px-3 py-1 rounded-full">
-                          {currentVariationIdx + 1} / {currentOutputs.length}
-                        </div>
+                <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {currentOutputs.map((output, idx) => (
+                    <div key={output.id} className="relative group">
+                      {/* Image */}
+                      <div
+                        className={`
+                          aspect-square rounded-lg overflow-hidden border-4 transition-all cursor-pointer
+                          ${output.is_selected
+                            ? "border-primary ring-4 ring-primary/30"
+                            : "border-transparent hover:border-muted-foreground/50"
+                          }
+                        `}
+                      >
+                        {regeneratingIds.has(output.id) || output.status === "pending" ? (
+                          <div className="w-full h-full bg-muted flex flex-col items-center justify-center">
+                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : output.stored_url ? (
+                          <img
+                            src={output.stored_url}
+                            alt={`Option ${idx + 1}`}
+                            loading="lazy"
+                            decoding="async"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-muted flex items-center justify-center">
+                            <span className="text-xs text-muted-foreground">No image</span>
+                          </div>
+                        )}
+                        {output.is_selected && (
+                          <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1.5">
+                            <Check className="h-4 w-4" />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  {/* Thumbnail strip */}
-                  {currentOutputs.length > 1 && (
-                    <div className="flex justify-center gap-2 overflow-x-auto py-2">
-                      {currentOutputs.map((output, idx) => (
-                        <button
-                          key={output.id}
-                          onClick={() => {
-                            const key = `${currentView.lookId}-${currentView.view}`;
-                            setVariationIndex(prev => ({ ...prev, [key]: idx }));
-                          }}
-                          className={`
-                            relative flex-shrink-0 w-16 h-16 rounded-md overflow-hidden border-2 transition-all
-                            ${idx === currentVariationIdx
-                              ? "border-primary ring-2 ring-primary/30"
-                              : output.is_selected
-                                ? "border-primary/50"
-                                : "border-transparent hover:border-muted-foreground/50"
-                            }
-                          `}
+                      {/* Quick action buttons below each image */}
+                      <div className="flex justify-center gap-1.5 mt-2">
+                        <Button
+                          variant={output.is_selected ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => handleSelect(output.id)}
+                          className={`h-8 w-8 p-0 ${output.is_selected ? "bg-primary hover:bg-primary/90" : ""}`}
+                          disabled={regeneratingIds.has(output.id) || output.status === "pending"}
                         >
-                          {regeneratingIds.has(output.id) || output.status === "pending" ? (
-                            <div className="w-full h-full bg-muted flex items-center justify-center">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            </div>
-                          ) : output.stored_url ? (
-                            <img
-                              src={output.stored_url}
-                              alt={`Option ${idx + 1}`}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-muted" />
-                          )}
-                          {output.is_selected && (
-                            <div className="absolute top-0.5 right-0.5 bg-primary text-primary-foreground rounded-full p-0.5">
-                              <Check className="h-2.5 w-2.5" />
-                            </div>
-                          )}
-                        </button>
-                      ))}
+                          <Check className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDelete(output.id)}
+                          className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          disabled={regeneratingIds.has(output.id)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-8 w-8 p-0">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="center">
+                            <DropdownMenuItem onClick={() => handleRegenerate(output.id)}>
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              Regenerate
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
-                  )}
+                  ))}
                 </div>
               ) : (
                 <p className="text-center text-muted-foreground py-8">
