@@ -1,4 +1,4 @@
-export type JobType = 'PHOTOSHOP_FACE_APPLY' | 'RETOUCH_FINAL';
+export type JobType = 'PHOTOSHOP_FACE_APPLY' | 'RETOUCH_FINAL' | 'FOUNDATION_FACE_REPLACE';
 
 export type JobStatus = 
   | 'OPEN'
@@ -16,7 +16,11 @@ export type ArtifactType =
   | 'PHOTOSHOP_OUTPUT'
   | 'REPOSE_VARIANT'
   | 'CLIENT_SELECTION'
-  | 'RETOUCH_OUTPUT';
+  | 'RETOUCH_OUTPUT'
+  | 'HEAD_RENDER_FRONT'
+  | 'HEAD_RENDER_SIDE'
+  | 'HEAD_RENDER_BACK'
+  | 'LOOK_ORIGINAL';
 
 export interface UnifiedJob {
   id: string;

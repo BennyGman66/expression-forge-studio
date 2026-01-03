@@ -2382,6 +2382,10 @@ export type Database = {
         | "REPOSE_VARIANT"
         | "CLIENT_SELECTION"
         | "RETOUCH_OUTPUT"
+        | "HEAD_RENDER_FRONT"
+        | "HEAD_RENDER_SIDE"
+        | "HEAD_RENDER_BACK"
+        | "LOOK_ORIGINAL"
       job_status:
         | "OPEN"
         | "ASSIGNED"
@@ -2390,7 +2394,10 @@ export type Database = {
         | "NEEDS_CHANGES"
         | "APPROVED"
         | "CLOSED"
-      job_type: "PHOTOSHOP_FACE_APPLY" | "RETOUCH_FINAL"
+      job_type:
+        | "PHOTOSHOP_FACE_APPLY"
+        | "RETOUCH_FINAL"
+        | "FOUNDATION_FACE_REPLACE"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2527,6 +2534,10 @@ export const Constants = {
         "REPOSE_VARIANT",
         "CLIENT_SELECTION",
         "RETOUCH_OUTPUT",
+        "HEAD_RENDER_FRONT",
+        "HEAD_RENDER_SIDE",
+        "HEAD_RENDER_BACK",
+        "LOOK_ORIGINAL",
       ],
       job_status: [
         "OPEN",
@@ -2537,7 +2548,11 @@ export const Constants = {
         "APPROVED",
         "CLOSED",
       ],
-      job_type: ["PHOTOSHOP_FACE_APPLY", "RETOUCH_FINAL"],
+      job_type: [
+        "PHOTOSHOP_FACE_APPLY",
+        "RETOUCH_FINAL",
+        "FOUNDATION_FACE_REPLACE",
+      ],
     },
   },
 } as const

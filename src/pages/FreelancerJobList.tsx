@@ -96,6 +96,7 @@ export default function FreelancerJobList() {
               <SelectItem value="ALL">All Types</SelectItem>
               <SelectItem value="PHOTOSHOP_FACE_APPLY">Photoshop Face Apply</SelectItem>
               <SelectItem value="RETOUCH_FINAL">Retouch Final</SelectItem>
+              <SelectItem value="FOUNDATION_FACE_REPLACE">Foundation Face Replace</SelectItem>
             </SelectContent>
           </Select>
         </div>
