@@ -136,9 +136,13 @@ export default function FreelancerJobDetail() {
           <Button variant="ghost" onClick={() => navigate('/freelancer/jobs')} className="mb-2">
             <ArrowLeft className="mr-2 h-4 w-4" /> Back to Jobs
           </Button>
-          <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">{job.type.replace(/_/g, ' ')}</h1>
+              <h1 className="text-2xl font-bold text-foreground">
+                {job.type === 'FOUNDATION_FACE_REPLACE' 
+                  ? 'Foundation Face Replace' 
+                  : job.type.replace(/_/g, ' ')}
+              </h1>
               <p className="text-muted-foreground">
                 Created {format(new Date(job.created_at!), 'MMM d, yyyy')}
                 {job.due_date && ` • Due ${format(new Date(job.due_date), 'MMM d, yyyy')}`}
@@ -176,28 +180,36 @@ export default function FreelancerJobDetail() {
                 {inputs.length === 0 ? (
                   <p className="text-muted-foreground text-sm">No input files attached</p>
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                     {inputs.map(input => (
-                      <a
+                      <div
                         key={input.id}
-                        href={input.artifact?.file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors"
+                        className="p-4 rounded-lg bg-muted/50 border border-border"
                       >
+                        <p className="text-sm font-medium text-foreground mb-2">{input.label || 'Input File'}</p>
                         {input.artifact?.preview_url ? (
                           <img
                             src={input.artifact.preview_url}
                             alt={input.label || 'Input'}
-                            className="w-full h-24 object-cover rounded mb-2"
+                            className="w-full h-40 object-cover rounded mb-3"
                           />
                         ) : (
-                          <div className="w-full h-24 bg-muted rounded mb-2 flex items-center justify-center">
-                            <FileImage className="h-8 w-8 text-muted-foreground" />
+                          <div className="w-full h-40 bg-muted rounded mb-3 flex items-center justify-center">
+                            <FileImage className="h-10 w-10 text-muted-foreground" />
                           </div>
                         )}
-                        <p className="text-sm text-foreground truncate">{input.label || 'Input File'}</p>
-                      </a>
+                        <a
+                          href={input.artifact?.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          download
+                        >
+                          <Button variant="outline" size="sm" className="w-full">
+                            <Download className="h-4 w-4 mr-2" />
+                            Download
+                          </Button>
+                        </a>
+                      </div>
                     ))}
                   </div>
                 )}

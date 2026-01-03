@@ -84,6 +84,7 @@ export function CreateJobDialog({
                   Photoshop Face Apply
                 </SelectItem>
                 <SelectItem value="RETOUCH_FINAL">Final Retouch</SelectItem>
+                <SelectItem value="FOUNDATION_FACE_REPLACE">Foundation Face Replace</SelectItem>
               </SelectContent>
             </Select>
           </div>

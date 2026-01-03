@@ -39,6 +39,7 @@ const statusColors: Record<JobStatus, string> = {
 const typeLabels: Record<JobType, string> = {
   PHOTOSHOP_FACE_APPLY: "Photoshop Face Apply",
   RETOUCH_FINAL: "Final Retouch",
+  FOUNDATION_FACE_REPLACE: "Foundation Face Replace",
 };
 
 export default function JobBoard() {
@@ -132,6 +133,7 @@ export default function JobBoard() {
               <SelectItem value="all">All Types</SelectItem>
               <SelectItem value="PHOTOSHOP_FACE_APPLY">Photoshop Face Apply</SelectItem>
               <SelectItem value="RETOUCH_FINAL">Final Retouch</SelectItem>
+              <SelectItem value="FOUNDATION_FACE_REPLACE">Foundation Face Replace</SelectItem>
             </SelectContent>
           </Select>
         </div>

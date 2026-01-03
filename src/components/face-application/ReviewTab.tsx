@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2, MoreVertical, RefreshCw, AlertCircle, Loader2, X, Briefcase } from "lucide-react";
+import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2, MoreVertical, RefreshCw, AlertCircle, Loader2, X, Briefcase, Wrench } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { FaceApplicationOutput, FaceApplicationJob } from "@/types/face-application";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { CreatePhotoshopJobDialog } from "./CreatePhotoshopJobDialog";
+import { CreateFoundationFaceReplaceJobDialog } from "@/components/jobs/CreateFoundationFaceReplaceJobDialog";
 
 interface ReviewTabProps {
   projectId: string;
@@ -40,6 +41,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
   const [currentViewIndex, setCurrentViewIndex] = useState(0);
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
   const [showJobDialog, setShowJobDialog] = useState(false);
+  const [showFoundationJobDialog, setShowFoundationJobDialog] = useState(false);
   const { toast } = useToast();
 
   // Fetch all jobs and outputs for this project (regardless of status)
@@ -570,6 +572,15 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
           <Button
             variant="outline"
             size="lg"
+            onClick={() => setShowFoundationJobDialog(true)}
+            disabled={selectedCount === 0}
+          >
+            <Wrench className="h-4 w-4 mr-2" />
+            Create Job: Foundation Face Replace
+          </Button>
+          <Button
+            variant="outline"
+            size="lg"
             onClick={() => setShowJobDialog(true)}
             disabled={selectedCount === 0}
           >
@@ -599,6 +610,17 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
               .flatMap(v => v.outputs.filter(o => o.is_selected && o.stored_url).map(o => o.stored_url!))
             }
             faceFoundationUrls={talentInfo?.front_face_url ? [talentInfo.front_face_url] : []}
+          />
+        )}
+
+        {/* Foundation Face Replace Job Dialog */}
+        {currentView && (
+          <CreateFoundationFaceReplaceJobDialog
+            open={showFoundationJobDialog}
+            onOpenChange={setShowFoundationJobDialog}
+            lookId={currentView.lookId}
+            lookName={currentView.lookName}
+            projectId={projectId}
           />
         )}
       </div>
