@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { ArrowRight, Check } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage, FaceFoundation } from "@/types/face-application";
 
 interface LookWithImages {
@@ -29,6 +30,8 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
   const [matches, setMatches] = useState<Record<string, string>>({}); // sourceImageId -> faceUrl
   const [talentInfo, setTalentInfo] = useState<TalentInfo | null>(null);
   const [talentIds, setTalentIds] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const { toast } = useToast();
 
   // Fetch ALL looks for this PROJECT with their source images
   useEffect(() => {
@@ -161,6 +164,37 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
     });
   };
 
+  // Save matches to database and continue
+  const handleContinue = async () => {
+    setIsSaving(true);
+    try {
+      // Save face matches to look_source_images
+      // We store the matched face URL in a way that GenerateTab can use
+      const updates = Object.entries(matches).map(([sourceImageId, faceUrl]) => {
+        // Find which talent this face belongs to
+        const foundation = faceFoundations.find(f => f.stored_url === faceUrl);
+        return {
+          id: sourceImageId,
+          digital_talent_id: foundation?.digital_talent_id || talentIds[0],
+        };
+      });
+
+      // Update each source image with the matched talent
+      for (const update of updates) {
+        await supabase
+          .from("look_source_images")
+          .update({ digital_talent_id: update.digital_talent_id })
+          .eq("id", update.id);
+      }
+
+      onContinue();
+    } catch (error: any) {
+      toast({ title: "Error saving matches", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Check matches - require at least one, not all
   const allSourceImages = looks.flatMap((l) => l.sourceImages);
   const matchedCount = allSourceImages.filter((img) => matches[img.id]).length;
@@ -280,10 +314,10 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
         <div className="flex justify-end pt-4 pb-8">
           <Button
             size="lg"
-            disabled={!hasAnyMatched || faceFoundations.length === 0}
-            onClick={onContinue}
+            disabled={!hasAnyMatched || faceFoundations.length === 0 || isSaving}
+            onClick={handleContinue}
           >
-            Continue to Generate ({matchedCount}/{allSourceImages.length} matched)
+            {isSaving ? "Saving..." : `Continue to Generate (${matchedCount}/${allSourceImages.length} matched)`}
             <ArrowRight className="h-4 w-4 ml-2" />
           </Button>
         </div>
