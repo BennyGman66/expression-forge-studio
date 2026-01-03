@@ -14,6 +14,44 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_events: {
+        Row: {
+          action: string
+          created_at: string | null
+          id: string
+          job_id: string | null
+          metadata: Json | null
+          project_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string | null
+          id?: string
+          job_id?: string | null
+          metadata?: Json | null
+          project_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string | null
+          id?: string
+          job_id?: string | null
+          metadata?: Json | null
+          project_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       brand_refs: {
         Row: {
           created_at: string
@@ -1547,6 +1585,193 @@ export type Database = {
           },
         ]
       }
+      invites: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          email: string | null
+          expires_at: string
+          id: string
+          job_id: string | null
+          pin_code: string | null
+          project_id: string | null
+          role: Database["public"]["Enums"]["app_role"]
+          token: string
+          used_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          email?: string | null
+          expires_at: string
+          id?: string
+          job_id?: string | null
+          pin_code?: string | null
+          project_id?: string | null
+          role: Database["public"]["Enums"]["app_role"]
+          token: string
+          used_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          email?: string | null
+          expires_at?: string
+          id?: string
+          job_id?: string | null
+          pin_code?: string | null
+          project_id?: string | null
+          role?: Database["public"]["Enums"]["app_role"]
+          token?: string
+          used_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invites_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invites_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "unified_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_inputs: {
+        Row: {
+          artifact_id: string | null
+          created_at: string | null
+          id: string
+          job_id: string
+          label: string | null
+        }
+        Insert: {
+          artifact_id?: string | null
+          created_at?: string | null
+          id?: string
+          job_id: string
+          label?: string | null
+        }
+        Update: {
+          artifact_id?: string | null
+          created_at?: string | null
+          id?: string
+          job_id?: string
+          label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_inputs_artifact_id_fkey"
+            columns: ["artifact_id"]
+            isOneToOne: false
+            referencedRelation: "unified_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_inputs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "unified_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_notes: {
+        Row: {
+          author_id: string | null
+          body: string
+          created_at: string | null
+          id: string
+          job_id: string
+        }
+        Insert: {
+          author_id?: string | null
+          body: string
+          created_at?: string | null
+          id?: string
+          job_id: string
+        }
+        Update: {
+          author_id?: string | null
+          body?: string
+          created_at?: string | null
+          id?: string
+          job_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_notes_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_notes_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "unified_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_outputs: {
+        Row: {
+          artifact_id: string | null
+          created_at: string | null
+          file_url: string | null
+          id: string
+          job_id: string
+          label: string | null
+          uploaded_by: string | null
+        }
+        Insert: {
+          artifact_id?: string | null
+          created_at?: string | null
+          file_url?: string | null
+          id?: string
+          job_id: string
+          label?: string | null
+          uploaded_by?: string | null
+        }
+        Update: {
+          artifact_id?: string | null
+          created_at?: string | null
+          file_url?: string | null
+          id?: string
+          job_id?: string
+          label?: string | null
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_outputs_artifact_id_fkey"
+            columns: ["artifact_id"]
+            isOneToOne: false
+            referencedRelation: "unified_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_outputs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "unified_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_outputs_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       jobs: {
         Row: {
           brand_id: string | null
@@ -1981,6 +2206,102 @@ export type Database = {
         }
         Relationships: []
       }
+      unified_artifacts: {
+        Row: {
+          created_at: string | null
+          file_url: string
+          id: string
+          look_id: string | null
+          metadata: Json | null
+          preview_url: string | null
+          project_id: string | null
+          source_id: string | null
+          source_table: string | null
+          type: Database["public"]["Enums"]["artifact_type"]
+        }
+        Insert: {
+          created_at?: string | null
+          file_url: string
+          id?: string
+          look_id?: string | null
+          metadata?: Json | null
+          preview_url?: string | null
+          project_id?: string | null
+          source_id?: string | null
+          source_table?: string | null
+          type: Database["public"]["Enums"]["artifact_type"]
+        }
+        Update: {
+          created_at?: string | null
+          file_url?: string
+          id?: string
+          look_id?: string | null
+          metadata?: Json | null
+          preview_url?: string | null
+          project_id?: string | null
+          source_id?: string | null
+          source_table?: string | null
+          type?: Database["public"]["Enums"]["artifact_type"]
+        }
+        Relationships: []
+      }
+      unified_jobs: {
+        Row: {
+          assigned_user_id: string | null
+          created_at: string | null
+          created_by: string | null
+          due_date: string | null
+          id: string
+          instructions: string | null
+          look_id: string | null
+          project_id: string | null
+          status: Database["public"]["Enums"]["job_status"] | null
+          type: Database["public"]["Enums"]["job_type"]
+          updated_at: string | null
+        }
+        Insert: {
+          assigned_user_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          due_date?: string | null
+          id?: string
+          instructions?: string | null
+          look_id?: string | null
+          project_id?: string | null
+          status?: Database["public"]["Enums"]["job_status"] | null
+          type: Database["public"]["Enums"]["job_type"]
+          updated_at?: string | null
+        }
+        Update: {
+          assigned_user_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          due_date?: string | null
+          id?: string
+          instructions?: string | null
+          look_id?: string | null
+          project_id?: string | null
+          status?: Database["public"]["Enums"]["job_status"] | null
+          type?: Database["public"]["Enums"]["job_type"]
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "unified_jobs_assigned_user_id_fkey"
+            columns: ["assigned_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "unified_jobs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string | null
@@ -2053,6 +2374,23 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "internal" | "freelancer" | "client"
+      artifact_type:
+        | "LOOK_SOURCE"
+        | "LOOK_PREP"
+        | "FACE_LIBRARY_REF"
+        | "PHOTOSHOP_OUTPUT"
+        | "REPOSE_VARIANT"
+        | "CLIENT_SELECTION"
+        | "RETOUCH_OUTPUT"
+      job_status:
+        | "OPEN"
+        | "ASSIGNED"
+        | "IN_PROGRESS"
+        | "SUBMITTED"
+        | "NEEDS_CHANGES"
+        | "APPROVED"
+        | "CLOSED"
+      job_type: "PHOTOSHOP_FACE_APPLY" | "RETOUCH_FINAL"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2181,6 +2519,25 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "internal", "freelancer", "client"],
+      artifact_type: [
+        "LOOK_SOURCE",
+        "LOOK_PREP",
+        "FACE_LIBRARY_REF",
+        "PHOTOSHOP_OUTPUT",
+        "REPOSE_VARIANT",
+        "CLIENT_SELECTION",
+        "RETOUCH_OUTPUT",
+      ],
+      job_status: [
+        "OPEN",
+        "ASSIGNED",
+        "IN_PROGRESS",
+        "SUBMITTED",
+        "NEEDS_CHANGES",
+        "APPROVED",
+        "CLOSED",
+      ],
+      job_type: ["PHOTOSHOP_FACE_APPLY", "RETOUCH_FINAL"],
     },
   },
 } as const
