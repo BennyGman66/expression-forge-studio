@@ -17,6 +17,7 @@ interface HeadCropTabProps {
 interface TalentLook {
   id: string;
   name: string;
+  digital_talent_id: string | null;
 }
 
 const OUTPUT_SIZE = 1000; // Final crop size
@@ -49,21 +50,25 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const imageRef = useRef<HTMLImageElement>(null);
   const { toast } = useToast();
 
-  // Fetch all looks for the talent
+  // Fetch all looks for the PROJECT (not just one talent)
   useEffect(() => {
-    if (!talentId) return;
+    if (!projectId) return;
     const fetchLooks = async () => {
       const { data } = await supabase
         .from("talent_looks")
-        .select("id, name")
-        .eq("digital_talent_id", talentId)
+        .select("id, name, digital_talent_id")
+        .eq("project_id", projectId)
         .order("created_at");
       if (data) {
         setLooks(data);
+        // Auto-select first look if none selected
+        if (!lookId && data.length > 0) {
+          onLookChange(data[0].id);
+        }
       }
     };
     fetchLooks();
-  }, [talentId]);
+  }, [projectId, lookId, onLookChange]);
 
   // Fetch source images for current look
   useEffect(() => {
