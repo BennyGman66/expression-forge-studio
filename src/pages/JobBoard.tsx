@@ -19,12 +19,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useJobs } from "@/hooks/useJobs";
+import { useNeedsReviewCount, useLatestSubmission } from "@/hooks/useReviewSystem";
 import { JobStatus, JobType } from "@/types/jobs";
-import { ArrowLeft, Plus, Search, Clock, User, Briefcase } from "lucide-react";
+import { ArrowLeft, Plus, Search, Clock, User, Briefcase, Eye, MessageSquare } from "lucide-react";
 import { format } from "date-fns";
 import { JobDetailPanel } from "@/components/jobs/JobDetailPanel";
 import { CreateJobDialog } from "@/components/jobs/CreateJobDialog";
+import { JobReviewPanel } from "@/components/review";
 
 const statusColors: Record<JobStatus, string> = {
   OPEN: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -45,10 +48,14 @@ const typeLabels: Record<JobType, string> = {
 export default function JobBoard() {
   const navigate = useNavigate();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [reviewJobId, setReviewJobId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<JobStatus | "all">("all");
   const [typeFilter, setTypeFilter] = useState<JobType | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewTab, setViewTab] = useState<"all" | "needs-review">("all");
+
+  const { data: needsReviewCount } = useNeedsReviewCount();
 
   const { data: jobs, isLoading } = useJobs({
     status: statusFilter !== "all" ? statusFilter : undefined,
@@ -56,6 +63,7 @@ export default function JobBoard() {
   });
 
   const filteredJobs = jobs?.filter((job) => {
+    if (viewTab === "needs-review" && job.status !== "SUBMITTED") return false;
     if (!searchQuery) return true;
     const searchLower = searchQuery.toLowerCase();
     return (
@@ -93,6 +101,23 @@ export default function JobBoard() {
           </Button>
         </div>
 
+        {/* View Tabs */}
+        <div className="mb-4">
+          <Tabs value={viewTab} onValueChange={(v) => setViewTab(v as "all" | "needs-review")}>
+            <TabsList>
+              <TabsTrigger value="all">All Jobs</TabsTrigger>
+              <TabsTrigger value="needs-review" className="gap-2">
+                Needs Review
+                {(needsReviewCount || 0) > 0 && (
+                  <Badge variant="destructive" className="h-5 px-1.5 text-xs">
+                    {needsReviewCount}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
         {/* Filters */}
         <div className="flex gap-4 mb-6">
           <div className="relative flex-1 max-w-sm">
@@ -104,38 +129,42 @@ export default function JobBoard() {
               className="pl-10"
             />
           </div>
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as JobStatus | "all")}
-          >
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="OPEN">Open</SelectItem>
-              <SelectItem value="ASSIGNED">Assigned</SelectItem>
-              <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
-              <SelectItem value="SUBMITTED">Submitted</SelectItem>
-              <SelectItem value="NEEDS_CHANGES">Needs Changes</SelectItem>
-              <SelectItem value="APPROVED">Approved</SelectItem>
-              <SelectItem value="CLOSED">Closed</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={typeFilter}
-            onValueChange={(v) => setTypeFilter(v as JobType | "all")}
-          >
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="PHOTOSHOP_FACE_APPLY">Photoshop Face Apply</SelectItem>
-              <SelectItem value="RETOUCH_FINAL">Final Retouch</SelectItem>
-              <SelectItem value="FOUNDATION_FACE_REPLACE">Foundation Face Replace</SelectItem>
-            </SelectContent>
-          </Select>
+          {viewTab === "all" && (
+            <>
+              <Select
+                value={statusFilter}
+                onValueChange={(v) => setStatusFilter(v as JobStatus | "all")}
+              >
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="OPEN">Open</SelectItem>
+                  <SelectItem value="ASSIGNED">Assigned</SelectItem>
+                  <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+                  <SelectItem value="SUBMITTED">Submitted</SelectItem>
+                  <SelectItem value="NEEDS_CHANGES">Needs Changes</SelectItem>
+                  <SelectItem value="APPROVED">Approved</SelectItem>
+                  <SelectItem value="CLOSED">Closed</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={typeFilter}
+                onValueChange={(v) => setTypeFilter(v as JobType | "all")}
+              >
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="PHOTOSHOP_FACE_APPLY">Photoshop Face Apply</SelectItem>
+                  <SelectItem value="RETOUCH_FINAL">Final Retouch</SelectItem>
+                  <SelectItem value="FOUNDATION_FACE_REPLACE">Foundation Face Replace</SelectItem>
+                </SelectContent>
+              </Select>
+            </>
+          )}
         </div>
 
         {/* Jobs Table */}
@@ -149,18 +178,19 @@ export default function JobBoard() {
                 <TableHead>Assignee</TableHead>
                 <TableHead>Due Date</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8">
+                  <TableCell colSpan={7} className="text-center py-8">
                     Loading jobs...
                   </TableCell>
                 </TableRow>
               ) : filteredJobs?.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8">
+                  <TableCell colSpan={7} className="text-center py-8">
                     <div className="flex flex-col items-center gap-2">
                       <Briefcase className="h-8 w-8 text-muted-foreground" />
                       <p className="text-muted-foreground">No jobs found</p>
@@ -181,12 +211,20 @@ export default function JobBoard() {
                       <span className="text-sm">{typeLabels[job.type]}</span>
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={statusColors[job.status]}
-                      >
-                        {job.status.replace("_", " ")}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant="outline"
+                          className={statusColors[job.status]}
+                        >
+                          {job.status.replace("_", " ")}
+                        </Badge>
+                        {job.status === "SUBMITTED" && (
+                          <Badge variant="secondary" className="text-[10px] h-5 px-1.5 gap-1">
+                            <MessageSquare className="h-3 w-3" />
+                            New
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {job.assigned_user ? (
@@ -215,6 +253,22 @@ export default function JobBoard() {
                     <TableCell className="text-sm text-muted-foreground">
                       {format(new Date(job.created_at), "MMM d, yyyy")}
                     </TableCell>
+                    <TableCell>
+                      {job.status === "SUBMITTED" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReviewJobId(job.id);
+                          }}
+                        >
+                          <Eye className="h-3 w-3" />
+                          Review
+                        </Button>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))
               )}
@@ -235,6 +289,14 @@ export default function JobBoard() {
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
       />
+
+      {/* Review Panel */}
+      {reviewJobId && (
+        <JobReviewPanel
+          jobId={reviewJobId}
+          onClose={() => setReviewJobId(null)}
+        />
+      )}
     </div>
   );
 }

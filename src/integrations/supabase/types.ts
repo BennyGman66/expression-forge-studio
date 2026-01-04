@@ -1629,6 +1629,51 @@ export type Database = {
           },
         ]
       }
+      image_annotations: {
+        Row: {
+          asset_id: string
+          created_at: string
+          created_by_user_id: string | null
+          id: string
+          rect: Json
+          shape_type: Database["public"]["Enums"]["annotation_shape"]
+          style: Json
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          rect?: Json
+          shape_type?: Database["public"]["Enums"]["annotation_shape"]
+          style?: Json
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          rect?: Json
+          shape_type?: Database["public"]["Enums"]["annotation_shape"]
+          style?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "image_annotations_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "submission_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "image_annotations_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invites: {
         Row: {
           created_at: string | null
@@ -1816,6 +1861,57 @@ export type Database = {
           },
         ]
       }
+      job_submissions: {
+        Row: {
+          created_at: string
+          id: string
+          job_id: string
+          status: Database["public"]["Enums"]["submission_status"]
+          submitted_at: string
+          submitted_by_user_id: string | null
+          summary_note: string | null
+          updated_at: string
+          version_number: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          job_id: string
+          status?: Database["public"]["Enums"]["submission_status"]
+          submitted_at?: string
+          submitted_by_user_id?: string | null
+          summary_note?: string | null
+          updated_at?: string
+          version_number?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          job_id?: string
+          status?: Database["public"]["Enums"]["submission_status"]
+          submitted_at?: string
+          submitted_by_user_id?: string | null
+          summary_note?: string | null
+          updated_at?: string
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_submissions_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "unified_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_submissions_submitted_by_user_id_fkey"
+            columns: ["submitted_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       jobs: {
         Row: {
           brand_id: string | null
@@ -1968,6 +2064,71 @@ export type Database = {
           view?: string
         }
         Relationships: []
+      }
+      notifications: {
+        Row: {
+          comment_id: string | null
+          created_at: string
+          id: string
+          job_id: string | null
+          metadata: Json | null
+          read_at: string | null
+          submission_id: string | null
+          type: Database["public"]["Enums"]["notification_type"]
+          user_id: string
+        }
+        Insert: {
+          comment_id?: string | null
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          metadata?: Json | null
+          read_at?: string | null
+          submission_id?: string | null
+          type: Database["public"]["Enums"]["notification_type"]
+          user_id: string
+        }
+        Update: {
+          comment_id?: string | null
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          metadata?: Json | null
+          read_at?: string | null
+          submission_id?: string | null
+          type?: Database["public"]["Enums"]["notification_type"]
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_comment_id_fkey"
+            columns: ["comment_id"]
+            isOneToOne: false
+            referencedRelation: "review_comments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "unified_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "job_submissions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       outputs: {
         Row: {
@@ -2400,6 +2561,100 @@ export type Database = {
           },
         ]
       }
+      review_comments: {
+        Row: {
+          author_user_id: string | null
+          body: string
+          created_at: string
+          id: string
+          read_by: Json | null
+          thread_id: string
+          visibility: Database["public"]["Enums"]["comment_visibility"]
+        }
+        Insert: {
+          author_user_id?: string | null
+          body: string
+          created_at?: string
+          id?: string
+          read_by?: Json | null
+          thread_id: string
+          visibility?: Database["public"]["Enums"]["comment_visibility"]
+        }
+        Update: {
+          author_user_id?: string | null
+          body?: string
+          created_at?: string
+          id?: string
+          read_by?: Json | null
+          thread_id?: string
+          visibility?: Database["public"]["Enums"]["comment_visibility"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "review_comments_author_user_id_fkey"
+            columns: ["author_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "review_comments_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "review_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      review_threads: {
+        Row: {
+          annotation_id: string | null
+          asset_id: string | null
+          created_at: string
+          id: string
+          scope: string
+          submission_id: string
+        }
+        Insert: {
+          annotation_id?: string | null
+          asset_id?: string | null
+          created_at?: string
+          id?: string
+          scope?: string
+          submission_id: string
+        }
+        Update: {
+          annotation_id?: string | null
+          asset_id?: string | null
+          created_at?: string
+          id?: string
+          scope?: string
+          submission_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_review_threads_annotation"
+            columns: ["annotation_id"]
+            isOneToOne: false
+            referencedRelation: "image_annotations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "review_threads_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "submission_assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "review_threads_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "job_submissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scrape_jobs: {
         Row: {
           brand_id: string
@@ -2443,6 +2698,51 @@ export type Database = {
             columns: ["brand_id"]
             isOneToOne: false
             referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      submission_assets: {
+        Row: {
+          created_at: string
+          file_url: string | null
+          id: string
+          job_output_id: string | null
+          label: string | null
+          sort_index: number
+          submission_id: string
+        }
+        Insert: {
+          created_at?: string
+          file_url?: string | null
+          id?: string
+          job_output_id?: string | null
+          label?: string | null
+          sort_index?: number
+          submission_id: string
+        }
+        Update: {
+          created_at?: string
+          file_url?: string | null
+          id?: string
+          job_output_id?: string | null
+          label?: string | null
+          sort_index?: number
+          submission_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "submission_assets_job_output_id_fkey"
+            columns: ["job_output_id"]
+            isOneToOne: false
+            referencedRelation: "job_outputs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "submission_assets_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "job_submissions"
             referencedColumns: ["id"]
           },
         ]
@@ -2739,6 +3039,7 @@ export type Database = {
       is_internal_user: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
+      annotation_shape: "RECT"
       app_role: "admin" | "internal" | "freelancer" | "client"
       artifact_type:
         | "LOOK_SOURCE"
@@ -2755,6 +3056,7 @@ export type Database = {
         | "LOOK_ORIGINAL_FRONT"
         | "LOOK_ORIGINAL_SIDE"
         | "LOOK_ORIGINAL_BACK"
+      comment_visibility: "SHARED" | "INTERNAL_ONLY"
       job_status:
         | "OPEN"
         | "ASSIGNED"
@@ -2767,6 +3069,12 @@ export type Database = {
         | "PHOTOSHOP_FACE_APPLY"
         | "RETOUCH_FINAL"
         | "FOUNDATION_FACE_REPLACE"
+      notification_type:
+        | "JOB_SUBMITTED"
+        | "COMMENT_MENTION"
+        | "CHANGES_REQUESTED"
+        | "JOB_APPROVED"
+        | "COMMENT_REPLY"
       pipeline_job_status:
         | "QUEUED"
         | "RUNNING"
@@ -2784,6 +3092,11 @@ export type Database = {
         | "CROP_GENERATION"
         | "ORGANIZE_IMAGES"
         | "OTHER"
+      submission_status:
+        | "SUBMITTED"
+        | "IN_REVIEW"
+        | "CHANGES_REQUESTED"
+        | "APPROVED"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2911,6 +3224,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      annotation_shape: ["RECT"],
       app_role: ["admin", "internal", "freelancer", "client"],
       artifact_type: [
         "LOOK_SOURCE",
@@ -2928,6 +3242,7 @@ export const Constants = {
         "LOOK_ORIGINAL_SIDE",
         "LOOK_ORIGINAL_BACK",
       ],
+      comment_visibility: ["SHARED", "INTERNAL_ONLY"],
       job_status: [
         "OPEN",
         "ASSIGNED",
@@ -2941,6 +3256,13 @@ export const Constants = {
         "PHOTOSHOP_FACE_APPLY",
         "RETOUCH_FINAL",
         "FOUNDATION_FACE_REPLACE",
+      ],
+      notification_type: [
+        "JOB_SUBMITTED",
+        "COMMENT_MENTION",
+        "CHANGES_REQUESTED",
+        "JOB_APPROVED",
+        "COMMENT_REPLY",
       ],
       pipeline_job_status: [
         "QUEUED",
@@ -2960,6 +3282,12 @@ export const Constants = {
         "CROP_GENERATION",
         "ORGANIZE_IMAGES",
         "OTHER",
+      ],
+      submission_status: [
+        "SUBMITTED",
+        "IN_REVIEW",
+        "CHANGES_REQUESTED",
+        "APPROVED",
       ],
     },
   },
