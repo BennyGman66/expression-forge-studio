@@ -152,37 +152,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     imageViewerRef.current?.scrollToAnnotation(annotationId);
   }, []);
 
-  // Backfill legacy jobs that were SUBMITTED before the review system
-  useEffect(() => {
-    const backfillSubmission = async () => {
-      if (!job || submissions.length > 0 || jobLoading || isBackfilling) return;
-      if (job.status !== 'SUBMITTED' && job.status !== 'NEEDS_CHANGES') return;
-      if (jobOutputs.length === 0) return;
-      
-      setIsBackfilling(true);
-      try {
-        const assets = jobOutputs.map((output, index) => ({
-          fileUrl: output.file_url || '',
-          label: output.label || `Output ${index + 1}`,
-          sortIndex: index,
-        }));
-        
-        await createSubmission.mutateAsync({
-          jobId,
-          assets,
-          summaryNote: 'Auto-created from legacy submission',
-        });
-        
-        await refetchSubmissions();
-      } catch (error) {
-        console.error('Failed to backfill submission:', error);
-      } finally {
-        setIsBackfilling(false);
-      }
-    };
-    
-    backfillSubmission();
-  }, [job, submissions.length, jobLoading, jobOutputs, jobId]);
+  // No auto-backfill - submissions are only created when freelancer explicitly submits
 
   // Auto-select first submission and asset
   useEffect(() => {
