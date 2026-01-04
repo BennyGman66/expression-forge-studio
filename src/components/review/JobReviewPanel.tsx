@@ -540,10 +540,9 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
         <AlertDialog open={showChangesDialog} onOpenChange={setShowChangesDialog}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Request Changes for {selectedAsset?.label || 'Asset'}</AlertDialogTitle>
+              <AlertDialogTitle>Request Changes</AlertDialogTitle>
               <AlertDialogDescription>
-                The freelancer will be notified that this specific asset needs changes.
-                Add a note about what needs to be fixed:
+                Add a note describing what needs to be fixed:
               </AlertDialogDescription>
             </AlertDialogHeader>
             <Textarea
@@ -568,12 +567,12 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
         <AlertDialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Approve {selectedAsset?.label || 'Asset'}</AlertDialogTitle>
+              <AlertDialogTitle>Approve Asset</AlertDialogTitle>
               <AlertDialogDescription>
                 {reviewProgress.pending === 1 && reviewProgress.changesRequested === 0 ? (
                   "This is the last asset. Approving it will complete the entire job."
                 ) : (
-                  `This will mark ${selectedAsset?.label || 'this asset'} as approved. ${reviewProgress.pending - 1} more to review.`
+                  `${reviewProgress.pending - 1} more asset${reviewProgress.pending - 1 === 1 ? '' : 's'} to review after this.`
                 )}
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -584,7 +583,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                 disabled={updateAssetStatus.isPending}
                 className="bg-green-600 hover:bg-green-700"
               >
-                Approve {selectedAsset?.label || 'Asset'}
+                Approve
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
