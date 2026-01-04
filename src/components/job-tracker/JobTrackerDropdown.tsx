@@ -19,7 +19,7 @@ export function JobTrackerDropdown({ activeJobs, recentJobs }: JobTrackerDropdow
 
   return (
     <>
-      <div className="w-80 max-h-[480px] flex flex-col">
+      <div className="w-80 max-h-[480px] flex flex-col bg-popover">
         <ScrollArea className="flex-1">
           {isEmpty && (
             <div className="p-6 text-center text-muted-foreground">

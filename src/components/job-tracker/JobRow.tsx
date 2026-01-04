@@ -46,15 +46,13 @@ export function JobRow({ job, onOpenDetail }: JobRowProps) {
       className="p-3 hover:bg-muted/50 cursor-pointer transition-colors border-b last:border-b-0"
       onClick={() => onOpenDetail?.(job)}
     >
-      <div className="flex items-start justify-between gap-2 mb-1.5">
-        <div className="flex items-center gap-2 min-w-0">
-          <JobTypeBadge type={job.type} />
-          <span className="text-sm font-medium truncate">{job.title}</span>
-        </div>
-        <Badge variant={statusConfig.variant} className="text-[10px] shrink-0">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <JobTypeBadge type={job.type} />
+        <Badge variant={statusConfig.variant} className="text-[10px] px-2">
           {statusConfig.label}
         </Badge>
       </div>
+      <p className="text-sm font-medium truncate mb-1.5">{job.title}</p>
       
       {isActive && (
         <div className="mb-2">
