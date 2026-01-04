@@ -476,6 +476,7 @@ export default function FreelancerJobDetail() {
               jobId={jobId!}
               versionNumber={latestSubmission.version_number}
               instructions={job.instructions || undefined}
+              inputs={inputs}
               onReplacementsChange={handleReplacementsReady}
               onResubmit={handleResubmit}
               isResubmitting={uploading || createResubmission.isPending}

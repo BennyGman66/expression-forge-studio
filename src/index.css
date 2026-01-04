@@ -246,6 +246,30 @@
     to { opacity: 1; }
   }
 
+  .animate-flash-highlight {
+    animation: flashHighlight 0.6s ease-out;
+  }
+
+  @keyframes flashHighlight {
+    0% { 
+      background-color: rgba(250, 204, 21, 0.7);
+      box-shadow: 0 0 20px rgba(250, 204, 21, 0.8);
+    }
+    100% { 
+      background-color: transparent;
+      box-shadow: none;
+    }
+  }
+
+  .animate-flash-comment {
+    animation: flashComment 0.6s ease-out;
+  }
+
+  @keyframes flashComment {
+    0% { background-color: hsl(var(--primary) / 0.4); }
+    100% { background-color: transparent; }
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted)) transparent;
