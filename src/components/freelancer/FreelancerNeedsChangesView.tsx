@@ -128,53 +128,61 @@ export function FreelancerNeedsChangesView({
     }));
   }, [annotations, threads]);
 
-  // Filter threads for this asset (SHARED comments OR annotation-only threads)
-  const assetThreads = useMemo(() => {
+  // Get ALL threads for the entire submission (not just selected asset) - Frame.io style
+  const allThreads = useMemo(() => {
     return threads
-      .filter(t => t.asset_id === selectedAsset?.id)
       .map(thread => ({
         ...thread,
         comments: thread.comments?.filter(c => c.visibility === 'SHARED'),
       }))
-      // Include if has comments OR has an annotation (visual feedback without text)
+      // Include if has comments OR has an annotation (visual feedback)
       .filter(t => (t.comments?.length || 0) > 0 || t.annotation_id);
-  }, [threads, selectedAsset?.id]);
+  }, [threads]);
 
-  // Separate annotation-only threads (no text comments but have visual markers)
-  const annotationOnlyThreads = useMemo(() => {
-    return assetThreads.filter(t => 
-      t.annotation_id && (!t.comments || t.comments.length === 0)
-    );
-  }, [assetThreads]);
-
-  // Build flat comment list for selected asset (chronological)
-  const assetComments = useMemo(() => {
-    const comments: Array<{
-      comment: NonNullable<ReviewThread['comments']>[0];
+  // Build flat list of ALL feedback items across ALL assets (chronological)
+  const allFeedbackItems = useMemo(() => {
+    const items: Array<{
+      type: 'comment' | 'annotation-only';
+      comment?: NonNullable<ReviewThread['comments']>[0];
       thread: ReviewThread;
-      annotationIndex: number | null;
+      assetId: string | null;
+      assetLabel: string | null;
       annotationId: string | null;
     }> = [];
 
-    assetThreads.forEach(thread => {
-      const annotationIndex = thread.annotation_id 
-        ? enrichedAnnotations.findIndex(a => a.id === thread.annotation_id)
-        : null;
-
-      thread.comments?.forEach(comment => {
-        comments.push({
-          comment,
-          thread,
-          annotationIndex: annotationIndex !== null && annotationIndex >= 0 ? annotationIndex : null,
-          annotationId: thread.annotation_id || null,
+    allThreads.forEach(thread => {
+      const asset = assets.find(a => a.id === thread.asset_id);
+      
+      if (thread.comments && thread.comments.length > 0) {
+        // Threads with actual text comments
+        thread.comments.forEach(comment => {
+          items.push({
+            type: 'comment',
+            comment,
+            thread,
+            assetId: thread.asset_id,
+            assetLabel: asset?.label || 'Untitled',
+            annotationId: thread.annotation_id || null,
+          });
         });
-      });
+      } else if (thread.annotation_id) {
+        // Annotation-only threads (no text but has visual marker)
+        items.push({
+          type: 'annotation-only',
+          thread,
+          assetId: thread.asset_id,
+          assetLabel: asset?.label || 'Untitled',
+          annotationId: thread.annotation_id,
+        });
+      }
     });
 
-    return comments.sort((a, b) => 
-      new Date(a.comment.created_at).getTime() - new Date(b.comment.created_at).getTime()
-    );
-  }, [assetThreads, enrichedAnnotations]);
+    return items.sort((a, b) => {
+      const aTime = a.comment?.created_at || a.thread.created_at;
+      const bTime = b.comment?.created_at || b.thread.created_at;
+      return new Date(aTime).getTime() - new Date(bTime).getTime();
+    });
+  }, [allThreads, assets]);
 
   // Assets needing replacement
   const assetsNeedingReplacement = useMemo(() => {
@@ -208,12 +216,20 @@ export function FreelancerNeedsChangesView({
     setSelectedAnnotationId(annotationId);
   }, []);
 
-  const handleJumpToAnnotation = useCallback((annotationId: string) => {
+  // Jump to annotation - can switch assets if needed
+  const handleJumpToAnnotation = useCallback((annotationId: string, targetAssetId?: string | null) => {
+    // If annotation is on a different asset, switch to it first
+    if (targetAssetId && targetAssetId !== selectedAssetId) {
+      setSelectedAssetId(targetAssetId);
+    }
     setSelectedAnnotationId(annotationId);
     setFlashingAnnotationId(annotationId);
     setTimeout(() => setFlashingAnnotationId(null), 600);
-    imageViewerRef.current?.scrollToAnnotation(annotationId);
-  }, []);
+    // Only scroll if on same asset (otherwise image isn't loaded yet)
+    if (!targetAssetId || targetAssetId === selectedAssetId) {
+      imageViewerRef.current?.scrollToAnnotation(annotationId);
+    }
+  }, [selectedAssetId]);
 
   // Handle file replacement
   const handleReplaceFile = (assetId: string, file: File) => {
@@ -242,7 +258,7 @@ export function FreelancerNeedsChangesView({
   };
 
   // Send reply to selected annotation's thread
-  const selectedAnnotationThread = assetThreads.find(t => t.annotation_id === selectedAnnotationId);
+  const selectedAnnotationThread = allThreads.find(t => t.annotation_id === selectedAnnotationId);
   
   const handleSendReply = async () => {
     if (!replyText.trim() || !selectedAnnotationThread) return;
@@ -349,21 +365,9 @@ export function FreelancerNeedsChangesView({
           <div className="px-4 py-2 border-b border-border flex items-center justify-between bg-muted/30">
             <div className="flex items-center gap-2">
               <span className="font-medium text-sm">{selectedAsset?.label || 'Asset'}</span>
-              <span className="text-muted-foreground text-sm">—</span>
-              {selectedAsset?.review_status === 'CHANGES_REQUESTED' ? (
-                <Badge className="bg-orange-500/20 text-orange-400 text-xs">
-                  Needs Changes
-                </Badge>
-              ) : selectedAsset?.review_status === 'APPROVED' ? (
-                <Badge className="bg-green-500/20 text-green-400 text-xs">
-                  Approved
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-xs">Pending</Badge>
-              )}
               {selectedAssetCommentCount > 0 && (
                 <span className="text-xs text-muted-foreground">
-                  ({selectedAssetCommentCount} comment{selectedAssetCommentCount !== 1 ? 's' : ''})
+                  {selectedAssetCommentCount} annotation{selectedAssetCommentCount !== 1 ? 's' : ''}
                 </span>
               )}
             </div>
@@ -434,211 +438,209 @@ export function FreelancerNeedsChangesView({
 
         {/* Right: Actions + Comments */}
         <div className="w-72 border rounded-lg border-border flex flex-col bg-card">
-          {/* Actions Panel - Fix Checklist */}
-          <div className="p-4 border-b border-border bg-muted/20">
-            <h4 className="text-xs uppercase tracking-wide text-muted-foreground mb-3">Required Fixes</h4>
-            <div className="space-y-1.5">
-              {assets.map(asset => {
-                const needsChanges = asset.review_status === 'CHANGES_REQUESTED';
-                const isApproved = asset.review_status === 'APPROVED';
-                const assetReplacement = replacements.get(asset.id);
-                const commentCount = getAssetCommentCount(asset.id);
-                
-                return (
-                  <div 
-                    key={asset.id} 
-                    className={cn(
-                      "flex items-center justify-between py-1.5 px-2 rounded text-sm",
-                      needsChanges && !assetReplacement && "bg-orange-500/10",
-                      assetReplacement && "bg-blue-500/10"
-                    )}
-                  >
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      {isApproved ? (
-                        <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                      ) : assetReplacement ? (
-                        <CheckCircle className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                      ) : (
-                        <AlertTriangle className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+          {/* Actions Panel - Fix Checklist - Only show assets that need changes */}
+          {requiredCount > 0 && (
+            <div className="p-3 border-b border-border bg-muted/10">
+              <div className="space-y-1">
+                {assetsNeedingReplacement.map(asset => {
+                  const assetReplacement = replacements.get(asset.id);
+                  const commentCount = getAssetCommentCount(asset.id);
+                  
+                  return (
+                    <div 
+                      key={asset.id} 
+                      className={cn(
+                        "flex items-center justify-between py-1 px-2 rounded text-sm",
+                        assetReplacement ? "bg-blue-500/10" : "bg-orange-500/10"
                       )}
-                      <span className="truncate">{asset.label || 'Untitled'}</span>
-                      {commentCount > 0 && needsChanges && (
-                        <span className="text-xs text-muted-foreground">({commentCount})</span>
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        {assetReplacement ? (
+                          <CheckCircle className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                        )}
+                        <span className="truncate text-xs">{asset.label || 'Untitled'}</span>
+                        {commentCount > 0 && (
+                          <span className="text-[10px] text-muted-foreground">({commentCount})</span>
+                        )}
+                      </div>
+                      
+                      {!assetReplacement && (
+                        <>
+                          <Input
+                            type="file"
+                            accept="image/*,.psd,.ai,.pdf,.tiff"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                handleReplaceFile(asset.id, file);
+                              }
+                              e.target.value = '';
+                            }}
+                            className="hidden"
+                            id={`replace-checklist-${asset.id}`}
+                          />
+                          <Label htmlFor={`replace-checklist-${asset.id}`}>
+                            <Button variant="ghost" size="sm" asChild className="h-5 px-1.5 text-[10px]">
+                              <span>
+                                <Upload className="h-3 w-3 mr-0.5" />
+                                Upload
+                              </span>
+                            </Button>
+                          </Label>
+                        </>
+                      )}
+                      
+                      {assetReplacement && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveReplacement(asset.id)}
+                          className="h-5 px-1.5 text-[10px]"
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
                       )}
                     </div>
-                    
-                    {needsChanges && !assetReplacement && (
-                      <>
-                        <Input
-                          type="file"
-                          accept="image/*,.psd,.ai,.pdf,.tiff"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              handleReplaceFile(asset.id, file);
-                            }
-                            e.target.value = '';
-                          }}
-                          className="hidden"
-                          id={`replace-checklist-${asset.id}`}
-                        />
-                        <Label htmlFor={`replace-checklist-${asset.id}`}>
-                          <Button variant="ghost" size="sm" asChild className="h-6 px-2 text-xs">
-                            <span>
-                              <Upload className="h-3 w-3 mr-1" />
-                              Upload
-                            </span>
-                          </Button>
-                        </Label>
-                      </>
-                    )}
-                    
-                    {assetReplacement && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemoveReplacement(asset.id)}
-                        className="h-6 px-2 text-xs"
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    )}
-                    
-                    {isApproved && (
-                      <span className="text-xs text-green-500">Approved</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            
+                  );
+                })}
+              </div>
             {/* Progress + Resubmit */}
-            <div className="mt-4 pt-3 border-t border-border">
-              <p className="text-xs text-muted-foreground mb-2">
-                {readyCount}/{requiredCount} replacements ready
-              </p>
-              <Button 
-                className="w-full" 
-                disabled={!canResubmit || isResubmitting}
-                onClick={onResubmit}
-              >
-                {isResubmitting ? 'Resubmitting...' : 'Resubmit for Review'}
-              </Button>
-              {!canResubmit && requiredCount > 0 && (
-                <p className="text-[10px] text-muted-foreground text-center mt-1.5">
-                  Replace all flagged assets to resubmit
+              <div className="mt-3 pt-2 border-t border-border">
+                <p className="text-[10px] text-muted-foreground mb-2">
+                  {readyCount}/{requiredCount} replacements ready
                 </p>
-              )}
+                <Button 
+                  className="w-full" 
+                  disabled={!canResubmit || isResubmitting}
+                  onClick={onResubmit}
+                  size="sm"
+                >
+                  {isResubmitting ? 'Resubmitting...' : 'Resubmit for Review'}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Comments Panel */}
+          {/* Comments Panel - Shows ALL feedback from ALL assets */}
           <div className="flex-1 flex flex-col min-h-0">
-            <div className="p-4 border-b border-border/50 flex items-center justify-between">
+            <div className="p-3 border-b border-border/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs uppercase tracking-wide text-muted-foreground">Comments</span>
+                <span className="text-xs uppercase tracking-wide text-muted-foreground">Feedback</span>
               </div>
               <Badge variant="outline" className="text-[10px] h-5">
-                {assetComments.length + annotationOnlyThreads.length}
+                {allFeedbackItems.length}
               </Badge>
             </div>
             
             <ScrollArea className="flex-1">
-              <div className="p-4 space-y-3">
-                {/* Annotation-only threads (visual markers without text) */}
-                {annotationOnlyThreads.map((thread) => {
-                  const annotationIndex = enrichedAnnotations.findIndex(a => a.id === thread.annotation_id);
-                  const isSelected = thread.annotation_id === selectedAnnotationId;
-                  const isFlashing = flashingCommentId === thread.id;
-                  
-                  return (
-                    <div
-                      key={thread.id}
-                      className={cn(
-                        "rounded-lg p-3 transition-colors cursor-pointer border",
-                        isFlashing && "animate-flash-comment",
-                        isSelected 
-                          ? "bg-orange-500/10 border-orange-500/30" 
-                          : "bg-orange-500/5 border-orange-500/20 hover:bg-orange-500/10"
-                      )}
-                      onClick={() => {
-                        if (thread.annotation_id) {
-                          handleJumpToAnnotation(thread.annotation_id);
-                        }
-                      }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Target className="h-4 w-4 text-orange-500" />
-                        <span className="text-sm font-medium text-orange-600 dark:text-orange-400">
-                          Annotation marked for review
-                        </span>
-                        <span className="ml-auto font-mono text-xs text-muted-foreground">
-                          #{annotationIndex + 1}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1.5 pl-6">
-                        Click to view on image
-                      </p>
-                    </div>
-                  );
-                })}
-                
-                {/* Regular comments */}
-                {assetComments.length > 0 ? (
-                  assetComments.map(({ comment, annotationIndex, annotationId }) => {
-                    const isSelected = annotationId === selectedAnnotationId;
-                    const isFlashing = flashingCommentId === comment.id;
+              <div className="p-3 space-y-2">
+                {allFeedbackItems.length > 0 ? (
+                  allFeedbackItems.map((item, idx) => {
+                    const isOnSelectedAsset = item.assetId === selectedAsset?.id;
+                    const annotationIndex = item.annotationId && isOnSelectedAsset
+                      ? enrichedAnnotations.findIndex(a => a.id === item.annotationId)
+                      : null;
+                    const isSelected = item.annotationId === selectedAnnotationId && isOnSelectedAsset;
+                    const isFlashing = item.type === 'comment' 
+                      ? flashingCommentId === item.comment?.id 
+                      : flashingCommentId === item.thread.id;
                     
+                    if (item.type === 'annotation-only') {
+                      // Annotation-only feedback (visual marker without text)
+                      return (
+                        <div
+                          key={item.thread.id}
+                          className={cn(
+                            "rounded-lg p-2.5 transition-colors cursor-pointer border",
+                            isFlashing && "animate-flash-comment",
+                            isSelected 
+                              ? "bg-orange-500/10 border-orange-500/30" 
+                              : "bg-orange-500/5 border-orange-500/20 hover:bg-orange-500/10"
+                          )}
+                          onClick={() => {
+                            if (item.annotationId) {
+                              handleJumpToAnnotation(item.annotationId, item.assetId);
+                            }
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Target className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                            <span className="text-xs font-medium truncate">{item.assetLabel}</span>
+                            {annotationIndex !== null && annotationIndex >= 0 && (
+                              <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                                #{annotationIndex + 1}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-1 pl-5">
+                            Marked for review
+                          </p>
+                        </div>
+                      );
+                    }
+                    
+                    // Regular comment
+                    const comment = item.comment!;
                     return (
                       <div
                         key={comment.id}
                         className={cn(
-                          "rounded-lg p-3 transition-colors cursor-pointer",
+                          "rounded-lg p-2.5 transition-colors cursor-pointer",
                           isFlashing && "animate-flash-comment",
                           isSelected ? "bg-primary/10" : "hover:bg-muted/50"
                         )}
                         onClick={() => {
-                          if (annotationId) {
-                            handleJumpToAnnotation(annotationId);
+                          if (item.annotationId) {
+                            handleJumpToAnnotation(item.annotationId, item.assetId);
                           }
                         }}
                       >
+                        {/* Asset label as subtle header when not on selected asset */}
+                        {!isOnSelectedAsset && (
+                          <div className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1">
+                            <span className="font-medium">{item.assetLabel}</span>
+                            {item.annotationId && <Target className="h-2.5 w-2.5" />}
+                          </div>
+                        )}
+                        
                         <div className="flex items-center gap-2">
-                          <Avatar className="h-5 w-5 shrink-0">
-                            <AvatarFallback className="text-[9px]">
+                          <Avatar className="h-4 w-4 shrink-0">
+                            <AvatarFallback className="text-[8px]">
                               {comment.author?.display_name?.slice(0, 2).toUpperCase() ||
                                 comment.author?.email?.slice(0, 2).toUpperCase() ||
                                 '??'}
                             </AvatarFallback>
                           </Avatar>
-                          <span className="text-xs font-medium truncate">
+                          <span className="text-[11px] font-medium truncate">
                             {comment.author?.display_name || comment.author?.email?.split('@')[0] || 'Reviewer'}
                           </span>
                           <span className="text-[10px] text-muted-foreground">
                             {format(new Date(comment.created_at), 'MMM d')}
                           </span>
                           
-                          {annotationIndex !== null && (
-                            <div className="ml-auto flex items-center gap-0.5 text-xs text-muted-foreground">
+                          {isOnSelectedAsset && annotationIndex !== null && annotationIndex >= 0 && (
+                            <div className="ml-auto flex items-center gap-0.5 text-[10px] text-muted-foreground">
                               <span className="font-mono">#{annotationIndex + 1}</span>
-                              <Target className="h-3 w-3" />
+                              <Target className="h-2.5 w-2.5" />
                             </div>
                           )}
                         </div>
                         
-                        <p className="text-sm mt-1.5 pl-7 text-foreground/90">
+                        <p className="text-xs mt-1 pl-6 text-foreground/90">
                           {comment.body}
                         </p>
                       </div>
                     );
                   })
-                ) : annotationOnlyThreads.length === 0 ? (
+                ) : (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     <MessageSquare className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                    <p>No comments on this asset</p>
+                    <p>No feedback yet</p>
                   </div>
-                ) : null}
+                )}
               </div>
             </ScrollArea>
             
