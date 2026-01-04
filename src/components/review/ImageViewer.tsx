@@ -66,7 +66,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
     const handleZoomIn = () => setZoom(prev => Math.min(prev * 1.25, 5));
     const handleZoomOut = () => setZoom(prev => Math.max(prev / 1.25, 0.25));
 
-    // True fit-to-screen calculation - prioritize filling the viewport
+    // Fit entire image in viewport - no cropping
     const handleFit = useCallback(() => {
       if (!containerRef.current || !imageDimensions.width) {
         setZoom(1);
@@ -75,31 +75,18 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       }
       
       const container = containerRef.current.getBoundingClientRect();
-      const padding = 24; // Reduced padding for more image visibility
+      const padding = 16; // Minimal padding
       const availableWidth = container.width - padding;
       const availableHeight = container.height - padding;
       
-      const aspectRatio = imageDimensions.width / imageDimensions.height;
-      const isPortrait = aspectRatio < 0.85;
+      // Always use the smaller ratio to ensure full image fits
+      const fitZoom = Math.min(
+        availableWidth / imageDimensions.width,
+        availableHeight / imageDimensions.height
+      );
       
-      let fitZoom;
-      if (isPortrait) {
-        // For portrait images (like fashion photos), prioritize height fit
-        fitZoom = Math.min(
-          availableHeight / imageDimensions.height,
-          availableWidth / imageDimensions.width,
-          3.5 // Allow up to 350% for portraits
-        );
-      } else {
-        fitZoom = Math.min(
-          availableWidth / imageDimensions.width,
-          availableHeight / imageDimensions.height,
-          3 // Allow up to 300% for landscape/square
-        );
-      }
-      
-      // Use at least 0.6 zoom to avoid tiny images
-      setZoom(Math.max(fitZoom, 0.6));
+      // No minimum floor - let it be as small as needed to show full image
+      setZoom(fitZoom);
       setPan({ x: 0, y: 0 });
     }, [imageDimensions]);
 
