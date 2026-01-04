@@ -6,24 +6,27 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const CLASSIFICATION_PROMPT = `Analyze this grey clay model image and determine which pose slot it belongs to.
+const CLASSIFICATION_PROMPT = `Analyze this product/fashion image and classify it.
 
-SLOT DEFINITIONS:
-- A (Full Front): Full body visible from head to feet, front-facing view
-- B (Cropped Front): Upper body only (waist/hip up), front-facing, legs NOT visible
-- C (Full Back): Full body visible from head to feet, back view
-- D (Detail): Close-up detail shot, typically showing specific body parts or tight crop
+FIRST, determine if this image should be DELETED:
+- Is this a photo of a CHILD (anyone who appears under 18)? → DELETE
+- Is this a PRODUCT-ONLY shot with NO PERSON visible (flat lay, just clothing/accessories on a surface or mannequin)? → DELETE
 
-ANALYSIS CRITERIA:
-1. Can you see the full body from head to feet? If YES → A or C
-2. Is it a front view or back view?
-   - Front (face visible) → A if full body, B if cropped
-   - Back (back of head visible) → C
-3. Is it cropped at waist/hip level showing only upper body? → B
-4. Is it a close-up or very tight crop of specific area? → D
+IF the image should be kept (adult model visible), classify into the correct SLOT:
+- A (Full Front): Full body visible from head to at least mid-thigh/knees, FRONT-facing view (face visible)
+- B (Cropped Front): Upper body only (waist up), FRONT-facing, legs NOT fully visible, OR 3/4 angle views
+- C (Full Back): Full body visible from head to at least mid-thigh/knees, BACK view (back of head visible)
+- D (Detail): Close-up/detail shot, OR side profile, OR very tight crop showing specific body parts
 
-Respond with ONLY a single letter: A, B, C, or D
-Do not include any explanation.`;
+RESPONSE FORMAT (exactly one of):
+DELETE_CHILD - if showing a child/minor
+DELETE_PRODUCT - if product-only with no person
+A - Full front body shot
+B - Cropped front / upper body
+C - Full back body shot
+D - Detail / close-up / side profile
+
+Respond with ONLY the classification code, nothing else.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -39,39 +42,37 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch clay images with their current slots
+    // Fetch product images (not clay) for the brand
     let query = supabase
-      .from("clay_images")
+      .from("product_images")
       .select(`
         id,
+        source_url,
         stored_url,
-        product_image_id,
-        product_images!inner (
+        slot,
+        products!inner (
           id,
-          slot,
-          products!inner (
-            brand_id
-          )
+          brand_id
         )
       `);
 
     if (brandId) {
-      query = query.eq("product_images.products.brand_id", brandId);
+      query = query.eq("products.brand_id", brandId);
     }
 
-    const { data: clayImages, error: fetchError } = await query;
+    const { data: productImages, error: fetchError } = await query;
 
     if (fetchError) {
-      console.error("Failed to fetch clay images:", fetchError);
+      console.error("Failed to fetch product images:", fetchError);
       return new Response(
-        JSON.stringify({ error: "Failed to fetch clay images" }),
+        JSON.stringify({ error: "Failed to fetch product images" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    if (!clayImages || clayImages.length === 0) {
+    if (!productImages || productImages.length === 0) {
       return new Response(
-        JSON.stringify({ success: true, total: 0, message: "No clay images to check" }),
+        JSON.stringify({ success: true, total: 0, message: "No images to organize" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -81,10 +82,10 @@ serve(async (req) => {
       .from("jobs")
       .insert({
         brand_id: brandId,
-        type: "clay_pose_check",
+        type: "ava_organize",
         status: "processing",
         progress: 0,
-        total: clayImages.length,
+        total: productImages.length,
       })
       .select()
       .single();
@@ -97,18 +98,18 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Created job ${job.id} for checking ${clayImages.length} clay poses`);
+    console.log(`Created job ${job.id} for organizing ${productImages.length} images`);
 
     // Process in background
-    (globalThis as any).EdgeRuntime?.waitUntil?.(processClayPoses(supabase, job.id, clayImages, lovableApiKey)) 
-      ?? processClayPoses(supabase, job.id, clayImages, lovableApiKey);
+    (globalThis as any).EdgeRuntime?.waitUntil?.(processImages(supabase, job.id, productImages, lovableApiKey)) 
+      ?? processImages(supabase, job.id, productImages, lovableApiKey);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         jobId: job.id,
-        total: clayImages.length,
-        message: `Started checking ${clayImages.length} clay poses` 
+        total: productImages.length,
+        message: `Started organizing ${productImages.length} images` 
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
@@ -122,7 +123,7 @@ serve(async (req) => {
   }
 });
 
-async function classifyPoseSlot(imageUrl: string, lovableApiKey: string): Promise<string | null> {
+async function classifyImage(imageUrl: string, lovableApiKey: string): Promise<string | null> {
   try {
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -152,12 +153,15 @@ async function classifyPoseSlot(imageUrl: string, lovableApiKey: string): Promis
     const data = await response.json();
     const result = (data.choices?.[0]?.message?.content || "").trim().toUpperCase();
     
-    // Validate the result is a valid slot
-    if (["A", "B", "C", "D"].includes(result)) {
+    // Check for valid responses
+    if (["A", "B", "C", "D", "DELETE_CHILD", "DELETE_PRODUCT"].includes(result)) {
       return result;
     }
     
     // Try to extract from longer response
+    if (result.includes("DELETE_CHILD")) return "DELETE_CHILD";
+    if (result.includes("DELETE_PRODUCT")) return "DELETE_PRODUCT";
+    
     const match = result.match(/^([ABCD])/);
     return match ? match[1] : null;
   } catch (error) {
@@ -166,49 +170,62 @@ async function classifyPoseSlot(imageUrl: string, lovableApiKey: string): Promis
   }
 }
 
-async function processClayPoses(supabase: any, jobId: string, clayImages: any[], lovableApiKey: string) {
-  console.log(`Processing ${clayImages.length} clay poses for slot verification`);
+async function processImages(supabase: any, jobId: string, images: any[], lovableApiKey: string) {
+  console.log(`Processing ${images.length} images for AVA organize`);
   let processed = 0;
   let movedCount = 0;
-  let flaggedCount = 0;
+  let deletedCount = 0;
+  let keptCount = 0;
 
-  for (let i = 0; i < clayImages.length; i++) {
-    const clay = clayImages[i];
-    const currentSlot = clay.product_images?.slot;
-    const productImageId = clay.product_images?.id;
+  for (let i = 0; i < images.length; i++) {
+    const img = images[i];
+    const imageUrl = img.stored_url || img.source_url;
+    const currentSlot = img.slot;
 
-    console.log(`[${i + 1}/${clayImages.length}] Checking clay pose ${clay.id}, current slot: ${currentSlot}`);
+    console.log(`[${i + 1}/${images.length}] Analyzing image ${img.id}, current slot: ${currentSlot}`);
 
     try {
-      const suggestedSlot = await classifyPoseSlot(clay.stored_url, lovableApiKey);
+      const classification = await classifyImage(imageUrl, lovableApiKey);
       
-      if (suggestedSlot && suggestedSlot !== currentSlot) {
-        console.log(`[${clay.id}] Slot mismatch: current=${currentSlot}, suggested=${suggestedSlot}`);
+      if (!classification) {
+        console.log(`[${img.id}] Could not classify, keeping as-is`);
+        keptCount++;
+      } else if (classification.startsWith("DELETE")) {
+        const reason = classification === "DELETE_CHILD" ? "child photo" : "product-only";
+        console.log(`[${img.id}] Deleting: ${reason}`);
         
-        // Auto-move to correct slot
+        // Delete associated clay image first
+        await supabase.from("clay_images").delete().eq("product_image_id", img.id);
+        // Delete the product image
+        await supabase.from("product_images").delete().eq("id", img.id);
+        deletedCount++;
+      } else if (classification !== currentSlot) {
+        console.log(`[${img.id}] Moving from ${currentSlot} to ${classification}`);
+        
         const { error: updateError } = await supabase
           .from("product_images")
-          .update({ slot: suggestedSlot })
-          .eq("id", productImageId);
+          .update({ slot: classification })
+          .eq("id", img.id);
 
         if (updateError) {
-          console.error(`Failed to update slot for ${productImageId}:`, updateError);
-          flaggedCount++;
+          console.error(`Failed to update slot for ${img.id}:`, updateError);
         } else {
-          console.log(`[${clay.id}] Moved from ${currentSlot} to ${suggestedSlot}`);
           movedCount++;
         }
+      } else {
+        console.log(`[${img.id}] Already correct slot: ${currentSlot}`);
+        keptCount++;
       }
 
       processed++;
-      await updateJobProgress(supabase, jobId, processed, clayImages.length);
+      await updateJobProgress(supabase, jobId, processed, images.length);
 
       // Small delay to avoid rate limiting
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 300));
     } catch (error) {
-      console.error(`Error processing ${clay.id}:`, error);
+      console.error(`Error processing ${img.id}:`, error);
       processed++;
-      await updateJobProgress(supabase, jobId, processed, clayImages.length);
+      await updateJobProgress(supabase, jobId, processed, images.length);
     }
   }
 
@@ -217,12 +234,12 @@ async function processClayPoses(supabase: any, jobId: string, clayImages: any[],
     .from("jobs")
     .update({ 
       status: "completed", 
-      result: { moved: movedCount, flagged: flaggedCount },
+      result: { moved: movedCount, deleted: deletedCount, kept: keptCount },
       updated_at: new Date().toISOString() 
     })
     .eq("id", jobId);
 
-  console.log(`Clay pose check complete. Moved: ${movedCount}, Flagged: ${flaggedCount}`);
+  console.log(`AVA organize complete. Moved: ${movedCount}, Deleted: ${deletedCount}, Kept: ${keptCount}`);
 }
 
 async function updateJobProgress(supabase: any, jobId: string, progress: number, total: number) {

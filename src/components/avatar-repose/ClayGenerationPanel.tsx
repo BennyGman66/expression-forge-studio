@@ -239,7 +239,7 @@ export function ClayGenerationPanel() {
     setIsOrganizing(true);
     setOrganizeProgress({ current: 0, total: 0 });
     try {
-      const { data, error } = await supabase.functions.invoke("organize-images", { body: { brandId: selectedBrand } });
+      const { data, error } = await supabase.functions.invoke("organize-clay-poses", { body: { brandId: selectedBrand } });
       if (error) throw error;
       if (data.total > 0) {
         setOrganizeJobId(data.jobId);
@@ -419,56 +419,66 @@ export function ClayGenerationPanel() {
         </div>
       )}
 
-      {/* Dense Image Grid */}
-      <div className="flex-1 overflow-auto p-3" ref={gridRef}>
+      {/* Dense Image Grid - Grouped by Slot */}
+      <div className="flex-1 overflow-auto p-3 space-y-4" ref={gridRef}>
         {selectedBrand && pendingImages.length > 0 && (
-          <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 xl:grid-cols-14 gap-1.5">
-            {pendingImages.map((img) => {
-              const isSelected = selectedImages.has(img.id);
+          <>
+            {SLOTS.filter((slot) => selectedSlots.has(slot)).map((slot) => {
+              const slotImages = pendingImages.filter((img) => img.slot === slot);
+              if (slotImages.length === 0) return null;
               return (
-                <div
-                  key={img.id}
-                  className={`aspect-[3/4] rounded overflow-hidden relative cursor-pointer group transition-all ${
-                    isSelected ? "ring-2 ring-primary ring-offset-1 scale-[1.02]" : "hover:ring-1 hover:ring-muted-foreground/50"
-                  }`}
-                  onClick={(e) => handleImageClick(img.id, e)}
-                >
-                  {img.stored_url ? (
-                    <img src={img.stored_url} alt="" className="w-full h-full object-cover" loading="lazy" />
-                  ) : (
-                    <div className="w-full h-full bg-muted flex items-center justify-center">
-                      <ImageIcon className="w-4 h-4 text-muted-foreground" />
-                    </div>
-                  )}
-
-                  {/* Slot Badge */}
-                  <Badge
-                    variant="secondary"
-                    className="absolute bottom-1 left-1 text-[10px] px-1 py-0 h-4 bg-background/80 backdrop-blur"
-                  >
-                    {img.slot}
-                  </Badge>
-
-                  {/* Selection Checkbox */}
-                  <div
-                    className={`absolute top-1 left-1 w-5 h-5 rounded flex items-center justify-center transition-opacity ${
-                      isSelected ? "opacity-100 bg-primary text-primary-foreground" : "opacity-0 group-hover:opacity-100 bg-background/80 border"
-                    }`}
-                  >
-                    {isSelected && <Check className="w-3 h-3" />}
+                <div key={slot}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge variant="outline" className="text-xs font-semibold">
+                      {slot}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {SLOT_LABELS[slot]} · {slotImages.length}
+                    </span>
                   </div>
+                  <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 xl:grid-cols-14 gap-1.5">
+                    {slotImages.map((img) => {
+                      const isSelected = selectedImages.has(img.id);
+                      return (
+                        <div
+                          key={img.id}
+                          className={`aspect-[3/4] rounded overflow-hidden relative cursor-pointer group transition-all ${
+                            isSelected ? "ring-2 ring-primary ring-offset-1 scale-[1.02]" : "hover:ring-1 hover:ring-muted-foreground/50"
+                          }`}
+                          onClick={(e) => handleImageClick(img.id, e)}
+                        >
+                          {img.stored_url ? (
+                            <img src={img.stored_url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          ) : (
+                            <div className="w-full h-full bg-muted flex items-center justify-center">
+                              <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                            </div>
+                          )}
 
-                  {/* Delete on Hover */}
-                  <button
-                    onClick={(e) => handleDeleteImage(img.id, e)}
-                    className="absolute top-1 right-1 w-5 h-5 rounded bg-destructive/80 text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
+                          {/* Selection Checkbox */}
+                          <div
+                            className={`absolute top-1 left-1 w-5 h-5 rounded flex items-center justify-center transition-opacity ${
+                              isSelected ? "opacity-100 bg-primary text-primary-foreground" : "opacity-0 group-hover:opacity-100 bg-background/80 border"
+                            }`}
+                          >
+                            {isSelected && <Check className="w-3 h-3" />}
+                          </div>
+
+                          {/* Delete on Hover */}
+                          <button
+                            onClick={(e) => handleDeleteImage(img.id, e)}
+                            className="absolute top-1 right-1 w-5 h-5 rounded bg-destructive/80 text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
-          </div>
+          </>
         )}
 
         {/* Empty States */}
