@@ -101,49 +101,76 @@ serve(async (req) => {
       );
     }
 
-    const MAX_RETRIES = 2;
+    const MAX_RETRIES = 4;
     let generatedImageUrl: string | null = null;
     let isValid = false;
+    let bestImageUrl: string | null = null; // Store any generated image as fallback
 
     // Try to generate valid clay image with retries
     for (let attempt = 1; attempt <= MAX_RETRIES && !isValid; attempt++) {
-      const useReinforced = attempt > 1;
+      const useReinforced = attempt > 2; // Use reinforced prompt on attempts 3+
       console.log(`[${imageId}] Attempt ${attempt}/${MAX_RETRIES} (reinforced: ${useReinforced})`);
 
       try {
-        generatedImageUrl = await generateClayImage(imageUrl, lovableApiKey, selectedModel, useReinforced);
+        const attemptUrl = await generateClayImage(imageUrl, lovableApiKey, selectedModel, useReinforced);
 
-        if (!generatedImageUrl) {
+        if (!attemptUrl) {
           console.error(`[${imageId}] No image returned on attempt ${attempt}`);
+          // Wait a bit before retrying
+          await new Promise((r) => setTimeout(r, 2000));
           continue;
         }
 
+        // Store as fallback even if not validated
+        if (!bestImageUrl) {
+          bestImageUrl = attemptUrl;
+        }
+        generatedImageUrl = attemptUrl;
+
         // Validate the generated image
         console.log(`[${imageId}] Validating generated image...`);
-        isValid = await validateClayImage(generatedImageUrl, lovableApiKey);
+        isValid = await validateClayImage(attemptUrl, lovableApiKey);
 
-        if (!isValid) {
-          console.log(`[${imageId}] Validation failed, will retry`);
+        if (isValid) {
+          generatedImageUrl = attemptUrl;
+          console.log(`[${imageId}] Validation passed on attempt ${attempt}`);
+        } else {
+          console.log(`[${imageId}] Validation failed on attempt ${attempt}, will retry`);
+          // Keep the best image as fallback
+          bestImageUrl = attemptUrl;
+          // Wait before retry
+          await new Promise((r) => setTimeout(r, 1500));
         }
       } catch (error: any) {
         if (error.message === "RATE_LIMITED") {
-          console.log(`[${imageId}] Rate limited, waiting 10s...`);
-          await new Promise((r) => setTimeout(r, 10000));
+          console.log(`[${imageId}] Rate limited, waiting 15s...`);
+          await new Promise((r) => setTimeout(r, 15000));
           attempt--; // Don't count rate limit as an attempt
         } else {
-          console.error(`[${imageId}] Generation error:`, error);
-          throw error;
+          console.error(`[${imageId}] Generation error on attempt ${attempt}:`, error);
+          // Wait and continue trying
+          await new Promise((r) => setTimeout(r, 2000));
         }
       }
     }
 
-    if (!generatedImageUrl) {
+    // Use best available image even if validation didn't pass
+    const finalImageUrl = isValid ? generatedImageUrl : (bestImageUrl || generatedImageUrl);
+
+    if (!finalImageUrl) {
       console.error(`[${imageId}] Failed to generate clay after ${MAX_RETRIES} attempts`);
       return new Response(
         JSON.stringify({ error: "Generation failed", imageId }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Log if using unvalidated fallback
+    if (!isValid && finalImageUrl) {
+      console.log(`[${imageId}] Using unvalidated image as fallback`);
+    }
+
+    generatedImageUrl = finalImageUrl;
 
     // Upload to Supabase storage
     const base64Data = generatedImageUrl.replace(/^data:image\/\w+;base64,/, "");
