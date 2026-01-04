@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, forwardRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -375,58 +375,63 @@ export function ThreadPanel({
   );
 }
 
-function CommentBubble({
-  comment,
-  isCurrentUser,
-  isInternal,
-}: {
+interface CommentBubbleProps {
   comment: ReviewComment;
   isCurrentUser: boolean;
   isInternal: boolean;
-}) {
-  const isInternalComment = comment.visibility === 'INTERNAL_ONLY';
+}
 
-  return (
-    <div className={cn(
-      "flex gap-2",
-      isCurrentUser && "flex-row-reverse"
-    )}>
-      <Avatar className="h-7 w-7 shrink-0">
-        <AvatarFallback className="text-[10px]">
-          {comment.author?.display_name?.slice(0, 2).toUpperCase() ||
-            comment.author?.email?.slice(0, 2).toUpperCase() ||
-            '??'}
-        </AvatarFallback>
-      </Avatar>
-      <div className={cn(
-        "flex-1 min-w-0",
-        isCurrentUser && "text-right"
-      )}>
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="text-xs font-medium">
-            {comment.author?.display_name || comment.author?.email || 'Unknown'}
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            {format(new Date(comment.created_at), 'MMM d, h:mm a')}
-          </span>
-          {isInternalComment && isInternal && (
-            <Badge variant="outline" className="text-[9px] h-4 px-1">
-              <Lock className="h-2 w-2 mr-0.5" />
-              Internal
-            </Badge>
-          )}
-        </div>
+const CommentBubble = forwardRef<HTMLDivElement, CommentBubbleProps>(
+  ({ comment, isCurrentUser, isInternal }, ref) => {
+    const isInternalComment = comment.visibility === 'INTERNAL_ONLY';
+
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          "flex gap-2",
+          isCurrentUser && "flex-row-reverse"
+        )}
+      >
+        <Avatar className="h-7 w-7 shrink-0">
+          <AvatarFallback className="text-[10px]">
+            {comment.author?.display_name?.slice(0, 2).toUpperCase() ||
+              comment.author?.email?.slice(0, 2).toUpperCase() ||
+              '??'}
+          </AvatarFallback>
+        </Avatar>
         <div className={cn(
-          "mt-1 p-2 rounded-lg text-sm inline-block max-w-full text-left",
-          isCurrentUser
-            ? "bg-primary text-primary-foreground"
-            : isInternalComment
-              ? "bg-yellow-500/20 border border-yellow-500/30"
-              : "bg-muted"
+          "flex-1 min-w-0",
+          isCurrentUser && "text-right"
         )}>
-          {comment.body}
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-xs font-medium">
+              {comment.author?.display_name || comment.author?.email || 'Unknown'}
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {format(new Date(comment.created_at), 'MMM d, h:mm a')}
+            </span>
+            {isInternalComment && isInternal && (
+              <Badge variant="outline" className="text-[9px] h-4 px-1">
+                <Lock className="h-2 w-2 mr-0.5" />
+                Internal
+              </Badge>
+            )}
+          </div>
+          <div className={cn(
+            "mt-1 p-2 rounded-lg text-sm inline-block max-w-full text-left",
+            isCurrentUser
+              ? "bg-primary text-primary-foreground"
+              : isInternalComment
+                ? "bg-yellow-500/20 border border-yellow-500/30"
+                : "bg-muted"
+          )}>
+            {comment.body}
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+);
+
+CommentBubble.displayName = 'CommentBubble';
