@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -7,11 +7,12 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Palette, Image as ImageIcon, Trash2, CheckCircle2, Sparkles, StopCircle, Check, X as XIcon } from "lucide-react";
+import { Loader2, Palette, Image as ImageIcon, Trash2, CheckCircle2, Sparkles, StopCircle, Check, X as XIcon, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePipelineJobs } from "@/hooks/usePipelineJobs";
 import type { Brand, ProductImage, ClayImage, ImageSlot } from "@/types/avatar-repose";
+import type { PipelineJob } from "@/types/pipeline-jobs";
 
 const SLOTS: ImageSlot[] = ["A", "B", "C", "D"];
 const SLOT_LABELS: Record<ImageSlot, string> = {
@@ -23,7 +24,8 @@ const SLOT_LABELS: Record<ImageSlot, string> = {
 
 export function ClayGenerationPanel() {
   const navigate = useNavigate();
-  const { createJob, updateProgress, setStatus } = usePipelineJobs();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { createJob, updateProgress, setStatus, getJob } = usePipelineJobs();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<string>("");
   const [selectedGender, setSelectedGender] = useState<string>("all");
@@ -42,6 +44,8 @@ export function ClayGenerationPanel() {
   const [selectedModel, setSelectedModel] = useState("google/gemini-2.5-flash-image-preview");
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const [interruptedJob, setInterruptedJob] = useState<PipelineJob | null>(null);
+  const currentJobIdRef = useRef<string | null>(null);
 
   const imageModels = [
     { value: "google/gemini-2.5-flash-image-preview", label: "Flash" },
@@ -126,6 +130,49 @@ export function ClayGenerationPanel() {
     }
   }, [isGenerating]);
 
+  // Check for interrupted jobs on mount or when brand changes
+  useEffect(() => {
+    if (!selectedBrand) return;
+    
+    const checkInterruptedJob = async () => {
+      // Check URL param first
+      const resumeJobId = searchParams.get('resumeJobId');
+      if (resumeJobId) {
+        const job = await getJob(resumeJobId);
+        if (job && job.status === 'RUNNING') {
+          setInterruptedJob(job);
+          // Clear the URL param
+          const newParams = new URLSearchParams(searchParams);
+          newParams.delete('resumeJobId');
+          setSearchParams(newParams, { replace: true });
+          return;
+        }
+      }
+
+      // Check for any running clay generation jobs for this brand
+      const { data: runningJobs } = await supabase
+        .from('pipeline_jobs')
+        .select('*')
+        .eq('type', 'CLAY_GENERATION')
+        .eq('status', 'RUNNING')
+        .order('created_at', { ascending: false });
+      
+      if (runningJobs && runningJobs.length > 0) {
+        // Find one matching our brand
+        const matchingJob = runningJobs.find((j: any) => {
+          const context = j.origin_context as Record<string, unknown>;
+          return context?.brandId === selectedBrand;
+        });
+        
+        if (matchingJob) {
+          setInterruptedJob(matchingJob as PipelineJob);
+        }
+      }
+    };
+    
+    checkInterruptedJob();
+  }, [selectedBrand, searchParams, getJob, setSearchParams]);
+
   // Subscribe to new clay images in real-time
   useEffect(() => {
     if (!selectedBrand) return;
@@ -171,7 +218,7 @@ export function ClayGenerationPanel() {
     setSelectedSlots(next);
   };
 
-  const handleGenerateClay = async () => {
+  const handleGenerateClay = async (resumeJob?: PipelineJob) => {
     const imagesToProcess = pendingImages.filter((img) => img.stored_url);
     if (imagesToProcess.length === 0) {
       toast.error("No new images to process");
@@ -179,31 +226,51 @@ export function ClayGenerationPanel() {
     }
     setIsGenerating(true);
     shouldStopRef.current = false;
-    setProgress({ current: 0, total: imagesToProcess.length });
+    setInterruptedJob(null);
     
     const brandName = brands.find(b => b.id === selectedBrand)?.name || 'Unknown';
     
-    // Create a pipeline job for tracking
-    let jobId: string | null = null;
-    try {
-      jobId = await createJob({
-        type: 'CLAY_GENERATION',
-        title: `Generate Clay - ${brandName}`,
-        total: imagesToProcess.length,
-        origin_route: `/brand-pose-library?tab=clay`,
-        origin_context: { brandId: selectedBrand, brandName, slots: Array.from(selectedSlots) },
-        supports_pause: false,
-        supports_retry: false,
+    // Either resume an existing job or create a new one
+    let jobId: string | null = resumeJob?.id || null;
+    
+    if (resumeJob) {
+      // Resuming - update progress message
+      setProgress({ 
+        current: resumeJob.progress_done, 
+        total: resumeJob.progress_done + imagesToProcess.length 
       });
-    } catch (err) {
-      console.error('Failed to create pipeline job:', err);
+      toast.info(`Resuming clay generation - ${imagesToProcess.length} remaining...`);
+      
+      // Update the job's total to reflect remaining work
+      await updateProgress(jobId!, {
+        message: `Resuming - ${imagesToProcess.length} remaining...`
+      });
+    } else {
+      setProgress({ current: 0, total: imagesToProcess.length });
+      
+      // Create a new pipeline job for tracking
+      try {
+        jobId = await createJob({
+          type: 'CLAY_GENERATION',
+          title: `Generate Clay - ${brandName}`,
+          total: imagesToProcess.length,
+          origin_route: `/brand-pose-library?tab=clay`,
+          origin_context: { brandId: selectedBrand, brandName, slots: Array.from(selectedSlots) },
+          supports_pause: false,
+          supports_retry: false,
+        });
+      } catch (err) {
+        console.error('Failed to create pipeline job:', err);
+      }
+      
+      toast.info(`Generating clay for ${imagesToProcess.length} images...`);
     }
     
-    toast.info(`Generating clay for ${imagesToProcess.length} images...`);
+    currentJobIdRef.current = jobId;
 
-    let processed = 0;
-    let successCount = 0;
-    let failedCount = 0;
+    let processed = resumeJob?.progress_done || 0;
+    let successCount = resumeJob?.progress_done || 0;
+    let failedCount = resumeJob?.progress_failed || 0;
 
     for (const img of imagesToProcess) {
       if (shouldStopRef.current) {
@@ -228,22 +295,23 @@ export function ClayGenerationPanel() {
         failedCount++;
       }
       processed++;
-      setProgress({ current: processed, total: imagesToProcess.length });
+      setProgress({ current: processed, total: (resumeJob?.progress_done || 0) + imagesToProcess.length });
       
       // Update pipeline job progress
       if (jobId) {
         await updateProgress(jobId, { 
           done: successCount, 
           failed: failedCount,
-          message: `Processing ${processed}/${imagesToProcess.length}...`
+          message: `Processing ${processed}/${(resumeJob?.progress_done || 0) + imagesToProcess.length}...`
         });
       }
       
-      if (processed < imagesToProcess.length && !shouldStopRef.current) {
+      if (processed < (resumeJob?.progress_done || 0) + imagesToProcess.length && !shouldStopRef.current) {
         await new Promise((r) => setTimeout(r, 500));
       }
     }
     setIsGenerating(false);
+    currentJobIdRef.current = null;
     if (!shouldStopRef.current) {
       if (jobId) await setStatus(jobId, 'COMPLETED');
       toast.success(`Clay complete! ${successCount} processed.`, {
@@ -252,6 +320,20 @@ export function ClayGenerationPanel() {
           onClick: () => navigate(`/brand-pose-library?tab=clay`),
         },
       });
+    }
+  };
+
+  const handleResumeInterrupted = () => {
+    if (interruptedJob) {
+      handleGenerateClay(interruptedJob);
+    }
+  };
+
+  const handleDismissInterrupted = async () => {
+    if (interruptedJob) {
+      await setStatus(interruptedJob.id, 'CANCELED');
+      setInterruptedJob(null);
+      toast.info("Job dismissed");
     }
   };
 
@@ -515,12 +597,34 @@ export function ClayGenerationPanel() {
             Stop
           </Button>
         ) : (
-          <Button size="sm" onClick={handleGenerateClay} disabled={!selectedBrand || pendingImages.length === 0}>
+          <Button size="sm" onClick={() => handleGenerateClay()} disabled={!selectedBrand || pendingImages.length === 0}>
             <Palette className="w-4 h-4 mr-1" />
             Generate ({pendingImages.length})
           </Button>
         )}
       </div>
+
+      {/* Interrupted Job Banner */}
+      {interruptedJob && !isGenerating && (
+        <div className="px-3 py-2 border-b bg-amber-500/10 border-amber-500/30">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <span className="text-sm">
+                <strong>Interrupted job detected:</strong> {interruptedJob.progress_done}/{interruptedJob.progress_total} completed
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={handleResumeInterrupted}>
+                Resume ({pendingImages.length} remaining)
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleDismissInterrupted}>
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Progress Bar (when generating) */}
       {isGenerating && (

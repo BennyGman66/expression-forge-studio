@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, Pause, Play, RotateCcw } from 'lucide-react';
+import { ExternalLink, Pause, Play, RotateCcw, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -11,12 +11,18 @@ import {
 } from '@/types/pipeline-jobs';
 import { formatDistanceToNow } from 'date-fns';
 
-interface JobRowProps {
-  job: PipelineJob;
-  onOpenDetail?: (job: PipelineJob) => void;
+interface EnhancedPipelineJob extends PipelineJob {
+  isStalled?: boolean;
 }
 
-export function JobRow({ job, onOpenDetail }: JobRowProps) {
+interface JobRowProps {
+  job: EnhancedPipelineJob;
+  onOpenDetail?: (job: PipelineJob) => void;
+  onMarkStalled?: (jobId: string) => void;
+  onResume?: (job: PipelineJob) => void;
+}
+
+export function JobRow({ job, onOpenDetail, onMarkStalled, onResume }: JobRowProps) {
   const navigate = useNavigate();
   const { pauseJob, resumeJob } = usePipelineJobs();
   
@@ -41,6 +47,23 @@ export function JobRow({ job, onOpenDetail }: JobRowProps) {
     }
   };
 
+  const handleResume = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onResume) {
+      onResume(job);
+    } else {
+      // Navigate to origin with resume param
+      const url = new URL(job.origin_route, window.location.origin);
+      url.searchParams.set('resumeJobId', job.id);
+      navigate(url.pathname + url.search);
+    }
+  };
+
+  const handleMarkStalled = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onMarkStalled?.(job.id);
+  };
+
   return (
     <div 
       className="p-3 hover:bg-muted/50 cursor-pointer transition-colors border-b last:border-b-0"
@@ -48,13 +71,21 @@ export function JobRow({ job, onOpenDetail }: JobRowProps) {
     >
       <div className="flex items-center justify-between gap-2 mb-1">
         <JobTypeBadge type={job.type} />
-        <Badge variant={statusConfig.variant} className="text-[10px] px-2">
-          {statusConfig.label}
-        </Badge>
+        <div className="flex items-center gap-1">
+          {job.isStalled && (
+            <Badge variant="destructive" className="text-[10px] px-2">
+              <AlertTriangle className="h-3 w-3 mr-1" />
+              Stalled
+            </Badge>
+          )}
+          <Badge variant={statusConfig.variant} className="text-[10px] px-2">
+            {statusConfig.label}
+          </Badge>
+        </div>
       </div>
       <p className="text-sm font-medium truncate mb-1.5">{job.title}</p>
       
-      {isActive && (
+      {isActive && !job.isStalled && (
         <div className="mb-2">
           <Progress value={progressPercent} className="h-1.5" />
           <div className="flex items-center justify-between mt-1">
@@ -69,8 +100,14 @@ export function JobRow({ job, onOpenDetail }: JobRowProps) {
           </div>
         </div>
       )}
+
+      {job.isStalled && (
+        <div className="mb-2 p-2 bg-destructive/10 rounded text-xs text-destructive">
+          Not updated {timeAgo} · {job.progress_done}/{job.progress_total} completed
+        </div>
+      )}
       
-      {!isActive && (
+      {!isActive && !job.isStalled && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
           <span>
             {job.progress_done}/{job.progress_total}
@@ -86,7 +123,29 @@ export function JobRow({ job, onOpenDetail }: JobRowProps) {
       )}
       
       <div className="flex items-center gap-1">
-        {job.supports_pause && isActive && (
+        {job.isStalled && (
+          <>
+            <Button
+              variant="default"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={handleResume}
+            >
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Resume
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-destructive"
+              onClick={handleMarkStalled}
+            >
+              Mark Failed
+            </Button>
+          </>
+        )}
+        
+        {job.supports_pause && isActive && !job.isStalled && (
           <Button
             variant="ghost"
             size="sm"

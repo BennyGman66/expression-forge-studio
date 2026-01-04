@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, Clock, User, AlertCircle } from 'lucide-react';
+import { ExternalLink, Clock, AlertTriangle, RefreshCw } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -12,14 +12,19 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { JobTypeBadge } from './JobTypeBadge';
 import { JOB_STATUS_CONFIG, type PipelineJob } from '@/types/pipeline-jobs';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 
-interface JobDetailModalProps {
-  job: PipelineJob | null;
-  onClose: () => void;
+interface EnhancedPipelineJob extends PipelineJob {
+  isStalled?: boolean;
 }
 
-export function JobDetailModal({ job, onClose }: JobDetailModalProps) {
+interface JobDetailModalProps {
+  job: EnhancedPipelineJob | null;
+  onClose: () => void;
+  onMarkStalled?: (jobId: string) => void;
+}
+
+export function JobDetailModal({ job, onClose, onMarkStalled }: JobDetailModalProps) {
   const navigate = useNavigate();
 
   if (!job) return null;
@@ -30,9 +35,22 @@ export function JobDetailModal({ job, onClose }: JobDetailModalProps) {
   
   const statusConfig = JOB_STATUS_CONFIG[job.status];
   const remaining = job.progress_total - job.progress_done - job.progress_failed;
+  const timeAgo = formatDistanceToNow(new Date(job.updated_at), { addSuffix: true });
 
   const handleOpenOrigin = () => {
     navigate(job.origin_route);
+    onClose();
+  };
+
+  const handleResume = () => {
+    const url = new URL(job.origin_route, window.location.origin);
+    url.searchParams.set('resumeJobId', job.id);
+    navigate(url.pathname + url.search);
+    onClose();
+  };
+
+  const handleMarkFailed = () => {
+    onMarkStalled?.(job.id);
     onClose();
   };
 
@@ -47,10 +65,28 @@ export function JobDetailModal({ job, onClose }: JobDetailModalProps) {
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Stalled Warning */}
+          {job.isStalled && (
+            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-lg flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-destructive">Job Stalled</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  This job hasn't been updated {timeAgo}. The browser tab may have been closed or navigated away.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Status & Progress */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Badge variant={statusConfig.variant}>{statusConfig.label}</Badge>
+              <div className="flex items-center gap-2">
+                {job.isStalled && (
+                  <Badge variant="destructive">Stalled</Badge>
+                )}
+                <Badge variant={statusConfig.variant}>{statusConfig.label}</Badge>
+              </div>
               <span className="text-sm text-muted-foreground">
                 {progressPercent}% complete
               </span>
@@ -91,6 +127,10 @@ export function JobDetailModal({ job, onClose }: JobDetailModalProps) {
               <Clock className="h-4 w-4" />
               <span>Started: {job.started_at ? format(new Date(job.started_at), 'PPp') : 'Not started'}</span>
             </div>
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>Last updated: {timeAgo}</span>
+            </div>
             {job.completed_at && (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Clock className="h-4 w-4" />
@@ -113,14 +153,28 @@ export function JobDetailModal({ job, onClose }: JobDetailModalProps) {
 
           {/* Actions */}
           <div className="flex items-center gap-2 pt-2">
-            <Button onClick={handleOpenOrigin} className="flex-1">
-              <ExternalLink className="h-4 w-4 mr-2" />
-              Open Origin
-            </Button>
-            {job.progress_failed > 0 && job.supports_retry && (
-              <Button variant="outline">
-                Retry {job.progress_failed} Failed
-              </Button>
+            {job.isStalled ? (
+              <>
+                <Button onClick={handleResume} className="flex-1">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Resume Job
+                </Button>
+                <Button variant="outline" onClick={handleMarkFailed}>
+                  Mark as Failed
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={handleOpenOrigin} className="flex-1">
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Open Origin
+                </Button>
+                {job.progress_failed > 0 && job.supports_retry && (
+                  <Button variant="outline">
+                    Retry {job.progress_failed} Failed
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>

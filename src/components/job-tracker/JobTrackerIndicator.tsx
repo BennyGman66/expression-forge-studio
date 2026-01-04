@@ -1,4 +1,4 @@
-import { Activity, Loader2 } from 'lucide-react';
+import { Activity, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Popover,
@@ -10,9 +10,12 @@ import { JobTrackerDropdown } from './JobTrackerDropdown';
 import { useActiveJobs } from '@/hooks/useActiveJobs';
 
 export function JobTrackerIndicator() {
-  const { activeJobs, recentJobs, activeCount, totalProgress, isLoading } = useActiveJobs();
+  const { activeJobs, recentJobs, activeCount, totalProgress, isLoading, markJobStalled } = useActiveJobs();
 
   const hasActiveJobs = activeCount > 0;
+  const stalledCount = activeJobs.filter(j => j.isStalled).length;
+  const hasStalled = stalledCount > 0;
+  
   const progressPercent = totalProgress.total > 0
     ? Math.round((totalProgress.done / totalProgress.total) * 100)
     : 0;
@@ -24,11 +27,18 @@ export function JobTrackerIndicator() {
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          variant={hasActiveJobs ? 'default' : 'ghost'}
+          variant={hasStalled ? 'destructive' : hasActiveJobs ? 'default' : 'ghost'}
           size="sm"
           className={hasActiveJobs ? 'gap-2 px-3' : 'gap-1.5'}
         >
-          {hasActiveJobs ? (
+          {hasStalled ? (
+            <>
+              <AlertTriangle className="h-3.5 w-3.5" />
+              <span className="text-xs font-medium">
+                {stalledCount} Stalled
+              </span>
+            </>
+          ) : hasActiveJobs ? (
             <>
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <div className="flex items-center gap-2">
@@ -56,7 +66,11 @@ export function JobTrackerIndicator() {
         className="p-0 w-80 bg-popover"
         sideOffset={8}
       >
-        <JobTrackerDropdown activeJobs={activeJobs} recentJobs={recentJobs} />
+        <JobTrackerDropdown 
+          activeJobs={activeJobs} 
+          recentJobs={recentJobs} 
+          onMarkStalled={markJobStalled}
+        />
       </PopoverContent>
     </Popover>
   );
