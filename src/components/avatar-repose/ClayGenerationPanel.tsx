@@ -583,7 +583,7 @@ export function ClayGenerationPanel() {
         )}
       </div>
 
-      {/* Persistent Bulk Action Bar */}
+      {/* Stats Bar */}
       <div className="border-t bg-background p-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button
@@ -600,38 +600,54 @@ export function ClayGenerationPanel() {
             {selectedImages.size === filteredImages.length && filteredImages.length > 0 ? "Deselect All" : "Select All"}
           </Button>
           <span className="text-sm text-muted-foreground">
-            {filteredImages.length} images · {pendingImages.length} pending{selectedImages.size > 0 && ` · ${selectedImages.size} selected`}
+            {filteredImages.length} images · {pendingImages.length} pending
           </span>
         </div>
+      </div>
 
-        <div className="flex items-center gap-1.5">
+      {/* Floating Bulk Actions Toolbar */}
+      {selectedImages.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-background border rounded-lg shadow-lg p-3 flex items-center gap-3">
+          <span className="text-sm font-medium">
+            {selectedImages.size} selected
+          </span>
+          
+          <div className="h-4 w-px bg-border" />
+          
           {/* Move to Slot Buttons */}
-          {SLOTS.map((slot) => (
+          {SLOTS.map((slot, index) => (
             <Button
               key={slot}
               variant="outline"
               size="sm"
               onClick={() => handleBulkMove(slot)}
-              disabled={selectedImages.size === 0}
-              className="w-8 h-8 p-0"
-              title={`Move to ${SLOT_LABELS[slot]} (${slot === "A" ? "1" : slot === "B" ? "2" : slot === "C" ? "3" : "4"})`}
+              title={`Move to ${SLOT_LABELS[slot]}`}
             >
-              {slot}
+              {slot} <span className="text-muted-foreground ml-1">({index + 1})</span>
             </Button>
           ))}
-
-          {/* Delete */}
-          <Button
-            variant="destructive"
-            size="sm"
+          
+          <div className="h-4 w-px bg-border" />
+          
+          <Button 
+            variant="destructive" 
+            size="sm" 
             onClick={handleBulkDelete}
-            disabled={selectedImages.size === 0}
-            className="ml-2"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete <span className="text-destructive-foreground/70 ml-1">(Del)</span>
+          </Button>
+          
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={clearSelection}
+          >
+            <XIcon className="h-4 w-4 mr-2" />
+            Clear <span className="text-muted-foreground ml-1">(Esc)</span>
           </Button>
         </div>
-      </div>
+      )}
     </div>
   );
 }
