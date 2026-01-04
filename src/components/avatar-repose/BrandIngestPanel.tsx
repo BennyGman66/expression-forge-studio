@@ -239,8 +239,44 @@ export function BrandIngestPanel() {
     const jobWithUrls = job as ScrapeJob & { product_urls?: string[]; current_index?: number };
     
     if (!jobWithUrls.product_urls || jobWithUrls.product_urls.length === 0) {
-      toast.info("No saved URLs - restarting scrape");
-      await runClientSideScrape(brand.id, brand.start_url, scrapeLimit);
+      // Old job without stored URLs - re-fetch URLs and continue existing job
+      toast.info("Re-mapping URLs for resume...");
+      setScrapingBrandId(brand.id);
+      shouldStopRef.current = false;
+
+      try {
+        const { data: mapResult, error: mapError } = await supabase.functions.invoke("scrape-brand", {
+          body: { brandId: brand.id, startUrl: brand.start_url, limit: job.total || scrapeLimit },
+        });
+
+        if (mapError || !mapResult?.success) {
+          throw new Error(mapResult?.error || mapError?.message || "Failed to map website");
+        }
+
+        const { productUrls } = mapResult;
+        // The edge function created a new job, but we want to use existing progress
+        // Update the NEW job with the existing progress offset
+        const startIndex = job.progress || 0;
+        
+        toast.info(`Resuming from product ${startIndex + 1}/${productUrls.length}`);
+        
+        // Update the new job to resume from where old job left off
+        await supabase.from("scrape_jobs").update({ 
+          status: "running",
+          current_index: startIndex,
+          progress: startIndex
+        }).eq("id", mapResult.jobId);
+
+        // Mark old job as superseded
+        await supabase.from("scrape_jobs").update({ status: "superseded" }).eq("id", job.id);
+
+        await processProductUrls(brand.id, mapResult.jobId, productUrls, startIndex);
+      } catch (err) {
+        console.error("Resume error:", err);
+        toast.error("Failed to resume scraping");
+      } finally {
+        setScrapingBrandId(null);
+      }
       return;
     }
 
