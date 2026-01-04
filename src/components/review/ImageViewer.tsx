@@ -16,6 +16,7 @@ interface ImageViewerProps {
   alt?: string;
   annotations: ImageAnnotation[];
   selectedAnnotationId: string | null;
+  flashingAnnotationId?: string | null;
   onAnnotationClick: (annotation: ImageAnnotation) => void;
   onAnnotationCreate: (rect: AnnotationRect) => void;
   isDrawing: boolean;
@@ -37,6 +38,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       alt = 'Asset',
       annotations,
       selectedAnnotationId,
+      flashingAnnotationId,
       onAnnotationClick,
       onAnnotationCreate,
       isDrawing,
@@ -80,10 +82,11 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       const fitZoom = Math.min(
         availableWidth / imageDimensions.width,
         availableHeight / imageDimensions.height,
-        2 // Allow up to 200% for better initial visibility
+        3 // Allow up to 300% for better initial visibility (especially portraits)
       );
       
-      setZoom(fitZoom);
+      // Use at least 0.5 zoom to avoid tiny images
+      setZoom(Math.max(fitZoom, 0.5));
       setPan({ x: 0, y: 0 });
     }, [imageDimensions]);
 
@@ -272,6 +275,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
                     {annotations.map((ann, idx) => {
                       const isSelected = selectedAnnotationId === ann.id;
                       const isHovered = hoveredAnnotationId === ann.id;
+                      const isFlashing = flashingAnnotationId === ann.id;
                       const markerPos = getMarkerPosition(ann);
                       const hasThread = !!ann.thread;
                       
@@ -281,6 +285,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
                             <div
                               className={cn(
                                 "absolute border-2 rounded-lg cursor-pointer pointer-events-auto transition-all duration-200",
+                                isFlashing && "animate-flash-highlight",
                                 isSelected
                                   ? "border-primary bg-primary/20 shadow-lg shadow-primary/40 ring-2 ring-primary/30"
                                   : hasThread

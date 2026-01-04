@@ -30,11 +30,21 @@ import {
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 
+interface JobInput {
+  id: string;
+  label: string | null;
+  artifact?: {
+    file_url: string;
+    preview_url: string | null;
+  };
+}
+
 interface FreelancerNeedsChangesViewProps {
   submissionId: string;
   jobId: string;
   versionNumber: number;
   instructions?: string;
+  inputs?: JobInput[];
   onReplacementsChange: (replacements: Map<string, { file: File; preview: string }>) => void;
   onResubmit: () => void;
   isResubmitting: boolean;
@@ -45,6 +55,7 @@ export function FreelancerNeedsChangesView({
   jobId,
   versionNumber,
   instructions,
+  inputs = [],
   onReplacementsChange,
   onResubmit,
   isResubmitting,
@@ -58,6 +69,8 @@ export function FreelancerNeedsChangesView({
   const [replacements, setReplacements] = useState<Map<string, { file: File; preview: string }>>(new Map());
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [replyText, setReplyText] = useState('');
+  const [flashingAnnotationId, setFlashingAnnotationId] = useState<string | null>(null);
+  const [flashingCommentId, setFlashingCommentId] = useState<string | null>(null);
   
   const imageViewerRef = useRef<ImageViewerHandle>(null);
   const addComment = useAddComment();
@@ -170,7 +183,13 @@ export function FreelancerNeedsChangesView({
 
   const handleAnnotationClick = useCallback((annotation: ImageAnnotation) => {
     setSelectedAnnotationId(annotation.id);
-  }, []);
+    // Flash the corresponding comment
+    const thread = threads.find(t => t.annotation_id === annotation.id);
+    if (thread?.comments?.[0]) {
+      setFlashingCommentId(thread.comments[0].id);
+      setTimeout(() => setFlashingCommentId(null), 600);
+    }
+  }, [threads]);
 
   const handleSelectAnnotation = useCallback((annotationId: string | null) => {
     setSelectedAnnotationId(annotationId);
@@ -178,6 +197,8 @@ export function FreelancerNeedsChangesView({
 
   const handleJumpToAnnotation = useCallback((annotationId: string) => {
     setSelectedAnnotationId(annotationId);
+    setFlashingAnnotationId(annotationId);
+    setTimeout(() => setFlashingAnnotationId(null), 600);
     imageViewerRef.current?.scrollToAnnotation(annotationId);
   }, []);
 
@@ -387,6 +408,7 @@ export function FreelancerNeedsChangesView({
               alt={selectedAsset?.label}
               annotations={enrichedAnnotations}
               selectedAnnotationId={selectedAnnotationId}
+              flashingAnnotationId={flashingAnnotationId}
               onAnnotationClick={handleAnnotationClick}
               onAnnotationCreate={() => {}}
               isDrawing={false}
@@ -514,12 +536,14 @@ export function FreelancerNeedsChangesView({
                 {assetComments.length > 0 ? (
                   assetComments.map(({ comment, annotationIndex, annotationId }) => {
                     const isSelected = annotationId === selectedAnnotationId;
+                    const isFlashing = flashingCommentId === comment.id;
                     
                     return (
                       <div
                         key={comment.id}
                         className={cn(
                           "rounded-lg p-2 transition-colors cursor-pointer",
+                          isFlashing && "animate-flash-comment",
                           isSelected ? "bg-primary/10" : "hover:bg-muted/50"
                         )}
                         onClick={() => {
@@ -597,8 +621,8 @@ export function FreelancerNeedsChangesView({
         </div>
       </div>
 
-      {/* Instructions - Collapsible at bottom */}
-      {instructions && (
+      {/* Instructions + Input Assets - Collapsible at bottom */}
+      {(instructions || inputs.length > 0) && (
         <Collapsible open={instructionsOpen} onOpenChange={setInstructionsOpen} className="mt-4">
           <CollapsibleTrigger asChild>
             <Button variant="ghost" className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground">
@@ -608,17 +632,45 @@ export function FreelancerNeedsChangesView({
                 <ChevronRight className="h-4 w-4" />
               )}
               <FileText className="h-4 w-4" />
-              <span className="font-medium">Brief / Instructions</span>
-              {!instructionsOpen && (
+              <span className="font-medium">Brief / Instructions & Reference Assets</span>
+              {!instructionsOpen && instructions && (
                 <span className="text-xs truncate max-w-md opacity-60">
-                  {instructions.slice(0, 80)}...
+                  {instructions.slice(0, 60)}...
                 </span>
               )}
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="p-4 border rounded-lg bg-muted/30 mt-2 text-sm whitespace-pre-wrap">
-              {instructions}
+            <div className="mt-2 space-y-4">
+              {/* Text Instructions */}
+              {instructions && (
+                <div className="p-4 border rounded-lg bg-muted/30 text-sm whitespace-pre-wrap">
+                  {instructions}
+                </div>
+              )}
+              
+              {/* Reference Input Assets */}
+              {inputs.length > 0 && (
+                <div className="p-4 border rounded-lg bg-muted/30">
+                  <h5 className="text-sm font-medium mb-3">Reference Assets</h5>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                    {inputs.map((input) => (
+                      <div key={input.id} className="space-y-1">
+                        <div className="aspect-[3/4] bg-muted rounded-md overflow-hidden border border-border">
+                          <img
+                            src={input.artifact?.preview_url || input.artifact?.file_url || ''}
+                            alt={input.label || 'Reference'}
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                        <p className="text-[10px] text-muted-foreground text-center truncate">
+                          {input.label || 'Reference'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </CollapsibleContent>
         </Collapsible>
