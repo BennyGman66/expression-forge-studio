@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -6,16 +6,18 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { Loader2, Palette, Image as ImageIcon, Trash2, ArrowRightLeft, CheckCircle2, Sparkles, CheckSquare, Square, X, StopCircle } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Loader2, Palette, Image as ImageIcon, Trash2, CheckCircle2, Sparkles, StopCircle, Check, X as XIcon } from "lucide-react";
 import { toast } from "sonner";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import type { Brand, ProductImage, ClayImage, ImageSlot } from "@/types/avatar-repose";
+
+const SLOTS: ImageSlot[] = ["A", "B", "C", "D"];
+const SLOT_LABELS: Record<ImageSlot, string> = {
+  A: "Full Front",
+  B: "Cropped Front",
+  C: "Full Back",
+  D: "Detail",
+};
 
 export function ClayGenerationPanel() {
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -33,11 +35,75 @@ export function ClayGenerationPanel() {
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [selectedModel, setSelectedModel] = useState("google/gemini-2.5-flash-image-preview");
+  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const imageModels = [
-    { value: "google/gemini-2.5-flash-image-preview", label: "Gemini 2.5 Flash (Image)" },
-    { value: "google/gemini-3-pro-image-preview", label: "Gemini 3 Pro (Image)" },
+    { value: "google/gemini-2.5-flash-image-preview", label: "Flash" },
+    { value: "google/gemini-3-pro-image-preview", label: "Pro" },
   ];
+
+  // Get filtered pending images
+  const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
+  const pendingImages = productImages.filter(
+    (img) => selectedSlots.has(img.slot) && !existingClayIds.has(img.id)
+  );
+
+  // Keyboard shortcuts
+  const handleBulkMove = useCallback(async (newSlot: string) => {
+    if (selectedImages.size === 0) return;
+    const imageIds = Array.from(selectedImages);
+    try {
+      const { error } = await supabase
+        .from("product_images")
+        .update({ slot: newSlot })
+        .in("id", imageIds);
+      if (error) throw error;
+      setProductImages((prev) =>
+        prev.map((img) => (selectedImages.has(img.id) ? { ...img, slot: newSlot } : img))
+      );
+      toast.success(`Moved ${imageIds.length} to ${SLOT_LABELS[newSlot as ImageSlot]}`);
+      setSelectedImages(new Set());
+    } catch {
+      toast.error("Failed to move images");
+    }
+  }, [selectedImages]);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (selectedImages.size === 0) return;
+    const imageIds = Array.from(selectedImages);
+    try {
+      await supabase.from("clay_images").delete().in("product_image_id", imageIds);
+      const { error } = await supabase.from("product_images").delete().in("id", imageIds);
+      if (error) throw error;
+      setProductImages((prev) => prev.filter((img) => !selectedImages.has(img.id)));
+      setClayImages((prev) => prev.filter((c) => !selectedImages.has(c.product_image_id)));
+      toast.success(`Deleted ${imageIds.length} images`);
+      setSelectedImages(new Set());
+    } catch {
+      toast.error("Failed to delete images");
+    }
+  }, [selectedImages]);
+
+  const selectAll = useCallback(() => {
+    setSelectedImages(new Set(pendingImages.map((img) => img.id)));
+  }, [pendingImages]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedImages(new Set());
+  }, []);
+
+  useKeyboardShortcuts({
+    onInclude: () => {}, // Not applicable for clay generation
+    onExclude: () => {},
+    onMoveToSlotA: () => handleBulkMove("A"),
+    onMoveToSlotB: () => handleBulkMove("B"),
+    onMoveToSlotC: () => handleBulkMove("C"),
+    onMoveToSlotD: () => handleBulkMove("D"),
+    onClearSelection: clearSelection,
+    onSelectAll: selectAll,
+    enabled: selectedImages.size > 0,
+  });
 
   useEffect(() => {
     fetchBrands();
@@ -50,7 +116,6 @@ export function ClayGenerationPanel() {
     }
   }, [selectedBrand, selectedGender, selectedProductType]);
 
-  // Reset shouldStop when generation starts
   useEffect(() => {
     if (isGenerating) {
       shouldStopRef.current = false;
@@ -60,70 +125,37 @@ export function ClayGenerationPanel() {
   // Subscribe to new clay images in real-time
   useEffect(() => {
     if (!selectedBrand) return;
-
     const channel = supabase
       .channel("clay-images-realtime")
-      .on(
-        "postgres_changes",
-        { 
-          event: "INSERT", 
-          schema: "public", 
-          table: "clay_images"
-        },
-        (payload) => {
-          const newClay = payload.new as ClayImage;
-          // Add the new clay image to state if not already present
-          setClayImages((prev) => {
-            if (prev.some((c) => c.id === newClay.id)) return prev;
-            return [...prev, newClay];
-          });
-        }
-      )
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "clay_images" }, (payload) => {
+        const newClay = payload.new as ClayImage;
+        setClayImages((prev) => (prev.some((c) => c.id === newClay.id) ? prev : [...prev, newClay]));
+      })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [selectedBrand]);
 
   // Subscribe to organize job progress
   useEffect(() => {
     if (!organizeJobId) return;
-
     const channel = supabase
       .channel("organize-progress")
-      .on(
-        "postgres_changes",
-        { 
-          event: "UPDATE", 
-          schema: "public", 
-          table: "jobs",
-          filter: `id=eq.${organizeJobId}`
-        },
-        (payload) => {
-          const job = payload.new as { progress: number; total: number; status: string };
-          setOrganizeProgress({ current: job.progress || 0, total: job.total || 0 });
-          
-          if (job.status === "completed") {
-            setIsOrganizing(false);
-            setOrganizeJobId(null);
-            toast.success("AVA finished organizing your images!");
-            fetchProductImages();
-          }
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "jobs", filter: `id=eq.${organizeJobId}` }, (payload) => {
+        const job = payload.new as { progress: number; total: number; status: string };
+        setOrganizeProgress({ current: job.progress || 0, total: job.total || 0 });
+        if (job.status === "completed") {
+          setIsOrganizing(false);
+          setOrganizeJobId(null);
+          toast.success("AVA finished organizing!");
+          fetchProductImages();
         }
-      )
+      })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [organizeJobId]);
 
   const fetchBrands = async () => {
-    const { data } = await supabase
-      .from("brands")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const { data } = await supabase.from("brands").select("*").order("created_at", { ascending: false });
     if (data) setBrands(data);
   };
 
@@ -132,19 +164,10 @@ export function ClayGenerationPanel() {
       .from("product_images")
       .select("*, products!inner(brand_id, gender, product_type)")
       .eq("products.brand_id", selectedBrand);
-
-    if (selectedGender !== "all") {
-      query = query.eq("products.gender", selectedGender);
-    }
-
-    if (selectedProductType !== "all") {
-      query = query.eq("products.product_type", selectedProductType);
-    }
-
+    if (selectedGender !== "all") query = query.eq("products.gender", selectedGender);
+    if (selectedProductType !== "all") query = query.eq("products.product_type", selectedProductType);
     const { data } = await query;
-    if (data) {
-      setProductImages(data as unknown as ProductImage[]);
-    }
+    if (data) setProductImages(data as unknown as ProductImage[]);
   };
 
   const fetchClayImages = async () => {
@@ -152,10 +175,7 @@ export function ClayGenerationPanel() {
       .from("clay_images")
       .select("*, product_images!inner(product_id, products!inner(brand_id))")
       .eq("product_images.products.brand_id", selectedBrand);
-    
-    if (data) {
-      setClayImages(data as unknown as ClayImage[]);
-    }
+    if (data) setClayImages(data as unknown as ClayImage[]);
   };
 
   const toggleSlot = (slot: string) => {
@@ -166,606 +186,365 @@ export function ClayGenerationPanel() {
   };
 
   const handleGenerateClay = async () => {
-    // Filter images that don't already have clay versions
-    const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
-    const imagesToProcess = productImages.filter(
-      (img) => selectedSlots.has(img.slot) && img.stored_url && !existingClayIds.has(img.id)
-    );
-
+    const imagesToProcess = pendingImages.filter((img) => img.stored_url);
     if (imagesToProcess.length === 0) {
-      toast.error("No new images to process (all already have clay versions)");
+      toast.error("No new images to process");
       return;
     }
-
     setIsGenerating(true);
     shouldStopRef.current = false;
     setProgress({ current: 0, total: imagesToProcess.length });
-
     toast.info(`Generating clay for ${imagesToProcess.length} images...`);
 
-    // Client-side orchestration: process one image at a time
     let processed = 0;
     let successCount = 0;
-    let failCount = 0;
 
     for (const img of imagesToProcess) {
-      // Check if user requested stop
       if (shouldStopRef.current) {
         toast.info(`Stopped after ${processed} images`);
         break;
       }
-
       try {
         const { data, error } = await supabase.functions.invoke("generate-clay-single", {
-          body: {
-            imageId: img.id,
-            model: selectedModel,
-          },
+          body: { imageId: img.id, model: selectedModel },
         });
-
-        if (error) {
-          console.error(`Error generating clay for ${img.id}:`, error);
-          failCount++;
-          toast.error(`Failed to generate clay for image ${processed + 1}`);
-        } else if (data?.error) {
-          console.error(`API error for ${img.id}:`, data.error);
-          failCount++;
-          toast.error(`Failed: ${data.error}`);
-        } else if (data?.storedUrl) {
+        if (!error && data?.storedUrl && !data.skipped) {
           successCount++;
-          // Add to local state immediately
-          if (!data.skipped) {
-            setClayImages((prev) => [
-              ...prev,
-              { id: crypto.randomUUID(), product_image_id: img.id, stored_url: data.storedUrl, created_at: new Date().toISOString() } as ClayImage
-            ]);
-          }
+          setClayImages((prev) => [...prev, { id: crypto.randomUUID(), product_image_id: img.id, stored_url: data.storedUrl, created_at: new Date().toISOString() } as ClayImage]);
         } else if (data?.skipped) {
-          successCount++; // Count skipped as success
+          successCount++;
         }
       } catch (err) {
         console.error(`Failed to process ${img.id}:`, err);
-        failCount++;
-        toast.error(`Error processing image ${processed + 1}`);
       }
-
       processed++;
       setProgress({ current: processed, total: imagesToProcess.length });
-
-      // Small delay between requests
       if (processed < imagesToProcess.length && !shouldStopRef.current) {
         await new Promise((r) => setTimeout(r, 500));
       }
     }
-
     setIsGenerating(false);
     if (!shouldStopRef.current) {
-      if (failCount === 0) {
-        toast.success(`Clay generation complete! ${successCount} images processed.`);
-      } else if (successCount === 0) {
-        toast.error(`All ${failCount} images failed to generate.`);
-      } else {
-        toast.warning(`Generated ${successCount} images, ${failCount} failed.`);
-      }
+      toast.success(`Clay complete! ${successCount} processed.`);
     }
   };
 
   const handleStopGeneration = () => {
     shouldStopRef.current = true;
-    toast.info("Stopping generation...");
+    toast.info("Stopping...");
   };
 
   const handleOrganizeImages = async () => {
-    if (!selectedBrand) {
-      toast.error("Please select a brand first");
-      return;
-    }
-
+    if (!selectedBrand) return;
     setIsOrganizing(true);
     setOrganizeProgress({ current: 0, total: 0 });
-
     try {
-      const { data, error } = await supabase.functions.invoke("organize-images", {
-        body: { brandId: selectedBrand },
-      });
-
+      const { data, error } = await supabase.functions.invoke("organize-images", { body: { brandId: selectedBrand } });
       if (error) throw error;
-
       if (data.total > 0) {
         setOrganizeJobId(data.jobId);
         setOrganizeProgress({ current: 0, total: data.total });
-        toast.info(`AVA is analyzing ${data.total} images...`);
+        toast.info(`AVA analyzing ${data.total} images...`);
       } else {
         toast.info("No images to organize!");
         setIsOrganizing(false);
       }
-    } catch (err) {
-      console.error("Organize error:", err);
-      toast.error("Failed to organize images");
+    } catch {
+      toast.error("Failed to organize");
       setIsOrganizing(false);
     }
   };
 
-  // Display order: A (Full Front), B (Cropped Front), D (Detail), C (Full Back)
-  const slots: ImageSlot[] = ["A", "B", "D", "C"];
-  const slotLabels: Record<ImageSlot, string> = {
-    A: "Full Front",
-    B: "Cropped Front",
-    D: "Detail",
-    C: "Full Back",
+  // Selection with shift-click support
+  const handleImageClick = (imageId: string, e: React.MouseEvent) => {
+    if (e.shiftKey && lastClickedId) {
+      const ids = pendingImages.map((img) => img.id);
+      const start = ids.indexOf(lastClickedId);
+      const end = ids.indexOf(imageId);
+      if (start !== -1 && end !== -1) {
+        const range = ids.slice(Math.min(start, end), Math.max(start, end) + 1);
+        setSelectedImages((prev) => {
+          const next = new Set(prev);
+          range.forEach((id) => next.add(id));
+          return next;
+        });
+        return;
+      }
+    }
+    if (e.ctrlKey || e.metaKey) {
+      setSelectedImages((prev) => {
+        const next = new Set(prev);
+        if (next.has(imageId)) next.delete(imageId);
+        else next.add(imageId);
+        return next;
+      });
+    } else {
+      setSelectedImages(new Set([imageId]));
+    }
+    setLastClickedId(imageId);
   };
 
-  const getImagesForSlot = (slot: string) => {
-    return productImages.filter((img) => img.slot === slot);
-  };
-
-  const getClayForImage = (imageId: string) => {
-    return clayImages.find((c) => c.product_image_id === imageId);
-  };
-
-  const handleDeleteImage = async (imageId: string) => {
+  const handleDeleteImage = async (imageId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     try {
-      // First delete any clay images associated with this product image
-      await supabase
-        .from("clay_images")
-        .delete()
-        .eq("product_image_id", imageId);
-
-      // Then delete the product image
-      const { error } = await supabase
-        .from("product_images")
-        .delete()
-        .eq("id", imageId);
-
-      if (error) throw error;
-
-      // Update local state
+      await supabase.from("clay_images").delete().eq("product_image_id", imageId);
+      await supabase.from("product_images").delete().eq("id", imageId);
       setProductImages((prev) => prev.filter((img) => img.id !== imageId));
       setClayImages((prev) => prev.filter((c) => c.product_image_id !== imageId));
-      toast.success("Image deleted");
-    } catch (err) {
-      console.error("Delete error:", err);
-      toast.error("Failed to delete image");
+      toast.success("Deleted");
+    } catch {
+      toast.error("Failed to delete");
     }
   };
 
-  const handleMoveToSlot = async (imageId: string, newSlot: string) => {
-    try {
-      const { error } = await supabase
-        .from("product_images")
-        .update({ slot: newSlot })
-        .eq("id", imageId);
-
-      if (error) throw error;
-
-      // Update local state
-      setProductImages((prev) =>
-        prev.map((img) =>
-          img.id === imageId ? { ...img, slot: newSlot } : img
-        )
-      );
-      toast.success(`Moved to slot ${newSlot}`);
-    } catch (err) {
-      console.error("Move error:", err);
-      toast.error("Failed to move image");
-    }
-  };
-
-  // Selection handlers
-  const toggleImageSelection = (imageId: string) => {
-    setSelectedImages((prev) => {
-      const next = new Set(prev);
-      if (next.has(imageId)) {
-        next.delete(imageId);
-      } else {
-        next.add(imageId);
-      }
-      return next;
-    });
-  };
-
-  const selectAllInSlot = (slot: string) => {
-    const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
-    const slotImages = getImagesForSlot(slot).filter((img) => !existingClayIds.has(img.id));
-    setSelectedImages((prev) => {
-      const next = new Set(prev);
-      slotImages.forEach((img) => next.add(img.id));
-      return next;
-    });
-  };
-
-  const clearSelection = () => {
-    setSelectedImages(new Set());
-  };
-
-  const handleBulkDelete = async () => {
-    if (selectedImages.size === 0) return;
-    
-    const imageIds = Array.from(selectedImages);
-    
-    try {
-      // Delete clay images first
-      await supabase
-        .from("clay_images")
-        .delete()
-        .in("product_image_id", imageIds);
-
-      // Then delete product images
-      const { error } = await supabase
-        .from("product_images")
-        .delete()
-        .in("id", imageIds);
-
-      if (error) throw error;
-
-      // Update local state
-      setProductImages((prev) => prev.filter((img) => !selectedImages.has(img.id)));
-      setClayImages((prev) => prev.filter((c) => !selectedImages.has(c.product_image_id)));
-      toast.success(`Deleted ${imageIds.length} images`);
-      clearSelection();
-    } catch (err) {
-      console.error("Bulk delete error:", err);
-      toast.error("Failed to delete images");
-    }
-  };
-
-  const handleBulkMove = async (newSlot: string) => {
-    if (selectedImages.size === 0) return;
-    
-    const imageIds = Array.from(selectedImages);
-    
-    try {
-      const { error } = await supabase
-        .from("product_images")
-        .update({ slot: newSlot })
-        .in("id", imageIds);
-
-      if (error) throw error;
-
-      // Update local state
-      setProductImages((prev) =>
-        prev.map((img) =>
-          selectedImages.has(img.id) ? { ...img, slot: newSlot } : img
-        )
-      );
-      toast.success(`Moved ${imageIds.length} images to ${slotLabels[newSlot as ImageSlot]}`);
-      clearSelection();
-    } catch (err) {
-      console.error("Bulk move error:", err);
-      toast.error("Failed to move images");
-    }
-  };
+  const completedCount = clayImages.length;
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* AVA Organise Button with Progress */}
-      <div className="space-y-2">
+    <div className="flex flex-col h-full">
+      {/* Compact Top Bar */}
+      <div className="border-b bg-background p-3 flex items-center gap-3 flex-wrap">
+        {/* Brand */}
+        <Select value={selectedBrand} onValueChange={setSelectedBrand}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="Brand" />
+          </SelectTrigger>
+          <SelectContent>
+            {brands.map((brand) => (
+              <SelectItem key={brand.id} value={brand.id}>{brand.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Gender Pills */}
+        <div className="flex gap-1">
+          {["all", "men", "women"].map((g) => (
+            <Button
+              key={g}
+              variant={selectedGender === g ? "default" : "outline"}
+              size="sm"
+              className="h-8 px-3"
+              onClick={() => setSelectedGender(g)}
+            >
+              {g === "all" ? "All" : g === "men" ? "M" : "W"}
+            </Button>
+          ))}
+        </div>
+
+        {/* Product Type Pills */}
+        <div className="flex gap-1">
+          {["all", "tops", "trousers"].map((t) => (
+            <Button
+              key={t}
+              variant={selectedProductType === t ? "default" : "outline"}
+              size="sm"
+              className="h-8 px-3"
+              onClick={() => setSelectedProductType(t)}
+            >
+              {t === "all" ? "All" : t.charAt(0).toUpperCase() + t.slice(1)}
+            </Button>
+          ))}
+        </div>
+
+        {/* Slot Checkboxes */}
+        <div className="flex items-center gap-2 border-l pl-3">
+          {SLOTS.map((slot) => (
+            <label key={slot} className="flex items-center gap-1 text-sm cursor-pointer">
+              <Checkbox
+                checked={selectedSlots.has(slot)}
+                onCheckedChange={() => toggleSlot(slot)}
+                className="h-4 w-4"
+              />
+              <span>{slot}</span>
+            </label>
+          ))}
+        </div>
+
+        {/* Model Selector */}
+        <Select value={selectedModel} onValueChange={setSelectedModel}>
+          <SelectTrigger className="w-24">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {imageModels.map((m) => (
+              <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* AVA Organise (Ghost) */}
         <Button
+          variant="ghost"
+          size="sm"
           onClick={handleOrganizeImages}
           disabled={isOrganizing || !selectedBrand}
-          className="w-full h-12 text-base font-semibold bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 hover:from-violet-600 hover:via-fuchsia-600 hover:to-pink-600 text-white shadow-lg hover:shadow-xl transition-all duration-300 border-0"
+          className="text-muted-foreground hover:text-foreground"
         >
           {isOrganizing ? (
             <>
-              <Loader2 className="w-5 h-5 animate-spin mr-2" />
-              AVA is organizing... {organizeProgress.total > 0 && `(${organizeProgress.current}/${organizeProgress.total})`}
+              <Loader2 className="w-4 h-4 animate-spin mr-1" />
+              {organizeProgress.total > 0 && `${organizeProgress.current}/${organizeProgress.total}`}
             </>
           ) : (
             <>
-              <Sparkles className="w-5 h-5 mr-2" />
-              ✨ AVA Organise
+              <Sparkles className="w-4 h-4 mr-1" />
+              AVA
             </>
           )}
         </Button>
-        
-        {isOrganizing && organizeProgress.total > 0 && (
-          <div className="space-y-1">
-            <Progress 
-              value={(organizeProgress.current / Math.max(organizeProgress.total, 1)) * 100} 
-              className="h-2 bg-violet-100"
-            />
-            <p className="text-xs text-muted-foreground text-center">
-              Analyzing image {organizeProgress.current} of {organizeProgress.total}
-            </p>
-          </div>
+
+        {/* Generate / Stop */}
+        {isGenerating ? (
+          <Button variant="destructive" size="sm" onClick={handleStopGeneration}>
+            <StopCircle className="w-4 h-4 mr-1" />
+            Stop
+          </Button>
+        ) : (
+          <Button size="sm" onClick={handleGenerateClay} disabled={!selectedBrand || pendingImages.length === 0}>
+            <Palette className="w-4 h-4 mr-1" />
+            Generate ({pendingImages.length})
+          </Button>
         )}
       </div>
 
-      {/* Controls */}
-      <Card className="p-6">
-        <h3 className="text-lg font-medium mb-4">Generate Clay Models</h3>
-        <div className="grid md:grid-cols-3 gap-4 mb-4">
-          <div className="space-y-2">
-            <Label>Brand</Label>
-            <Select value={selectedBrand} onValueChange={setSelectedBrand}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select brand" />
-              </SelectTrigger>
-              <SelectContent>
-                {brands.map((brand) => (
-                  <SelectItem key={brand.id} value={brand.id}>
-                    {brand.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Gender</Label>
-            <Select value={selectedGender} onValueChange={setSelectedGender}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="men">Men</SelectItem>
-                <SelectItem value="women">Women</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Product Type</Label>
-            <Select value={selectedProductType} onValueChange={setSelectedProductType}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="tops">Tops</SelectItem>
-                <SelectItem value="trousers">Trousers</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>AI Model</Label>
-            <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {imageModels.map((model) => (
-                  <SelectItem key={model.value} value={model.value}>
-                    {model.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+      {/* Progress Bar (when generating) */}
+      {isGenerating && (
+        <div className="px-3 py-2 border-b bg-muted/30">
+          <div className="flex items-center gap-2">
+            <Progress value={(progress.current / Math.max(progress.total, 1)) * 100} className="h-1.5 flex-1" />
+            <span className="text-xs font-medium">{progress.current}/{progress.total}</span>
           </div>
         </div>
-
-        <div className="flex items-center gap-4">
-          <div className="flex-1 space-y-2">
-            <Label>Slots</Label>
-            <div className="flex gap-4">
-              {slots.map((slot) => (
-                <label key={slot} className="flex items-center gap-1.5 text-sm">
-                  <Checkbox
-                    checked={selectedSlots.has(slot)}
-                    onCheckedChange={() => toggleSlot(slot)}
-                  />
-                  {slot}
-                </label>
-              ))}
-            </div>
-          </div>
-          {isGenerating ? (
-            <Button
-              onClick={handleStopGeneration}
-              variant="destructive"
-            >
-              <StopCircle className="w-4 h-4 mr-2" />
-              Stop
-            </Button>
-          ) : (
-            <Button
-              onClick={handleGenerateClay}
-              disabled={!selectedBrand}
-            >
-              <Palette className="w-4 h-4 mr-2" />
-              Generate Clay
-            </Button>
-          )}
-        </div>
-
-        {isGenerating && (
-          <div className="mt-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Progress value={(progress.current / Math.max(progress.total, 1)) * 100} className="h-2 flex-1" />
-              <span className="text-sm font-medium">
-                {Math.round((progress.current / Math.max(progress.total, 1)) * 100)}%
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {progress.current} / {progress.total} images processed
-            </p>
-          </div>
-        )}
-        
-        {!isGenerating && progress.total > 0 && progress.current >= progress.total && (
-          <div className="mt-4 flex items-center gap-2 text-sm text-green-600">
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Generation complete!</span>
-          </div>
-        )}
-      </Card>
-
-      {/* Bulk Actions Toolbar */}
-      {selectedImages.size > 0 && (
-        <Card className="p-3 sticky top-0 z-10 bg-background/95 backdrop-blur border-primary/50">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Badge variant="secondary" className="text-sm">
-                {selectedImages.size} selected
-              </Badge>
-              <Button variant="ghost" size="sm" onClick={clearSelection}>
-                <X className="w-4 h-4 mr-1" />
-                Clear
-              </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <ArrowRightLeft className="w-4 h-4 mr-2" />
-                    Move to...
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  {slots.map((s) => (
-                    <DropdownMenuItem key={s} onClick={() => handleBulkMove(s)}>
-                      {s}: {slotLabels[s]}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete
-              </Button>
-            </div>
-          </div>
-        </Card>
       )}
 
-      {/* Image Gallery by Slot - Shows only images without clay versions */}
-      {selectedBrand && (
-        <div className="space-y-6">
-          {slots.map((slot) => {
-            const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
-            const slotImages = getImagesForSlot(slot).filter(
-              (img) => !existingClayIds.has(img.id)
-            );
-            if (!selectedSlots.has(slot) || slotImages.length === 0) return null;
+      {/* Dense Image Grid */}
+      <div className="flex-1 overflow-auto p-3" ref={gridRef}>
+        {selectedBrand && pendingImages.length > 0 && (
+          <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 xl:grid-cols-14 gap-1.5">
+            {pendingImages.map((img) => {
+              const isSelected = selectedImages.has(img.id);
+              return (
+                <div
+                  key={img.id}
+                  className={`aspect-[3/4] rounded overflow-hidden relative cursor-pointer group transition-all ${
+                    isSelected ? "ring-2 ring-primary ring-offset-1 scale-[1.02]" : "hover:ring-1 hover:ring-muted-foreground/50"
+                  }`}
+                  onClick={(e) => handleImageClick(img.id, e)}
+                >
+                  {img.stored_url ? (
+                    <img src={img.stored_url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div className="w-full h-full bg-muted flex items-center justify-center">
+                      <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                  )}
 
-            const allSlotSelected = slotImages.every((img) => selectedImages.has(img.id));
-
-            return (
-              <div key={slot}>
-                <div className="flex items-center gap-2 mb-3">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-2"
-                    onClick={() => selectAllInSlot(slot)}
+                  {/* Slot Badge */}
+                  <Badge
+                    variant="secondary"
+                    className="absolute bottom-1 left-1 text-[10px] px-1 py-0 h-4 bg-background/80 backdrop-blur"
                   >
-                    {allSlotSelected ? (
-                      <CheckSquare className="w-4 h-4 text-primary" />
-                    ) : (
-                      <Square className="w-4 h-4" />
-                    )}
-                  </Button>
-                  <Badge variant="outline">{slot}</Badge>
-                  <span className="text-sm font-medium">{slotLabels[slot]}</span>
-                  <span className="text-sm text-muted-foreground">
-                    ({slotImages.length} pending)
-                  </span>
-                </div>
+                    {img.slot}
+                  </Badge>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                  {slotImages.map((img) => {
-                    const isSelected = selectedImages.has(img.id);
-                    return (
-                      <div key={img.id} className="space-y-2 group relative">
-                        <div 
-                          className={`aspect-[3/4] rounded-lg overflow-hidden bg-muted border relative cursor-pointer transition-all ${
-                            isSelected ? 'ring-2 ring-primary ring-offset-2' : ''
-                          }`}
-                          onClick={() => toggleImageSelection(img.id)}
-                        >
-                          {img.stored_url ? (
-                            <img
-                              src={img.stored_url}
-                              alt="Product"
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <ImageIcon className="w-8 h-8 text-muted-foreground" />
-                            </div>
-                          )}
-                          {/* Selection indicator */}
-                          <div className={`absolute top-2 left-2 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-                              isSelected ? 'bg-primary text-primary-foreground' : 'bg-background/80 border'
-                            }`}>
-                              {isSelected && <CheckCircle2 className="w-4 h-4" />}
-                            </div>
-                          </div>
-                          {/* Action buttons */}
-                          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="secondary"
-                                  size="icon"
-                                  className="h-7 w-7"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <ArrowRightLeft className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent>
-                                {slots.filter((s) => s !== img.slot).map((s) => (
-                                  <DropdownMenuItem
-                                    key={s}
-                                    onClick={() => handleMoveToSlot(img.id, s)}
-                                  >
-                                    Move to {s} ({slotLabels[s]})
-                                  </DropdownMenuItem>
-                                ))}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                            <Button
-                              variant="destructive"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteImage(img.id);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {/* Selection Checkbox */}
+                  <div
+                    className={`absolute top-1 left-1 w-5 h-5 rounded flex items-center justify-center transition-opacity ${
+                      isSelected ? "opacity-100 bg-primary text-primary-foreground" : "opacity-0 group-hover:opacity-100 bg-background/80 border"
+                    }`}
+                  >
+                    {isSelected && <Check className="w-3 h-3" />}
+                  </div>
+
+                  {/* Delete on Hover */}
+                  <button
+                    onClick={(e) => handleDeleteImage(img.id, e)}
+                    className="absolute top-1 right-1 w-5 h-5 rounded bg-destructive/80 text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+        )}
+
+        {/* Empty States */}
+        {selectedBrand && productImages.length === 0 && (
+          <Card className="p-8 text-center text-muted-foreground">
+            <Palette className="w-10 h-10 mx-auto mb-3 opacity-50" />
+            <p>No product images found</p>
+            <p className="text-sm">Scrape a brand first</p>
+          </Card>
+        )}
+
+        {selectedBrand && productImages.length > 0 && pendingImages.length === 0 && (
+          <Card className="p-6 text-center border-primary/30 bg-primary/5">
+            <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-primary" />
+            <p className="font-medium">All images have clay versions</p>
+            <p className="text-sm text-muted-foreground">{completedCount} clay poses ready</p>
+          </Card>
+        )}
+
+        {!selectedBrand && (
+          <Card className="p-8 text-center text-muted-foreground">
+            <ImageIcon className="w-10 h-10 mx-auto mb-3 opacity-50" />
+            <p>Select a brand to view images</p>
+          </Card>
+        )}
+      </div>
+
+      {/* Persistent Bulk Action Bar */}
+      <div className="border-t bg-background p-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => (selectedImages.size === pendingImages.length ? clearSelection() : selectAll())}
+            disabled={pendingImages.length === 0}
+          >
+            {selectedImages.size === pendingImages.length && pendingImages.length > 0 ? (
+              <XIcon className="w-4 h-4 mr-1" />
+            ) : (
+              <Checkbox checked={selectedImages.size > 0 && selectedImages.size === pendingImages.length} className="mr-1" />
+            )}
+            {selectedImages.size === pendingImages.length && pendingImages.length > 0 ? "Deselect All" : "Select All"}
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            {pendingImages.length} images{selectedImages.size > 0 && ` · ${selectedImages.size} selected`}
+          </span>
         </div>
-      )}
 
-      {selectedBrand && productImages.length === 0 && (
-        <Card className="p-8 text-center text-muted-foreground">
-          <Palette className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p>No product images found</p>
-          <p className="text-sm">Scrape a brand first to get images</p>
-        </Card>
-      )}
+        <div className="flex items-center gap-1.5">
+          {/* Move to Slot Buttons */}
+          {SLOTS.map((slot) => (
+            <Button
+              key={slot}
+              variant="outline"
+              size="sm"
+              onClick={() => handleBulkMove(slot)}
+              disabled={selectedImages.size === 0}
+              className="w-8 h-8 p-0"
+              title={`Move to ${SLOT_LABELS[slot]} (${slot === "A" ? "1" : slot === "B" ? "2" : slot === "C" ? "3" : "4"})`}
+            >
+              {slot}
+            </Button>
+          ))}
 
-      {selectedBrand && productImages.length > 0 && (
-        (() => {
-          const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
-          const pendingCount = productImages.filter((img) => !existingClayIds.has(img.id)).length;
-          const completedCount = clayImages.length;
-          
-          return pendingCount === 0 ? (
-            <Card className="p-6 text-center border-primary/30 bg-primary/5">
-              <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-primary" />
-              <p className="font-medium">All images have clay versions</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                {completedCount} clay poses ready in the library
-              </p>
-            </Card>
-          ) : null;
-        })()
-      )}
+          {/* Delete */}
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleBulkDelete}
+            disabled={selectedImages.size === 0}
+            className="ml-2"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
