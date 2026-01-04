@@ -4,14 +4,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
   MessageSquare,
   Send,
   Lock,
-  CornerDownRight,
+  ChevronLeft,
+  ChevronRight,
+  Target,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ReviewThread, ReviewComment, ImageAnnotation, CommentVisibility } from '@/types/review';
@@ -26,7 +28,12 @@ interface ThreadPanelProps {
   selectedAnnotationId: string | null;
   selectedAssetId: string | null;
   onSelectAnnotation: (annotationId: string | null) => void;
+  onJumpToAnnotation?: (annotationId: string) => void;
   isInternal: boolean;
+  // Issue navigation
+  allAnnotations?: { annotationId: string; assetId: string; assetLabel?: string }[];
+  currentIssueIndex?: number;
+  onNavigateIssue?: (direction: 'prev' | 'next') => void;
 }
 
 export function ThreadPanel({
@@ -36,13 +43,18 @@ export function ThreadPanel({
   selectedAnnotationId,
   selectedAssetId,
   onSelectAnnotation,
+  onJumpToAnnotation,
   isInternal,
+  allAnnotations = [],
+  currentIssueIndex = -1,
+  onNavigateIssue,
 }: ThreadPanelProps) {
   const { user } = useAuth();
   const [newComment, setNewComment] = useState('');
   const [isInternalOnly, setIsInternalOnly] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'asset' | 'annotations'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'annotations'>('annotations');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const selectedAnnotationRef = useRef<HTMLDivElement>(null);
 
   const addComment = useAddComment();
   const createThread = useCreateThread();
@@ -50,7 +62,6 @@ export function ThreadPanel({
   // Filter threads based on active tab and selected asset
   const filteredThreads = threads.filter(t => {
     if (activeTab === 'all') return t.scope === 'JOB';
-    if (activeTab === 'asset' && selectedAssetId) return t.scope === 'ASSET' && t.asset_id === selectedAssetId;
     if (activeTab === 'annotations') return t.scope === 'ANNOTATION' && t.asset_id === selectedAssetId;
     return false;
   });
@@ -62,6 +73,10 @@ export function ThreadPanel({
 
   // Get the thread to show in detail
   const activeThread = selectedAnnotationThread || filteredThreads[0];
+
+  // Total comment count
+  const totalComments = threads.reduce((acc, t) => acc + (t.comments?.length || 0), 0);
+  const totalIssues = allAnnotations.length;
 
   const handleSendComment = async () => {
     if (!newComment.trim()) return;
@@ -96,6 +111,13 @@ export function ThreadPanel({
     }
   }, [activeThread?.comments]);
 
+  // Scroll to selected annotation in list
+  useEffect(() => {
+    if (selectedAnnotationRef.current) {
+      selectedAnnotationRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedAnnotationId]);
+
   const getInitials = (name: string | null | undefined, email: string | undefined) => {
     if (name) return name.slice(0, 2).toUpperCase();
     if (email) return email.slice(0, 2).toUpperCase();
@@ -110,16 +132,15 @@ export function ThreadPanel({
           <MessageSquare className="h-4 w-4 text-muted-foreground" />
           <span className="font-medium text-sm">Comments</span>
           <Badge variant="secondary" className="ml-auto text-xs">
-            {threads.reduce((acc, t) => acc + (t.comments?.length || 0), 0)}
+            {totalComments}
           </Badge>
         </div>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-          <TabsList className="w-full grid grid-cols-3">
-            <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
-            <TabsTrigger value="asset" className="text-xs">Asset</TabsTrigger>
+          <TabsList className="w-full grid grid-cols-2">
+            <TabsTrigger value="all" className="text-xs">General</TabsTrigger>
             <TabsTrigger value="annotations" className="text-xs">
-              Annotations
+              Issues
               {annotations.length > 0 && (
                 <span className="ml-1 text-primary">({annotations.length})</span>
               )}
@@ -128,28 +149,102 @@ export function ThreadPanel({
         </Tabs>
       </div>
 
+      {/* Issue Navigation (when in annotations tab) */}
+      {activeTab === 'annotations' && totalIssues > 0 && onNavigateIssue && (
+        <div className="px-3 py-2 border-b border-border bg-muted/30 flex items-center justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            disabled={currentIssueIndex <= 0}
+            onClick={() => onNavigateIssue('prev')}
+          >
+            <ChevronLeft className="h-3 w-3 mr-1" />
+            Prev
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            {currentIssueIndex >= 0 ? `${currentIssueIndex + 1} of ${totalIssues}` : `${totalIssues} issues`}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            disabled={currentIssueIndex >= totalIssues - 1}
+            onClick={() => onNavigateIssue('next')}
+          >
+            Next
+            <ChevronRight className="h-3 w-3 ml-1" />
+          </Button>
+        </div>
+      )}
+
       {/* Annotation List (when in annotations tab) */}
       {activeTab === 'annotations' && (
-        <div className="p-2 border-b border-border bg-muted/30">
-          <ScrollArea className="max-h-24">
-            <div className="flex gap-1 flex-wrap">
-              {annotations.map((ann, idx) => (
-                <Button
-                  key={ann.id}
-                  variant={selectedAnnotationId === ann.id ? 'default' : 'outline'}
-                  size="sm"
-                  className="text-xs h-7"
-                  onClick={() => onSelectAnnotation(
-                    selectedAnnotationId === ann.id ? null : ann.id
-                  )}
-                >
-                  #{idx + 1}
-                </Button>
-              ))}
+        <div className="border-b border-border">
+          <ScrollArea className="max-h-40">
+            <div className="p-2 space-y-1">
+              {annotations.map((ann, idx) => {
+                const annThread = threads.find(t => t.annotation_id === ann.id);
+                const commentCount = annThread?.comments?.length || 0;
+                const firstComment = annThread?.comments?.[0];
+                const isSelected = selectedAnnotationId === ann.id;
+                
+                return (
+                  <div
+                    key={ann.id}
+                    ref={isSelected ? selectedAnnotationRef : null}
+                    className={cn(
+                      "flex items-start gap-2 p-2 rounded-md cursor-pointer transition-colors",
+                      isSelected
+                        ? "bg-primary/10 border border-primary/30"
+                        : "hover:bg-muted/50"
+                    )}
+                    onClick={() => onSelectAnnotation(isSelected ? null : ann.id)}
+                  >
+                    <Badge 
+                      variant={isSelected ? "default" : "secondary"} 
+                      className="shrink-0 text-xs h-5 w-6 justify-center"
+                    >
+                      #{idx + 1}
+                    </Badge>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="font-medium truncate">
+                          {ann.created_by?.display_name || ann.created_by?.email?.split('@')[0] || 'Unknown'}
+                        </span>
+                        {commentCount > 0 && (
+                          <span className="text-muted-foreground">
+                            · {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
+                          </span>
+                        )}
+                      </div>
+                      {firstComment && (
+                        <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">
+                          {firstComment.body}
+                        </p>
+                      )}
+                    </div>
+                    {onJumpToAnnotation && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onJumpToAnnotation(ann.id);
+                        }}
+                        title="Jump to annotation"
+                      >
+                        <Target className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
               {annotations.length === 0 && (
-                <span className="text-xs text-muted-foreground p-2">
+                <div className="text-xs text-muted-foreground p-2 text-center">
                   No annotations yet. Draw on the image to create one.
-                </span>
+                </div>
               )}
             </div>
           </ScrollArea>

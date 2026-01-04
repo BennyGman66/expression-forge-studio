@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -19,7 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { ImageViewer } from './ImageViewer';
+import { ImageViewer, ImageViewerHandle } from './ImageViewer';
 import { ThreadPanel } from './ThreadPanel';
 import { AssetThumbnails } from './AssetThumbnails';
 import {
@@ -36,7 +36,7 @@ import {
 } from '@/hooks/useReviewSystem';
 import { useJob, useJobOutputs } from '@/hooks/useJobs';
 import { useAuth } from '@/contexts/AuthContext';
-import { SubmissionAsset, AnnotationRect, SubmissionStatus } from '@/types/review';
+import { SubmissionAsset, AnnotationRect, SubmissionStatus, ImageAnnotation } from '@/types/review';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import {
@@ -49,9 +49,16 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
+  Keyboard,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 interface JobReviewPanelProps {
   jobId: string;
@@ -60,6 +67,7 @@ interface JobReviewPanelProps {
 
 export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const { isInternal, user } = useAuth();
+  const imageViewerRef = useRef<ImageViewerHandle>(null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<SubmissionAsset | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -69,6 +77,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const [changesNote, setChangesNote] = useState('');
   const [showApproveDialog, setShowApproveDialog] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   const { data: job, isLoading: jobLoading } = useJob(jobId);
   const { data: submissions = [], refetch: refetchSubmissions } = useJobSubmissions(jobId);
@@ -85,6 +94,66 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const addComment = useAddComment();
   const createThread = useCreateThread();
   const createSubmission = useCreateSubmission();
+
+  // Build global list of all annotations across all assets for sequential navigation
+  const allAnnotations = useMemo(() => {
+    const result: { annotationId: string; assetId: string; assetLabel?: string }[] = [];
+    assets.forEach(asset => {
+      const assetThreads = threads.filter(t => t.asset_id === asset.id && t.scope === 'ANNOTATION');
+      assetThreads.forEach(thread => {
+        if (thread.annotation_id) {
+          result.push({
+            annotationId: thread.annotation_id,
+            assetId: asset.id,
+            assetLabel: asset.label || undefined,
+          });
+        }
+      });
+    });
+    return result;
+  }, [assets, threads]);
+
+  // Find current issue index
+  const currentIssueIndex = useMemo(() => {
+    if (!selectedAnnotationId) return -1;
+    return allAnnotations.findIndex(a => a.annotationId === selectedAnnotationId);
+  }, [selectedAnnotationId, allAnnotations]);
+
+  // Navigate to prev/next issue across all assets
+  const handleNavigateIssue = useCallback((direction: 'prev' | 'next') => {
+    if (allAnnotations.length === 0) return;
+    
+    let newIndex: number;
+    if (currentIssueIndex === -1) {
+      newIndex = direction === 'next' ? 0 : allAnnotations.length - 1;
+    } else {
+      newIndex = direction === 'next' 
+        ? Math.min(currentIssueIndex + 1, allAnnotations.length - 1)
+        : Math.max(currentIssueIndex - 1, 0);
+    }
+    
+    const target = allAnnotations[newIndex];
+    if (!target) return;
+    
+    // Switch asset if needed
+    if (target.assetId !== selectedAsset?.id) {
+      const newAsset = assets.find(a => a.id === target.assetId);
+      if (newAsset) setSelectedAsset(newAsset);
+    }
+    
+    setSelectedAnnotationId(target.annotationId);
+    
+    // Scroll to annotation after a brief delay to let the asset switch
+    setTimeout(() => {
+      imageViewerRef.current?.scrollToAnnotation(target.annotationId);
+    }, 100);
+  }, [allAnnotations, currentIssueIndex, selectedAsset, assets]);
+
+  // Jump to specific annotation from ThreadPanel
+  const handleJumpToAnnotation = useCallback((annotationId: string) => {
+    setSelectedAnnotationId(annotationId);
+    imageViewerRef.current?.scrollToAnnotation(annotationId);
+  }, []);
 
   // Backfill legacy jobs that were SUBMITTED before the review system
   useEffect(() => {
@@ -236,6 +305,11 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in inputs
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         const currentIndex = assets.findIndex(a => a.id === selectedAsset?.id);
         if (currentIndex === -1) return;
@@ -248,15 +322,33 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
           setSelectedAnnotationId(null);
         }
       }
+      
+      // Issue navigation with [ and ]
+      if (e.key === '[') {
+        handleNavigateIssue('prev');
+      } else if (e.key === ']') {
+        handleNavigateIssue('next');
+      }
+      
+      // Toggle drawing with D
+      if (e.key === 'd' || e.key === 'D') {
+        if (isInternal) setIsDrawing(prev => !prev);
+      }
+      
       if (e.key === 'Escape') {
         if (isDrawing) setIsDrawing(false);
         else if (selectedAnnotationId) setSelectedAnnotationId(null);
+      }
+      
+      // Show shortcuts with ?
+      if (e.key === '?') {
+        setShowShortcuts(prev => !prev);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [assets, selectedAsset, isDrawing, selectedAnnotationId]);
+  }, [assets, selectedAsset, isDrawing, selectedAnnotationId, handleNavigateIssue, isInternal]);
 
   const getStatusBadgeStyle = (status: SubmissionStatus) => {
     switch (status) {
@@ -289,237 +381,266 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const currentAssetIndex = assets.findIndex(a => a.id === selectedAsset?.id);
 
   return (
-    <div className="fixed inset-0 bg-background z-50 flex flex-col">
-      {/* Top Bar */}
-      <div className="h-14 border-b border-border bg-card px-4 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="h-5 w-5" />
-          </Button>
-          
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-xs">
-              {job?.type?.replace(/_/g, ' ')}
-            </Badge>
-            <span className="text-sm font-medium">
-              {job?.title || `Job ${jobId.slice(0, 8)}`}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <User className="h-4 w-4" />
-            <span>
-              {selectedSubmission?.submitted_by?.display_name || 
-               selectedSubmission?.submitted_by?.email || 
-               'Unknown'}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* Version Selector */}
-          <Select value={selectedVersion || ''} onValueChange={setSelectedVersion}>
-            <SelectTrigger className="w-32">
-              <SelectValue placeholder="Version" />
-            </SelectTrigger>
-            <SelectContent>
-              {submissions.map((sub) => (
-                <SelectItem key={sub.id} value={sub.id}>
-                  v{sub.version_number}
-                  {sub.status === 'APPROVED' && ' ✓'}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* Status Badge */}
-          <Badge 
-            variant="outline" 
-            className={getStatusBadgeStyle(selectedSubmission?.status || 'SUBMITTED')}
-          >
-            {selectedSubmission?.status?.replace('_', ' ')}
-          </Badge>
-
-          {/* Actions */}
-          {isInternal && selectedSubmission?.status !== 'APPROVED' && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowChangesDialog(true)}
-                className="gap-1"
-              >
-                <AlertTriangle className="h-4 w-4" />
-                Request Changes
-              </Button>
-              <Button
-                size="sm"
-                variant="glow"
-                onClick={() => setShowApproveDialog(true)}
-                className="gap-1"
-              >
-                <Check className="h-4 w-4" />
-                Approve
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 flex min-h-0">
-        {/* Left: Asset Thumbnails */}
-        <div className="w-24 border-r border-border bg-muted/30 shrink-0">
-          <AssetThumbnails
-            assets={assets}
-            selectedAssetId={selectedAsset?.id || null}
-            onSelect={(asset) => {
-              setSelectedAsset(asset);
-              setSelectedAnnotationId(null);
-            }}
-            annotationCounts={annotationCounts}
-          />
-        </div>
-
-        {/* Center: Image Viewer */}
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Asset Navigation */}
-          <div className="h-10 border-b border-border bg-card/50 px-4 flex items-center justify-between shrink-0">
+    <TooltipProvider>
+      <div className="fixed inset-0 bg-background z-50 flex flex-col">
+        {/* Top Bar */}
+        <div className="h-14 border-b border-border bg-card px-4 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={onClose}>
+              <X className="h-5 w-5" />
+            </Button>
+            
             <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                disabled={currentAssetIndex <= 0}
-                onClick={() => {
-                  if (currentAssetIndex > 0) {
-                    setSelectedAsset(assets[currentAssetIndex - 1]);
-                    setSelectedAnnotationId(null);
-                  }
-                }}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="text-sm">
-                {selectedAsset?.label || `Asset ${currentAssetIndex + 1}`}
-                <span className="text-muted-foreground ml-2">
-                  ({currentAssetIndex + 1}/{assets.length})
-                </span>
+              <Badge variant="outline" className="text-xs">
+                {job?.type?.replace(/_/g, ' ')}
+              </Badge>
+              <span className="text-sm font-medium">
+                {job?.title || `Job ${jobId.slice(0, 8)}`}
               </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                disabled={currentAssetIndex >= assets.length - 1}
-                onClick={() => {
-                  if (currentAssetIndex < assets.length - 1) {
-                    setSelectedAsset(assets[currentAssetIndex + 1]);
-                    setSelectedAnnotationId(null);
-                  }
-                }}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
             </div>
 
-            {isInternal && (
-              <Button
-                variant={isDrawing ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setIsDrawing(!isDrawing)}
-                className="gap-1"
-              >
-                <Pencil className="h-3 w-3" />
-                {isDrawing ? 'Drawing...' : 'Draw Annotation'}
-              </Button>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <User className="h-4 w-4" />
+              <span>
+                {selectedSubmission?.submitted_by?.display_name || 
+                 selectedSubmission?.submitted_by?.email || 
+                 'Unknown'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Keyboard shortcuts help */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => setShowShortcuts(prev => !prev)}
+                >
+                  <Keyboard className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[200px]">
+                <div className="text-xs space-y-1">
+                  <p><kbd className="px-1 bg-muted rounded">←→</kbd> Navigate assets</p>
+                  <p><kbd className="px-1 bg-muted rounded">[]</kbd> Navigate issues</p>
+                  <p><kbd className="px-1 bg-muted rounded">D</kbd> Toggle draw mode</p>
+                  <p><kbd className="px-1 bg-muted rounded">Esc</kbd> Cancel/deselect</p>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+            
+            {/* Version Selector */}
+            <Select value={selectedVersion || ''} onValueChange={setSelectedVersion}>
+              <SelectTrigger className="w-32">
+                <SelectValue placeholder="Version" />
+              </SelectTrigger>
+              <SelectContent>
+                {submissions.map((sub) => (
+                  <SelectItem key={sub.id} value={sub.id}>
+                    v{sub.version_number}
+                    {sub.status === 'APPROVED' && ' ✓'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Status Badge */}
+            <Badge 
+              variant="outline" 
+              className={getStatusBadgeStyle(selectedSubmission?.status || 'SUBMITTED')}
+            >
+              {selectedSubmission?.status?.replace('_', ' ')}
+            </Badge>
+
+            {/* Actions */}
+            {isInternal && selectedSubmission?.status !== 'APPROVED' && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowChangesDialog(true)}
+                  className="gap-1"
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  Request Changes
+                </Button>
+                <Button
+                  size="sm"
+                  variant="glow"
+                  onClick={() => setShowApproveDialog(true)}
+                  className="gap-1"
+                >
+                  <Check className="h-4 w-4" />
+                  Approve
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 flex min-h-0">
+          {/* Left: Asset Thumbnails */}
+          <div className="w-24 border-r border-border bg-muted/30 shrink-0">
+            <AssetThumbnails
+              assets={assets}
+              selectedAssetId={selectedAsset?.id || null}
+              onSelect={(asset) => {
+                setSelectedAsset(asset);
+                setSelectedAnnotationId(null);
+              }}
+              annotationCounts={annotationCounts}
+            />
+          </div>
+
+          {/* Center: Image Viewer */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Asset Navigation */}
+            <div className="h-10 border-b border-border bg-card/50 px-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={currentAssetIndex <= 0}
+                  onClick={() => {
+                    if (currentAssetIndex > 0) {
+                      setSelectedAsset(assets[currentAssetIndex - 1]);
+                      setSelectedAnnotationId(null);
+                    }
+                  }}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm">
+                  {selectedAsset?.label || `Asset ${currentAssetIndex + 1}`}
+                  <span className="text-muted-foreground ml-2">
+                    ({currentAssetIndex + 1}/{assets.length})
+                  </span>
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={currentAssetIndex >= assets.length - 1}
+                  onClick={() => {
+                    if (currentAssetIndex < assets.length - 1) {
+                      setSelectedAsset(assets[currentAssetIndex + 1]);
+                      setSelectedAnnotationId(null);
+                    }
+                  }}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {isInternal && (
+                <Button
+                  variant={isDrawing ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setIsDrawing(!isDrawing)}
+                  className="gap-1"
+                >
+                  <Pencil className="h-3 w-3" />
+                  {isDrawing ? 'Drawing...' : 'Draw Annotation'}
+                </Button>
+              )}
+            </div>
+
+            {/* Image Viewer */}
+            {selectedAsset?.file_url ? (
+              <ImageViewer
+                ref={imageViewerRef}
+                src={selectedAsset.file_url}
+                alt={selectedAsset.label || 'Asset'}
+                annotations={annotations}
+                selectedAnnotationId={selectedAnnotationId}
+                onAnnotationClick={(ann) => setSelectedAnnotationId(ann.id)}
+                onAnnotationCreate={handleAnnotationCreate}
+                isDrawing={isDrawing}
+                showAnnotations={showAnnotations}
+                onToggleAnnotations={() => setShowAnnotations(!showAnnotations)}
+                className="flex-1"
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-muted-foreground">
+                No image available
+              </div>
             )}
           </div>
 
-          {/* Image Viewer */}
-          {selectedAsset?.file_url ? (
-            <ImageViewer
-              src={selectedAsset.file_url}
-              alt={selectedAsset.label || 'Asset'}
+          {/* Right: Comments Panel */}
+          <div className="w-80 shrink-0">
+            <ThreadPanel
+              submissionId={selectedSubmission?.id || ''}
+              threads={threads}
               annotations={annotations}
               selectedAnnotationId={selectedAnnotationId}
-              onAnnotationClick={(ann) => setSelectedAnnotationId(ann.id)}
-              onAnnotationCreate={handleAnnotationCreate}
-              isDrawing={isDrawing}
-              showAnnotations={showAnnotations}
-              onToggleAnnotations={() => setShowAnnotations(!showAnnotations)}
-              className="flex-1"
+              selectedAssetId={selectedAsset?.id || null}
+              onSelectAnnotation={setSelectedAnnotationId}
+              onJumpToAnnotation={handleJumpToAnnotation}
+              isInternal={isInternal}
+              allAnnotations={allAnnotations}
+              currentIssueIndex={currentIssueIndex}
+              onNavigateIssue={handleNavigateIssue}
             />
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground">
-              No image available
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* Right: Comments Panel */}
-        <div className="w-80 shrink-0">
-          <ThreadPanel
-            submissionId={selectedSubmission?.id || ''}
-            threads={threads}
-            annotations={annotations}
-            selectedAnnotationId={selectedAnnotationId}
-            selectedAssetId={selectedAsset?.id || null}
-            onSelectAnnotation={setSelectedAnnotationId}
-            isInternal={isInternal}
-          />
-        </div>
+        {/* Request Changes Dialog */}
+        <AlertDialog open={showChangesDialog} onOpenChange={setShowChangesDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Request Changes</AlertDialogTitle>
+              <AlertDialogDescription>
+                The freelancer will be notified and can view your annotations and comments.
+                Add a summary of what needs to be changed:
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <Textarea
+              placeholder="Describe the changes needed..."
+              value={changesNote}
+              onChange={(e) => setChangesNote(e.target.value)}
+              className="min-h-[100px]"
+            />
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleRequestChanges}
+                disabled={updateStatus.isPending}
+              >
+                Request Changes
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Approve Dialog */}
+        <AlertDialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Approve Submission</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will mark the submission as approved and notify the freelancer.
+                The job will move to the approved state.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleApprove}
+                disabled={updateStatus.isPending}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                Approve
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
-
-      {/* Request Changes Dialog */}
-      <AlertDialog open={showChangesDialog} onOpenChange={setShowChangesDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Request Changes</AlertDialogTitle>
-            <AlertDialogDescription>
-              The freelancer will be notified and can view your annotations and comments.
-              Add a summary of what needs to be changed:
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <Textarea
-            placeholder="Describe the changes needed..."
-            value={changesNote}
-            onChange={(e) => setChangesNote(e.target.value)}
-            className="min-h-[100px]"
-          />
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleRequestChanges}
-              disabled={updateStatus.isPending}
-            >
-              Request Changes
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Approve Dialog */}
-      <AlertDialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Approve Submission</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will mark the submission as approved and notify the freelancer.
-              The job will move to the approved state.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleApprove}
-              disabled={updateStatus.isPending}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              Approve
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+    </TooltipProvider>
   );
 }
