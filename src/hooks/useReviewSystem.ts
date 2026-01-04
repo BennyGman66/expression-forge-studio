@@ -654,16 +654,22 @@ export function useCreateResubmission() {
       if (subError) throw subError;
       
       // Create new assets - use replacement URLs where provided, otherwise copy from previous
-      const newAssets = (prevAssets || []).map((asset, index) => ({
-        submission_id: submission.id,
-        file_url: replacements.get(asset.id) || asset.file_url,
-        label: asset.label,
-        sort_index: index,
-        // Reset review status for new submission
-        review_status: null,
-        reviewed_by_user_id: null,
-        reviewed_at: null,
-      }));
+      // Carry over APPROVED status for unchanged assets
+      const newAssets = (prevAssets || []).map((asset, index) => {
+        const wasReplaced = replacements.has(asset.id);
+        const wasApproved = asset.review_status === 'APPROVED';
+        
+        return {
+          submission_id: submission.id,
+          file_url: replacements.get(asset.id) || asset.file_url,
+          label: asset.label,
+          sort_index: index,
+          // Keep APPROVED status if asset wasn't replaced and was previously approved
+          review_status: (!wasReplaced && wasApproved) ? 'APPROVED' : null,
+          reviewed_by_user_id: (!wasReplaced && wasApproved) ? asset.reviewed_by_user_id : null,
+          reviewed_at: (!wasReplaced && wasApproved) ? asset.reviewed_at : null,
+        };
+      });
       
       if (newAssets.length > 0) {
         const { error: assetError } = await supabase
@@ -739,14 +745,37 @@ export function useJobsReviewProgress() {
   return useQuery({
     queryKey: ['jobs-review-progress'],
     queryFn: async () => {
-      // Fetch all submission assets with their job IDs
+      // First get all submissions to find the latest per job
+      const { data: submissions, error: subError } = await supabase
+        .from('job_submissions')
+        .select('id, job_id, version_number')
+        .order('version_number', { ascending: false });
+      
+      if (subError) throw subError;
+      
+      // Get only the highest version per job
+      const latestByJob = new Map<string, string>();
+      for (const sub of submissions || []) {
+        if (!latestByJob.has(sub.job_id)) {
+          latestByJob.set(sub.job_id, sub.id);
+        }
+      }
+      
+      const latestSubmissionIds = Array.from(latestByJob.values());
+      
+      if (latestSubmissionIds.length === 0) {
+        return {} as ReviewProgressMap;
+      }
+      
+      // Fetch assets only for latest submissions
       const { data, error } = await supabase
         .from('submission_assets')
         .select(`
           id,
           review_status,
           submission:job_submissions!inner(job_id)
-        `);
+        `)
+        .in('submission_id', latestSubmissionIds);
       
       if (error) throw error;
       
