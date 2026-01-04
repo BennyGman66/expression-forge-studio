@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -9,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, Palette, Image as ImageIcon, Trash2, CheckCircle2, Sparkles, StopCircle, Check, X as XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { usePipelineJobs } from "@/hooks/usePipelineJobs";
 import type { Brand, ProductImage, ClayImage, ImageSlot } from "@/types/avatar-repose";
 
 const SLOTS: ImageSlot[] = ["A", "B", "C", "D"];
@@ -20,6 +22,8 @@ const SLOT_LABELS: Record<ImageSlot, string> = {
 };
 
 export function ClayGenerationPanel() {
+  const navigate = useNavigate();
+  const { createJob, updateProgress, setStatus } = usePipelineJobs();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<string>("");
   const [selectedGender, setSelectedGender] = useState<string>("all");
@@ -176,14 +180,35 @@ export function ClayGenerationPanel() {
     setIsGenerating(true);
     shouldStopRef.current = false;
     setProgress({ current: 0, total: imagesToProcess.length });
+    
+    const brandName = brands.find(b => b.id === selectedBrand)?.name || 'Unknown';
+    
+    // Create a pipeline job for tracking
+    let jobId: string | null = null;
+    try {
+      jobId = await createJob({
+        type: 'CLAY_GENERATION',
+        title: `Generate Clay - ${brandName}`,
+        total: imagesToProcess.length,
+        origin_route: `/brand-pose-library?tab=clay`,
+        origin_context: { brandId: selectedBrand, brandName, slots: Array.from(selectedSlots) },
+        supports_pause: false,
+        supports_retry: false,
+      });
+    } catch (err) {
+      console.error('Failed to create pipeline job:', err);
+    }
+    
     toast.info(`Generating clay for ${imagesToProcess.length} images...`);
 
     let processed = 0;
     let successCount = 0;
+    let failedCount = 0;
 
     for (const img of imagesToProcess) {
       if (shouldStopRef.current) {
         toast.info(`Stopped after ${processed} images`);
+        if (jobId) await setStatus(jobId, 'CANCELED');
         break;
       }
       try {
@@ -195,19 +220,38 @@ export function ClayGenerationPanel() {
           setClayImages((prev) => [...prev, { id: crypto.randomUUID(), product_image_id: img.id, stored_url: data.storedUrl, created_at: new Date().toISOString() } as ClayImage]);
         } else if (data?.skipped) {
           successCount++;
+        } else if (error) {
+          failedCount++;
         }
       } catch (err) {
         console.error(`Failed to process ${img.id}:`, err);
+        failedCount++;
       }
       processed++;
       setProgress({ current: processed, total: imagesToProcess.length });
+      
+      // Update pipeline job progress
+      if (jobId) {
+        await updateProgress(jobId, { 
+          done: successCount, 
+          failed: failedCount,
+          message: `Processing ${processed}/${imagesToProcess.length}...`
+        });
+      }
+      
       if (processed < imagesToProcess.length && !shouldStopRef.current) {
         await new Promise((r) => setTimeout(r, 500));
       }
     }
     setIsGenerating(false);
     if (!shouldStopRef.current) {
-      toast.success(`Clay complete! ${successCount} processed.`);
+      if (jobId) await setStatus(jobId, 'COMPLETED');
+      toast.success(`Clay complete! ${successCount} processed.`, {
+        action: {
+          label: "View Results",
+          onClick: () => navigate(`/brand-pose-library?tab=clay`),
+        },
+      });
     }
   };
 

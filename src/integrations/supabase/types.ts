@@ -2027,6 +2027,110 @@ export type Database = {
           },
         ]
       }
+      pipeline_job_events: {
+        Row: {
+          id: string
+          job_id: string
+          level: string
+          message: string
+          metadata: Json | null
+          timestamp: string
+        }
+        Insert: {
+          id?: string
+          job_id: string
+          level?: string
+          message: string
+          metadata?: Json | null
+          timestamp?: string
+        }
+        Update: {
+          id?: string
+          job_id?: string
+          level?: string
+          message?: string
+          metadata?: Json | null
+          timestamp?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_job_events_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pipeline_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          origin_context: Json | null
+          origin_route: string
+          progress_done: number
+          progress_failed: number
+          progress_message: string | null
+          progress_total: number
+          source_job_id: string | null
+          source_table: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["pipeline_job_status"]
+          supports_pause: boolean | null
+          supports_restart: boolean | null
+          supports_retry: boolean | null
+          title: string
+          type: Database["public"]["Enums"]["pipeline_job_type"]
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          origin_context?: Json | null
+          origin_route: string
+          progress_done?: number
+          progress_failed?: number
+          progress_message?: string | null
+          progress_total?: number
+          source_job_id?: string | null
+          source_table?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["pipeline_job_status"]
+          supports_pause?: boolean | null
+          supports_restart?: boolean | null
+          supports_retry?: boolean | null
+          title: string
+          type: Database["public"]["Enums"]["pipeline_job_type"]
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          origin_context?: Json | null
+          origin_route?: string
+          progress_done?: number
+          progress_failed?: number
+          progress_message?: string | null
+          progress_total?: number
+          source_job_id?: string | null
+          source_table?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["pipeline_job_status"]
+          supports_pause?: boolean | null
+          supports_restart?: boolean | null
+          supports_retry?: boolean | null
+          title?: string
+          type?: Database["public"]["Enums"]["pipeline_job_type"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       product_images: {
         Row: {
           created_at: string
@@ -2663,6 +2767,23 @@ export type Database = {
         | "PHOTOSHOP_FACE_APPLY"
         | "RETOUCH_FINAL"
         | "FOUNDATION_FACE_REPLACE"
+      pipeline_job_status:
+        | "QUEUED"
+        | "RUNNING"
+        | "PAUSED"
+        | "COMPLETED"
+        | "FAILED"
+        | "CANCELED"
+      pipeline_job_type:
+        | "SCRAPE_BRAND"
+        | "SCRAPE_FACES"
+        | "CLAY_GENERATION"
+        | "POSE_GENERATION"
+        | "FACE_GENERATION"
+        | "FACE_PAIRING"
+        | "CROP_GENERATION"
+        | "ORGANIZE_IMAGES"
+        | "OTHER"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2820,6 +2941,25 @@ export const Constants = {
         "PHOTOSHOP_FACE_APPLY",
         "RETOUCH_FINAL",
         "FOUNDATION_FACE_REPLACE",
+      ],
+      pipeline_job_status: [
+        "QUEUED",
+        "RUNNING",
+        "PAUSED",
+        "COMPLETED",
+        "FAILED",
+        "CANCELED",
+      ],
+      pipeline_job_type: [
+        "SCRAPE_BRAND",
+        "SCRAPE_FACES",
+        "CLAY_GENERATION",
+        "POSE_GENERATION",
+        "FACE_GENERATION",
+        "FACE_PAIRING",
+        "CROP_GENERATION",
+        "ORGANIZE_IMAGES",
+        "OTHER",
       ],
     },
   },

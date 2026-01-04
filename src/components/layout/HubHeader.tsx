@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { UserMenu } from "./UserMenu";
+import { JobTrackerIndicator } from "@/components/job-tracker";
 
 interface HubHeaderProps {
   currentApp?: string;
@@ -32,7 +33,8 @@ export function HubHeader({ currentApp, currentProject }: HubHeaderProps) {
         )}
       </nav>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
+        <JobTrackerIndicator />
         <UserMenu />
       </div>
     </header>
