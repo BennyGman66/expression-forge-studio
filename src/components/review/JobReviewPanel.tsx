@@ -29,6 +29,7 @@ import {
   useAssetAnnotations,
   useCreateAnnotation,
   useUpdateSubmissionStatus,
+  useUpdateAssetStatus,
   useCreateNotification,
   useAddComment,
   useCreateThread,
@@ -36,7 +37,7 @@ import {
 } from '@/hooks/useReviewSystem';
 import { useJob, useJobOutputs } from '@/hooks/useJobs';
 import { useAuth } from '@/contexts/AuthContext';
-import { SubmissionAsset, AnnotationRect, SubmissionStatus, ImageAnnotation } from '@/types/review';
+import { SubmissionAsset, AnnotationRect, SubmissionStatus, ImageAnnotation, AssetReviewStatus } from '@/types/review';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import {
@@ -85,6 +86,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
 
   const createAnnotation = useCreateAnnotation();
   const updateStatus = useUpdateSubmissionStatus();
+  const updateAssetStatus = useUpdateAssetStatus();
   const createNotification = useCreateNotification();
   const addComment = useAddComment();
   const createThread = useCreateThread();
@@ -236,45 +238,49 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     }
   }, [threads, pendingAnnotationId]);
 
-  const handleRequestChanges = async () => {
-    if (!selectedSubmission || !job) return;
+  // Per-asset: Request changes on current asset
+  const handleRequestChangesAsset = async () => {
+    if (!selectedSubmission || !job || !selectedAsset) return;
 
     try {
-      // Create a job-level thread if needed and add the note
-      let jobThread = threads.find(t => t.scope === 'JOB');
-      if (!jobThread) {
-        jobThread = await createThread.mutateAsync({
+      // Create an asset-level thread if needed and add the note
+      let assetThread = threads.find(t => t.scope === 'ASSET' && t.asset_id === selectedAsset.id);
+      if (!assetThread) {
+        assetThread = await createThread.mutateAsync({
           submissionId: selectedSubmission.id,
-          scope: 'JOB',
+          scope: 'ASSET',
+          assetId: selectedAsset.id,
         });
       }
       
       if (changesNote.trim()) {
         await addComment.mutateAsync({
-          threadId: jobThread.id,
+          threadId: assetThread.id,
           body: changesNote.trim(),
           visibility: 'SHARED',
         });
       }
 
-      // Update submission status
-      await updateStatus.mutateAsync({
-        submissionId: selectedSubmission.id,
+      // Update asset status
+      const result = await updateAssetStatus.mutateAsync({
+        assetId: selectedAsset.id,
         status: 'CHANGES_REQUESTED',
+        submissionId: selectedSubmission.id,
         jobId,
       });
 
-      // Notify freelancer
+      // Notify freelancer about this specific asset
       if (job.assigned_user_id) {
         await createNotification.mutateAsync({
           userId: job.assigned_user_id,
           type: 'CHANGES_REQUESTED',
           jobId,
           submissionId: selectedSubmission.id,
+          metadata: { assetLabel: selectedAsset.label },
         });
       }
 
-      toast.success('Changes requested. Freelancer has been notified.');
+      toast.success(`Changes requested for ${selectedAsset.label || 'asset'}`);
       setShowChangesDialog(false);
       setChangesNote('');
     } catch (error) {
@@ -282,32 +288,47 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     }
   };
 
-  const handleApprove = async () => {
-    if (!selectedSubmission || !job) return;
+  // Per-asset: Approve current asset
+  const handleApproveAsset = async () => {
+    if (!selectedSubmission || !job || !selectedAsset) return;
 
     try {
-      await updateStatus.mutateAsync({
-        submissionId: selectedSubmission.id,
+      const result = await updateAssetStatus.mutateAsync({
+        assetId: selectedAsset.id,
         status: 'APPROVED',
+        submissionId: selectedSubmission.id,
         jobId,
       });
 
-      // Notify freelancer
-      if (job.assigned_user_id) {
-        await createNotification.mutateAsync({
-          userId: job.assigned_user_id,
-          type: 'JOB_APPROVED',
-          jobId,
-          submissionId: selectedSubmission.id,
-        });
+      if (result.allApproved) {
+        // Notify freelancer that entire job is approved
+        if (job.assigned_user_id) {
+          await createNotification.mutateAsync({
+            userId: job.assigned_user_id,
+            type: 'JOB_APPROVED',
+            jobId,
+            submissionId: selectedSubmission.id,
+          });
+        }
+        toast.success('All assets approved! Job complete.');
+      } else {
+        toast.success(`${selectedAsset.label || 'Asset'} approved`);
       }
-
-      toast.success('Submission approved!');
+      
       setShowApproveDialog(false);
     } catch (error) {
-      toast.error('Failed to approve submission');
+      toast.error('Failed to approve asset');
     }
   };
+
+  // Get overall submission progress
+  const reviewProgress = useMemo(() => {
+    const total = assets.length;
+    const approved = assets.filter(a => a.review_status === 'APPROVED').length;
+    const changesRequested = assets.filter(a => a.review_status === 'CHANGES_REQUESTED').length;
+    const pending = total - approved - changesRequested;
+    return { total, approved, changesRequested, pending };
+  }, [assets]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -434,6 +455,14 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
               </Select>
             )}
 
+            {/* Overall Progress */}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>{reviewProgress.approved}/{reviewProgress.total} approved</span>
+              {reviewProgress.changesRequested > 0 && (
+                <span className="text-orange-400">({reviewProgress.changesRequested} needs changes)</span>
+              )}
+            </div>
+
             {/* Status Badge */}
             <Badge 
               variant="outline" 
@@ -442,14 +471,19 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
               {selectedSubmission?.status?.replace('_', ' ')}
             </Badge>
 
-            {/* Actions */}
-            {isInternal && selectedSubmission?.status !== 'APPROVED' && (
+            {/* Per-Asset Actions */}
+            {isInternal && selectedAsset && selectedAsset.review_status !== 'APPROVED' && (
               <>
+                <div className="h-4 w-px bg-border" />
+                <span className="text-xs text-muted-foreground">
+                  {selectedAsset.label || 'Asset'}:
+                </span>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setShowChangesDialog(true)}
                   className="gap-1"
+                  disabled={updateAssetStatus.isPending}
                 >
                   <AlertTriangle className="h-4 w-4" />
                   Request Changes
@@ -459,11 +493,18 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                   variant="glow"
                   onClick={() => setShowApproveDialog(true)}
                   className="gap-1"
+                  disabled={updateAssetStatus.isPending}
                 >
                   <Check className="h-4 w-4" />
                   Approve
                 </Button>
               </>
+            )}
+            {isInternal && selectedAsset?.review_status === 'APPROVED' && (
+              <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
+                <Check className="h-3 w-3 mr-1" />
+                {selectedAsset.label || 'Asset'} Approved
+              </Badge>
             )}
           </div>
         </div>
@@ -529,10 +570,10 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
         <AlertDialog open={showChangesDialog} onOpenChange={setShowChangesDialog}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Request Changes</AlertDialogTitle>
+              <AlertDialogTitle>Request Changes for {selectedAsset?.label || 'Asset'}</AlertDialogTitle>
               <AlertDialogDescription>
-                The freelancer will be notified and can view your annotations and comments.
-                Add a summary of what needs to be changed:
+                The freelancer will be notified that this specific asset needs changes.
+                Add a note about what needs to be fixed:
               </AlertDialogDescription>
             </AlertDialogHeader>
             <Textarea
@@ -544,8 +585,8 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
-                onClick={handleRequestChanges}
-                disabled={updateStatus.isPending}
+                onClick={handleRequestChangesAsset}
+                disabled={updateAssetStatus.isPending}
               >
                 Request Changes
               </AlertDialogAction>
@@ -557,20 +598,23 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
         <AlertDialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Approve Submission</AlertDialogTitle>
+              <AlertDialogTitle>Approve {selectedAsset?.label || 'Asset'}</AlertDialogTitle>
               <AlertDialogDescription>
-                This will mark the submission as approved and notify the freelancer.
-                The job will move to the approved state.
+                {reviewProgress.pending === 1 && reviewProgress.changesRequested === 0 ? (
+                  "This is the last asset. Approving it will complete the entire job."
+                ) : (
+                  `This will mark ${selectedAsset?.label || 'this asset'} as approved. ${reviewProgress.pending - 1} more to review.`
+                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
-                onClick={handleApprove}
-                disabled={updateStatus.isPending}
+                onClick={handleApproveAsset}
+                disabled={updateAssetStatus.isPending}
                 className="bg-green-600 hover:bg-green-700"
               >
-                Approve
+                Approve {selectedAsset?.label || 'Asset'}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

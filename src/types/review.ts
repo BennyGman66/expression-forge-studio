@@ -1,4 +1,5 @@
 export type SubmissionStatus = 'SUBMITTED' | 'IN_REVIEW' | 'CHANGES_REQUESTED' | 'APPROVED';
+export type AssetReviewStatus = 'APPROVED' | 'CHANGES_REQUESTED' | null;
 export type CommentVisibility = 'SHARED' | 'INTERNAL_ONLY';
 export type NotificationType = 'JOB_SUBMITTED' | 'COMMENT_MENTION' | 'CHANGES_REQUESTED' | 'JOB_APPROVED' | 'COMMENT_REPLY';
 export type ThreadScope = 'JOB' | 'ASSET' | 'ANNOTATION';
@@ -42,6 +43,10 @@ export interface SubmissionAsset {
   label: string | null;
   sort_index: number;
   created_at: string;
+  // Per-asset review status
+  review_status: AssetReviewStatus;
+  reviewed_by_user_id: string | null;
+  reviewed_at: string | null;
   // Joined
   annotations?: ImageAnnotation[];
 }

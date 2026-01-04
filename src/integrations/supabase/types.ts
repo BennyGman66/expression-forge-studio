@@ -2709,6 +2709,9 @@ export type Database = {
           id: string
           job_output_id: string | null
           label: string | null
+          review_status: string | null
+          reviewed_at: string | null
+          reviewed_by_user_id: string | null
           sort_index: number
           submission_id: string
         }
@@ -2718,6 +2721,9 @@ export type Database = {
           id?: string
           job_output_id?: string | null
           label?: string | null
+          review_status?: string | null
+          reviewed_at?: string | null
+          reviewed_by_user_id?: string | null
           sort_index?: number
           submission_id: string
         }
@@ -2727,6 +2733,9 @@ export type Database = {
           id?: string
           job_output_id?: string | null
           label?: string | null
+          review_status?: string | null
+          reviewed_at?: string | null
+          reviewed_by_user_id?: string | null
           sort_index?: number
           submission_id?: string
         }
@@ -2736,6 +2745,13 @@ export type Database = {
             columns: ["job_output_id"]
             isOneToOne: false
             referencedRelation: "job_outputs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "submission_assets_reviewed_by_user_id_fkey"
+            columns: ["reviewed_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
           {

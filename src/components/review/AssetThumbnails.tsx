@@ -1,8 +1,8 @@
 import { cn } from '@/lib/utils';
-import { SubmissionAsset } from '@/types/review';
+import { SubmissionAsset, AssetReviewStatus } from '@/types/review';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Check, AlertTriangle } from 'lucide-react';
 
 interface AssetThumbnailsProps {
   assets: SubmissionAsset[];
@@ -10,6 +10,24 @@ interface AssetThumbnailsProps {
   onSelect: (asset: SubmissionAsset) => void;
   annotationCounts: Record<string, number>;
   orientation?: 'horizontal' | 'vertical';
+}
+
+function getStatusIndicator(status: AssetReviewStatus) {
+  if (status === 'APPROVED') {
+    return (
+      <div className="absolute top-1 left-1 w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
+        <Check className="h-3 w-3 text-white" />
+      </div>
+    );
+  }
+  if (status === 'CHANGES_REQUESTED') {
+    return (
+      <div className="absolute top-1 left-1 w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center">
+        <AlertTriangle className="h-3 w-3 text-white" />
+      </div>
+    );
+  }
+  return null;
 }
 
 export function AssetThumbnails({
@@ -44,7 +62,9 @@ export function AssetThumbnails({
               "relative group rounded-lg overflow-hidden border-2 transition-all shrink-0",
               isSelected
                 ? "border-primary ring-2 ring-primary/30"
-                : "border-transparent hover:border-muted-foreground/30"
+                : "border-transparent hover:border-muted-foreground/30",
+              asset.review_status === 'APPROVED' && !isSelected && "border-green-500/50",
+              asset.review_status === 'CHANGES_REQUESTED' && !isSelected && "border-orange-500/50"
             )}
           >
             <div className={cn(
@@ -64,6 +84,9 @@ export function AssetThumbnails({
               )}
             </div>
 
+            {/* Status indicator */}
+            {getStatusIndicator(asset.review_status)}
+
             {/* Label */}
             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-1">
               <p className="text-[10px] text-white font-medium truncate">
@@ -80,11 +103,6 @@ export function AssetThumbnails({
                 <MessageSquare className="h-2.5 w-2.5" />
                 {annotationCount}
               </Badge>
-            )}
-
-            {/* Selection indicator */}
-            {isSelected && (
-              <div className="absolute top-1 left-1 w-2 h-2 rounded-full bg-primary" />
             )}
           </button>
         );
