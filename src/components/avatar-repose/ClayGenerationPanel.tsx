@@ -30,8 +30,9 @@ export function ClayGenerationPanel() {
   const [isGenerating, setIsGenerating] = useState(false);
   const shouldStopRef = useRef(false);
   const [isOrganizing, setIsOrganizing] = useState(false);
-  const [organizeJobId, setOrganizeJobId] = useState<string | null>(null);
+  const shouldStopOrganizeRef = useRef(false);
   const [organizeProgress, setOrganizeProgress] = useState({ current: 0, total: 0 });
+  const [organizeStats, setOrganizeStats] = useState({ moved: 0, deletedKids: 0, deletedProducts: 0 });
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [selectedModel, setSelectedModel] = useState("google/gemini-2.5-flash-image-preview");
@@ -135,24 +136,6 @@ export function ClayGenerationPanel() {
     return () => { supabase.removeChannel(channel); };
   }, [selectedBrand]);
 
-  // Subscribe to organize job progress
-  useEffect(() => {
-    if (!organizeJobId) return;
-    const channel = supabase
-      .channel("organize-progress")
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "jobs", filter: `id=eq.${organizeJobId}` }, (payload) => {
-        const job = payload.new as { progress: number; total: number; status: string };
-        setOrganizeProgress({ current: job.progress || 0, total: job.total || 0 });
-        if (job.status === "completed") {
-          setIsOrganizing(false);
-          setOrganizeJobId(null);
-          toast.success("AVA finished organizing!");
-          fetchProductImages();
-        }
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [organizeJobId]);
 
   const fetchBrands = async () => {
     const { data } = await supabase.from("brands").select("*").order("created_at", { ascending: false });
@@ -237,22 +220,97 @@ export function ClayGenerationPanel() {
   const handleOrganizeImages = async () => {
     if (!selectedBrand) return;
     setIsOrganizing(true);
+    shouldStopOrganizeRef.current = false;
     setOrganizeProgress({ current: 0, total: 0 });
+    setOrganizeStats({ moved: 0, deletedKids: 0, deletedProducts: 0 });
+
     try {
+      // Get list of images to organize
       const { data, error } = await supabase.functions.invoke("organize-clay-poses", { body: { brandId: selectedBrand } });
       if (error) throw error;
-      if (data.total > 0) {
-        setOrganizeJobId(data.jobId);
-        setOrganizeProgress({ current: 0, total: data.total });
-        toast.info(`AVA analyzing ${data.total} images...`);
-      } else {
+
+      if (!data.images || data.images.length === 0) {
         toast.info("No images to organize!");
         setIsOrganizing(false);
+        return;
       }
-    } catch {
+
+      const images = data.images as { id: string; imageUrl: string; currentSlot: string }[];
+      setOrganizeProgress({ current: 0, total: images.length });
+      toast.info(`AVA analyzing ${images.length} images...`);
+
+      let moved = 0;
+      let deletedKids = 0;
+      let deletedProducts = 0;
+      let processed = 0;
+
+      for (const img of images) {
+        if (shouldStopOrganizeRef.current) {
+          toast.info(`Stopped after ${processed} images`);
+          break;
+        }
+
+        try {
+          const { data: result, error: classifyError } = await supabase.functions.invoke("organize-clay-single", {
+            body: { imageId: img.id, imageUrl: img.imageUrl },
+          });
+
+          if (classifyError || !result?.action) {
+            console.error(`Failed to classify ${img.id}`);
+          } else {
+            const action = result.action;
+
+            if (action === "DELETE_CHILD") {
+              await supabase.from("clay_images").delete().eq("product_image_id", img.id);
+              await supabase.from("product_images").delete().eq("id", img.id);
+              setProductImages((prev) => prev.filter((p) => p.id !== img.id));
+              setClayImages((prev) => prev.filter((c) => c.product_image_id !== img.id));
+              deletedKids++;
+            } else if (action === "DELETE_PRODUCT") {
+              await supabase.from("clay_images").delete().eq("product_image_id", img.id);
+              await supabase.from("product_images").delete().eq("id", img.id);
+              setProductImages((prev) => prev.filter((p) => p.id !== img.id));
+              setClayImages((prev) => prev.filter((c) => c.product_image_id !== img.id));
+              deletedProducts++;
+            } else if (["A", "B", "C", "D"].includes(action) && action !== img.currentSlot) {
+              await supabase.from("product_images").update({ slot: action }).eq("id", img.id);
+              setProductImages((prev) =>
+                prev.map((p) => (p.id === img.id ? { ...p, slot: action } : p))
+              );
+              moved++;
+            }
+          }
+        } catch (err) {
+          console.error(`Error processing ${img.id}:`, err);
+        }
+
+        processed++;
+        setOrganizeProgress({ current: processed, total: images.length });
+        setOrganizeStats({ moved, deletedKids, deletedProducts });
+
+        // Small delay to avoid rate limiting
+        if (processed < images.length && !shouldStopOrganizeRef.current) {
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+
+      if (!shouldStopOrganizeRef.current) {
+        const totalDeleted = deletedKids + deletedProducts;
+        toast.success(
+          `AVA complete! Moved: ${moved}, Deleted: ${totalDeleted} (${deletedKids} kids, ${deletedProducts} products)`
+        );
+      }
+    } catch (err) {
+      console.error("Organize error:", err);
       toast.error("Failed to organize");
+    } finally {
       setIsOrganizing(false);
     }
+  };
+
+  const handleStopOrganize = () => {
+    shouldStopOrganizeRef.current = true;
+    toast.info("Stopping AVA...");
   };
 
   // Selection with shift-click support
@@ -374,26 +432,29 @@ export function ClayGenerationPanel() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* AVA Organise (Ghost) */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleOrganizeImages}
-          disabled={isOrganizing || !selectedBrand}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          {isOrganizing ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin mr-1" />
-              {organizeProgress.total > 0 && `${organizeProgress.current}/${organizeProgress.total}`}
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4 mr-1" />
-              AVA
-            </>
-          )}
-        </Button>
+        {/* AVA Organise */}
+        {isOrganizing ? (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">
+              {organizeProgress.current}/{organizeProgress.total}
+            </span>
+            <Button variant="destructive" size="sm" onClick={handleStopOrganize}>
+              <StopCircle className="w-4 h-4 mr-1" />
+              Stop
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleOrganizeImages}
+            disabled={!selectedBrand}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Sparkles className="w-4 h-4 mr-1" />
+            AVA
+          </Button>
+        )}
 
         {/* Generate / Stop */}
         {isGenerating ? (
