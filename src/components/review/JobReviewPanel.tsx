@@ -73,6 +73,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [pendingAnnotationId, setPendingAnnotationId] = useState<string | null>(null);
   const [showChangesDialog, setShowChangesDialog] = useState(false);
   const [changesNote, setChangesNote] = useState('');
   const [showApproveDialog, setShowApproveDialog] = useState(false);
@@ -221,13 +222,25 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
         rect,
         submissionId: selectedSubmission.id,
       });
-      setSelectedAnnotationId(result.annotation.id);
+      const newAnnotationId = result.annotation.id;
+      setSelectedAnnotationId(newAnnotationId);
+      setPendingAnnotationId(newAnnotationId); // Mark as pending comment
       setIsDrawing(false);
-      toast.success('Annotation created. Add a comment below.');
+      // Don't show toast - the auto-focus on comment input is clear enough
     } catch (error) {
       toast.error('Failed to create annotation');
     }
   }, [selectedAsset, selectedSubmission, createAnnotation]);
+
+  // Clear pending annotation when a comment is successfully added (via watching threads)
+  useEffect(() => {
+    if (pendingAnnotationId) {
+      const pendingThread = threads.find(t => t.annotation_id === pendingAnnotationId);
+      if (pendingThread?.comments && pendingThread.comments.length > 0) {
+        setPendingAnnotationId(null);
+      }
+    }
+  }, [threads, pendingAnnotationId]);
 
   const handleRequestChanges = async () => {
     if (!selectedSubmission || !job) return;
@@ -537,17 +550,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                 </Button>
               </div>
 
-              {isInternal && (
-                <Button
-                  variant={isDrawing ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setIsDrawing(!isDrawing)}
-                  className="gap-1"
-                >
-                  <Pencil className="h-3 w-3" />
-                  {isDrawing ? 'Drawing...' : 'Draw Annotation'}
-                </Button>
-              )}
+              {/* Draw button moved to ThreadPanel for better annotation↔comment linking */}
             </div>
 
             {/* Image Viewer */}
@@ -586,6 +589,9 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
               allAnnotations={allAnnotations}
               currentIssueIndex={currentIssueIndex}
               onNavigateIssue={handleNavigateIssue}
+              isDrawing={isDrawing}
+              onToggleDrawing={() => setIsDrawing(!isDrawing)}
+              pendingAnnotationId={pendingAnnotationId}
             />
           </div>
         </div>
