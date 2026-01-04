@@ -32,10 +32,12 @@ import {
   useCreateNotification,
   useAddComment,
   useCreateThread,
+  useCreateSubmission,
 } from '@/hooks/useReviewSystem';
-import { useJob } from '@/hooks/useJobs';
+import { useJob, useJobOutputs } from '@/hooks/useJobs';
 import { useAuth } from '@/contexts/AuthContext';
 import { SubmissionAsset, AnnotationRect, SubmissionStatus } from '@/types/review';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import {
   X,
@@ -66,9 +68,11 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const [showChangesDialog, setShowChangesDialog] = useState(false);
   const [changesNote, setChangesNote] = useState('');
   const [showApproveDialog, setShowApproveDialog] = useState(false);
+  const [isBackfilling, setIsBackfilling] = useState(false);
 
   const { data: job, isLoading: jobLoading } = useJob(jobId);
-  const { data: submissions = [] } = useJobSubmissions(jobId);
+  const { data: submissions = [], refetch: refetchSubmissions } = useJobSubmissions(jobId);
+  const { data: jobOutputs = [] } = useJobOutputs(jobId);
   
   const selectedSubmission = submissions.find(s => s.id === selectedVersion) || submissions[0];
   const { data: assets = [] } = useSubmissionAssets(selectedSubmission?.id || null);
@@ -80,6 +84,39 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const createNotification = useCreateNotification();
   const addComment = useAddComment();
   const createThread = useCreateThread();
+  const createSubmission = useCreateSubmission();
+
+  // Backfill legacy jobs that were SUBMITTED before the review system
+  useEffect(() => {
+    const backfillSubmission = async () => {
+      if (!job || submissions.length > 0 || jobLoading || isBackfilling) return;
+      if (job.status !== 'SUBMITTED' && job.status !== 'NEEDS_CHANGES') return;
+      if (jobOutputs.length === 0) return;
+      
+      setIsBackfilling(true);
+      try {
+        const assets = jobOutputs.map((output, index) => ({
+          fileUrl: output.file_url || '',
+          label: output.label || `Output ${index + 1}`,
+          sortIndex: index,
+        }));
+        
+        await createSubmission.mutateAsync({
+          jobId,
+          assets,
+          summaryNote: 'Auto-created from legacy submission',
+        });
+        
+        await refetchSubmissions();
+      } catch (error) {
+        console.error('Failed to backfill submission:', error);
+      } finally {
+        setIsBackfilling(false);
+      }
+    };
+    
+    backfillSubmission();
+  }, [job, submissions.length, jobLoading, jobOutputs, jobId]);
 
   // Auto-select first submission and asset
   useEffect(() => {
@@ -231,12 +268,15 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     }
   };
 
-  if (jobLoading || submissions.length === 0) {
+  const isLoading = jobLoading || isBackfilling;
+  const noSubmissions = !isLoading && submissions.length === 0 && jobOutputs.length === 0;
+  
+  if (isLoading || noSubmissions) {
     return (
       <div className="fixed inset-0 bg-background z-50 flex items-center justify-center">
         <div className="text-center">
           <p className="text-muted-foreground">
-            {jobLoading ? 'Loading...' : 'No submissions to review'}
+            {isLoading ? 'Loading...' : 'No submissions to review'}
           </p>
           <Button variant="ghost" onClick={onClose} className="mt-4">
             Close
