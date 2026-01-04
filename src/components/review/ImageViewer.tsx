@@ -134,7 +134,8 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
           setDrawStart(coords);
           setDrawCurrent(coords);
         }
-      } else if (e.button === 0 && zoom > 1) {
+      } else if (e.button === 0) {
+        // Allow panning at any zoom level
         setIsPanning(true);
         setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
       }
@@ -229,7 +230,8 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
             className={cn(
               "flex-1 overflow-hidden relative bg-muted/30",
               isDrawing && "cursor-crosshair",
-              isPanning && "cursor-grabbing"
+              isPanning && "cursor-grabbing",
+              !isDrawing && !isPanning && "cursor-grab"
             )}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}

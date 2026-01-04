@@ -121,7 +121,7 @@ export function ThreadPanel({
   const handleCommentClick = (annotationId: string | null) => {
     if (annotationId) {
       onSelectAnnotation(annotationId);
-      onJumpToAnnotation?.(annotationId);
+      // Just highlight the annotation, don't move the canvas
     }
   };
 
