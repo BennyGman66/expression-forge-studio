@@ -21,6 +21,9 @@ verify_jwt = false
 [functions.organize-clay-poses]
 verify_jwt = false
 
+[functions.organize-clay-single]
+verify_jwt = false
+
 [functions.scrape-brand]
 verify_jwt = false
 
@@ -94,6 +97,9 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.generate-clay-single]
+verify_jwt = false
+
+[functions.assign-role]
 verify_jwt = false
 
 [functions.assign-role]
