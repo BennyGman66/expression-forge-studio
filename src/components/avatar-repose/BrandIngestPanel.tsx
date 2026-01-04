@@ -147,65 +147,8 @@ export function BrandIngestPanel() {
       // Update job to running
       await supabase.from("scrape_jobs").update({ status: "running" }).eq("id", jobId);
 
-      // Step 2: Process each product one at a time
-      let processed = 0;
-      let successCount = 0;
-      let failCount = 0;
-
-      for (const productUrl of productUrls) {
-        if (shouldStopRef.current) {
-          toast.info("Scraping stopped by user");
-          await supabase.from("scrape_jobs").update({ status: "stopped" }).eq("id", jobId);
-          break;
-        }
-
-        try {
-          const { data, error } = await supabase.functions.invoke("scrape-product-single", {
-            body: { brandId, productUrl, jobId },
-          });
-
-          if (error) {
-            console.error(`Error scraping ${productUrl}:`, error);
-            failCount++;
-          } else if (data?.success && !data?.skipped) {
-            successCount++;
-          } else if (data?.skipped) {
-            // Skipped is okay, just no images found
-          } else {
-            failCount++;
-          }
-        } catch (err) {
-          console.error(`Failed to process ${productUrl}:`, err);
-          failCount++;
-        }
-
-        processed++;
-        
-        // Update progress
-        await supabase.from("scrape_jobs").update({ 
-          progress: processed,
-          updated_at: new Date().toISOString()
-        }).eq("id", jobId);
-
-        // Small delay between requests
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-
-      // Mark job as complete
-      if (!shouldStopRef.current) {
-        await supabase.from("scrape_jobs").update({ status: "completed" }).eq("id", jobId);
-        
-        if (failCount === 0) {
-          toast.success(`Scraping complete! ${successCount} products saved.`);
-        } else if (successCount === 0) {
-          toast.error(`All ${failCount} products failed to scrape.`);
-        } else {
-          toast.warning(`Scraped ${successCount} products, ${failCount} failed.`);
-        }
-      }
-
-      // Refresh products
-      fetchBrands();
+      // Step 2: Process products using shared loop
+      await processProductUrls(brandId, jobId, productUrls, 0);
     } catch (err) {
       console.error("Client-side scrape error:", err);
       toast.error(err instanceof Error ? err.message : "Scraping failed");
@@ -214,16 +157,113 @@ export function BrandIngestPanel() {
     }
   };
 
+  const processProductUrls = async (
+    brandId: string, 
+    jobId: string, 
+    productUrls: string[], 
+    startIndex: number
+  ) => {
+    let processed = startIndex;
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = startIndex; i < productUrls.length; i++) {
+      if (shouldStopRef.current) {
+        toast.info("Scraping stopped by user");
+        await supabase.from("scrape_jobs").update({ 
+          status: "stopped",
+          current_index: i 
+        }).eq("id", jobId);
+        return;
+      }
+
+      const productUrl = productUrls[i];
+
+      try {
+        const { data, error } = await supabase.functions.invoke("scrape-product-single", {
+          body: { brandId, productUrl, jobId },
+        });
+
+        if (error) {
+          console.error(`Error scraping ${productUrl}:`, error);
+          failCount++;
+        } else if (data?.success && !data?.skipped) {
+          successCount++;
+        } else if (data?.skipped) {
+          // Skipped is okay, just no images found
+        } else {
+          failCount++;
+        }
+      } catch (err) {
+        console.error(`Failed to process ${productUrl}:`, err);
+        failCount++;
+      }
+
+      processed++;
+      
+      // Update progress and current_index
+      await supabase.from("scrape_jobs").update({ 
+        progress: processed,
+        current_index: i + 1,
+        updated_at: new Date().toISOString()
+      }).eq("id", jobId);
+
+      // Small delay between requests
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    // Mark job as complete
+    if (!shouldStopRef.current) {
+      await supabase.from("scrape_jobs").update({ status: "completed" }).eq("id", jobId);
+      
+      if (failCount === 0) {
+        toast.success(`Scraping complete! ${successCount} products saved.`);
+      } else if (successCount === 0) {
+        toast.error(`All ${failCount} products failed to scrape.`);
+      } else {
+        toast.warning(`Scraped ${successCount} products, ${failCount} failed.`);
+      }
+    }
+
+    // Refresh products
+    fetchBrands();
+  };
+
   const handleStopScrape = () => {
     shouldStopRef.current = true;
     toast.info("Stopping scrape...");
   };
 
   const handleResumeScrape = async (brand: Brand, job: ScrapeJob) => {
-    // For resume, we'd need to track which URLs were already processed
-    // For now, just restart from beginning
-    toast.info("Resuming scrape (restarting from beginning)");
-    await runClientSideScrape(brand.id, brand.start_url, scrapeLimit);
+    // Check if job has stored product URLs
+    const jobWithUrls = job as ScrapeJob & { product_urls?: string[]; current_index?: number };
+    
+    if (!jobWithUrls.product_urls || jobWithUrls.product_urls.length === 0) {
+      toast.info("No saved URLs - restarting scrape");
+      await runClientSideScrape(brand.id, brand.start_url, scrapeLimit);
+      return;
+    }
+
+    const startIndex = jobWithUrls.current_index || job.progress || 0;
+    const remaining = jobWithUrls.product_urls.length - startIndex;
+    
+    toast.info(`Resuming from product ${startIndex + 1}/${jobWithUrls.product_urls.length} (${remaining} remaining)`);
+    
+    setScrapingBrandId(brand.id);
+    shouldStopRef.current = false;
+
+    try {
+      // Update job status to running
+      await supabase.from("scrape_jobs").update({ status: "running" }).eq("id", job.id);
+      
+      // Continue processing from where we left off
+      await processProductUrls(brand.id, job.id, jobWithUrls.product_urls, startIndex);
+    } catch (err) {
+      console.error("Resume error:", err);
+      toast.error("Failed to resume scraping");
+    } finally {
+      setScrapingBrandId(null);
+    }
   };
 
   const handleDeleteBrand = async (brandId: string) => {

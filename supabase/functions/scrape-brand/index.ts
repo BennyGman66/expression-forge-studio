@@ -164,6 +164,7 @@ serve(async (req) => {
     console.log(`Selected ${selectedUrls.length} products to return`);
 
     // Create scrape job record - frontend will orchestrate the actual scraping
+    // Store product URLs for resume capability
     const { data: job, error: jobError } = await supabase
       .from('scrape_jobs')
       .insert({ 
@@ -171,6 +172,8 @@ serve(async (req) => {
         status: 'pending', 
         progress: 0, 
         total: selectedUrls.length,
+        product_urls: selectedUrls,
+        current_index: 0,
         logs: [{ time: new Date().toISOString(), message: `Mapped ${allLinks.length} URLs, selected ${selectedUrls.length} products` }]
       })
       .select()

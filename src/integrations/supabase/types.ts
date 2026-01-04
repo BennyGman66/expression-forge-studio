@@ -2300,8 +2300,10 @@ export type Database = {
         Row: {
           brand_id: string
           created_at: string
+          current_index: number | null
           id: string
           logs: Json | null
+          product_urls: string[] | null
           progress: number | null
           status: string
           total: number | null
@@ -2310,8 +2312,10 @@ export type Database = {
         Insert: {
           brand_id: string
           created_at?: string
+          current_index?: number | null
           id?: string
           logs?: Json | null
+          product_urls?: string[] | null
           progress?: number | null
           status?: string
           total?: number | null
@@ -2320,8 +2324,10 @@ export type Database = {
         Update: {
           brand_id?: string
           created_at?: string
+          current_index?: number | null
           id?: string
           logs?: Json | null
+          product_urls?: string[] | null
           progress?: number | null
           status?: string
           total?: number | null
