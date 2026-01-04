@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, Mail } from "lucide-react";
 import { AppRole } from "@/hooks/useUsers";
 
 interface InviteUserDialogProps {
@@ -76,6 +76,28 @@ export function InviteUserDialog({ open, onOpenChange }: InviteUserDialogProps) 
     }
   };
 
+  const handleSendEmail = () => {
+    if (!inviteLink) return;
+    
+    const roleName = role === 'internal' ? 'Internal Team Member' 
+                   : role === 'freelancer' ? 'Freelancer' 
+                   : 'Client';
+    
+    const subject = encodeURIComponent("You've been invited to join Leapfrog");
+    const body = encodeURIComponent(
+      `Hi${email ? '' : ' there'},\n\n` +
+      `You've been invited to join Leapfrog as a ${roleName}.\n\n` +
+      `Click the link below to create your account:\n` +
+      `${inviteLink}\n\n` +
+      `This link will expire in 7 days.\n\n` +
+      `If you have any questions, please reply to this email.\n\n` +
+      `Best regards,\nThe Leapfrog Team`
+    );
+    
+    const mailto = `mailto:${email || ''}?subject=${subject}&body=${body}`;
+    window.open(mailto, '_blank');
+  };
+
   const handleClose = () => {
     onOpenChange(false);
     setEmail("");
@@ -108,8 +130,16 @@ export function InviteUserDialog({ open, onOpenChange }: InviteUserDialogProps) 
                   )}
                 </Button>
               </div>
+              <Button 
+                variant="outline" 
+                className="w-full mt-2" 
+                onClick={handleSendEmail}
+              >
+                <Mail className="h-4 w-4 mr-2" />
+                Send via Email
+              </Button>
               <p className="text-xs text-muted-foreground">
-                This link expires in 7 days. Share it with the user to complete their registration.
+                This link expires in 7 days.
               </p>
             </div>
           </div>
