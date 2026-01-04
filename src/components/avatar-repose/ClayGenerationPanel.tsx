@@ -46,6 +46,7 @@ export function ClayGenerationPanel() {
   const gridRef = useRef<HTMLDivElement>(null);
   const [interruptedJob, setInterruptedJob] = useState<PipelineJob | null>(null);
   const currentJobIdRef = useRef<string | null>(null);
+  const initialResumeJobIdRef = useRef<string | null>(null);
 
   const imageModels = [
     { value: "google/gemini-2.5-flash-image-preview", label: "Flash" },
@@ -113,6 +114,30 @@ export function ClayGenerationPanel() {
     enabled: selectedImages.size > 0,
   });
 
+  // Capture resumeJobId on initial mount BEFORE brand selection
+  useEffect(() => {
+    const resumeJobId = searchParams.get('resumeJobId');
+    if (resumeJobId) {
+      initialResumeJobIdRef.current = resumeJobId;
+      
+      // Fetch the job to get the brand from origin_context and auto-select it
+      (async () => {
+        const job = await getJob(resumeJobId);
+        if (job) {
+          const context = job.origin_context as Record<string, unknown>;
+          if (context?.brandId && typeof context.brandId === 'string') {
+            setSelectedBrand(context.brandId);
+          }
+        }
+      })();
+      
+      // Clear the URL param immediately
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('resumeJobId');
+      setSearchParams(newParams, { replace: true });
+    }
+  }, []); // Only run once on mount
+
   useEffect(() => {
     fetchBrands();
   }, []);
@@ -130,23 +155,21 @@ export function ClayGenerationPanel() {
     }
   }, [isGenerating]);
 
-  // Check for interrupted jobs on mount or when brand changes
+  // Check for interrupted jobs when brand is selected
   useEffect(() => {
     if (!selectedBrand) return;
     
     const checkInterruptedJob = async () => {
-      // Check URL param first
-      const resumeJobId = searchParams.get('resumeJobId');
+      // Check stored ref first (from initial mount capture)
+      const resumeJobId = initialResumeJobIdRef.current;
       if (resumeJobId) {
         const job = await getJob(resumeJobId);
         if (job && job.status === 'RUNNING') {
           setInterruptedJob(job);
-          // Clear the URL param
-          const newParams = new URLSearchParams(searchParams);
-          newParams.delete('resumeJobId');
-          setSearchParams(newParams, { replace: true });
+          initialResumeJobIdRef.current = null; // Clear after use
           return;
         }
+        initialResumeJobIdRef.current = null;
       }
 
       // Check for any running clay generation jobs for this brand
@@ -171,7 +194,7 @@ export function ClayGenerationPanel() {
     };
     
     checkInterruptedJob();
-  }, [selectedBrand, searchParams, getJob, setSearchParams]);
+  }, [selectedBrand, getJob]);
 
   // Subscribe to new clay images in real-time
   useEffect(() => {
