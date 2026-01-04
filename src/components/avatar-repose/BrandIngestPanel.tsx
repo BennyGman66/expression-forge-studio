@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Play, RefreshCw, Trash2, Globe, Image as ImageIcon } from "lucide-react";
+import { Loader2, Play, RefreshCw, Trash2, Globe, Image as ImageIcon, Square, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import type { Brand, ScrapeJob, Product } from "@/types/avatar-repose";
 
@@ -15,6 +15,8 @@ export function BrandIngestPanel() {
   const [jobs, setJobs] = useState<Record<string, ScrapeJob>>({});
   const [products, setProducts] = useState<Record<string, Product[]>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [scrapingBrandId, setScrapingBrandId] = useState<string | null>(null);
+  const shouldStopRef = useRef(false);
 
   // Form state
   const [brandName, setBrandName] = useState("");
@@ -62,7 +64,7 @@ export function BrandIngestPanel() {
           .eq("brand_id", brand.id)
           .order("created_at", { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         if (jobData) {
           setJobs((prev) => ({ ...prev, [brand.id]: jobData }));
@@ -88,6 +90,7 @@ export function BrandIngestPanel() {
     }
 
     setIsLoading(true);
+    shouldStopRef.current = false;
 
     try {
       // Create brand
@@ -99,27 +102,128 @@ export function BrandIngestPanel() {
 
       if (brandError) throw brandError;
 
-      // Start scrape job
-      const { data, error } = await supabase.functions.invoke("scrape-brand", {
-        body: {
-          brandId: brand.id,
-          startUrl,
-          limit: scrapeLimit,
-        },
-      });
-
-      if (error) throw error;
-
-      toast.success(`Started scraping ${brandName}`);
+      toast.success(`Created brand: ${brandName}`);
       setBrandName("");
       setStartUrl("");
       fetchBrands();
+
+      // Start the scraping process
+      await runClientSideScrape(brand.id, startUrl, scrapeLimit);
     } catch (err) {
       console.error("Scrape error:", err);
       toast.error("Failed to start scrape");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const runClientSideScrape = async (brandId: string, startUrl: string, limit: number) => {
+    setScrapingBrandId(brandId);
+    shouldStopRef.current = false;
+
+    try {
+      // Step 1: Get product URLs from scrape-brand
+      toast.info("Mapping website for products...");
+      
+      const { data: mapResult, error: mapError } = await supabase.functions.invoke("scrape-brand", {
+        body: { brandId, startUrl, limit },
+      });
+
+      if (mapError || !mapResult?.success) {
+        throw new Error(mapResult?.error || mapError?.message || "Failed to map website");
+      }
+
+      const { jobId, productUrls } = mapResult;
+      
+      if (!productUrls || productUrls.length === 0) {
+        toast.warning("No products found on website");
+        await supabase.from("scrape_jobs").update({ status: "completed" }).eq("id", jobId);
+        setScrapingBrandId(null);
+        return;
+      }
+
+      toast.success(`Found ${productUrls.length} products to scrape`);
+
+      // Update job to running
+      await supabase.from("scrape_jobs").update({ status: "running" }).eq("id", jobId);
+
+      // Step 2: Process each product one at a time
+      let processed = 0;
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const productUrl of productUrls) {
+        if (shouldStopRef.current) {
+          toast.info("Scraping stopped by user");
+          await supabase.from("scrape_jobs").update({ status: "stopped" }).eq("id", jobId);
+          break;
+        }
+
+        try {
+          const { data, error } = await supabase.functions.invoke("scrape-product-single", {
+            body: { brandId, productUrl, jobId },
+          });
+
+          if (error) {
+            console.error(`Error scraping ${productUrl}:`, error);
+            failCount++;
+          } else if (data?.success && !data?.skipped) {
+            successCount++;
+          } else if (data?.skipped) {
+            // Skipped is okay, just no images found
+          } else {
+            failCount++;
+          }
+        } catch (err) {
+          console.error(`Failed to process ${productUrl}:`, err);
+          failCount++;
+        }
+
+        processed++;
+        
+        // Update progress
+        await supabase.from("scrape_jobs").update({ 
+          progress: processed,
+          updated_at: new Date().toISOString()
+        }).eq("id", jobId);
+
+        // Small delay between requests
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      // Mark job as complete
+      if (!shouldStopRef.current) {
+        await supabase.from("scrape_jobs").update({ status: "completed" }).eq("id", jobId);
+        
+        if (failCount === 0) {
+          toast.success(`Scraping complete! ${successCount} products saved.`);
+        } else if (successCount === 0) {
+          toast.error(`All ${failCount} products failed to scrape.`);
+        } else {
+          toast.warning(`Scraped ${successCount} products, ${failCount} failed.`);
+        }
+      }
+
+      // Refresh products
+      fetchBrands();
+    } catch (err) {
+      console.error("Client-side scrape error:", err);
+      toast.error(err instanceof Error ? err.message : "Scraping failed");
+    } finally {
+      setScrapingBrandId(null);
+    }
+  };
+
+  const handleStopScrape = () => {
+    shouldStopRef.current = true;
+    toast.info("Stopping scrape...");
+  };
+
+  const handleResumeScrape = async (brand: Brand, job: ScrapeJob) => {
+    // For resume, we'd need to track which URLs were already processed
+    // For now, just restart from beginning
+    toast.info("Resuming scrape (restarting from beginning)");
+    await runClientSideScrape(brand.id, brand.start_url, scrapeLimit);
   };
 
   const handleDeleteBrand = async (brandId: string) => {
@@ -139,6 +243,13 @@ export function BrandIngestPanel() {
     return { men, women, other };
   };
 
+  const isJobStalled = (job: ScrapeJob) => {
+    if (job.status !== "running") return false;
+    const updatedAt = new Date(job.updated_at).getTime();
+    const now = Date.now();
+    return (now - updatedAt) > 5 * 60 * 1000; // 5 minutes
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Add Brand Form */}
@@ -151,6 +262,7 @@ export function BrandIngestPanel() {
               value={brandName}
               onChange={(e) => setBrandName(e.target.value)}
               placeholder="e.g. Zara"
+              disabled={isLoading || scrapingBrandId !== null}
             />
           </div>
           <div className="space-y-2 md:col-span-2">
@@ -160,6 +272,7 @@ export function BrandIngestPanel() {
               value={startUrl}
               onChange={(e) => setStartUrl(e.target.value)}
               placeholder="https://www.brand.com/collections/all"
+              disabled={isLoading || scrapingBrandId !== null}
             />
           </div>
           <div className="space-y-2">
@@ -171,8 +284,9 @@ export function BrandIngestPanel() {
                 onChange={(e) => setScrapeLimit(Number(e.target.value))}
                 min={1}
                 max={500}
+                disabled={isLoading || scrapingBrandId !== null}
               />
-              <Button onClick={handleStartScrape} disabled={isLoading}>
+              <Button onClick={handleStartScrape} disabled={isLoading || scrapingBrandId !== null}>
                 {isLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
@@ -199,6 +313,8 @@ export function BrandIngestPanel() {
               const job = jobs[brand.id];
               const brandProducts = products[brand.id] || [];
               const breakdown = getGenderBreakdown(brandProducts);
+              const isCurrentlyScraping = scrapingBrandId === brand.id;
+              const stalled = job && isJobStalled(job);
 
               return (
                 <Card key={brand.id} className="p-4">
@@ -212,14 +328,19 @@ export function BrandIngestPanel() {
                               job.status === "completed"
                                 ? "default"
                                 : job.status === "running"
-                                ? "secondary"
-                                : job.status === "failed"
+                                ? stalled ? "destructive" : "secondary"
+                                : job.status === "failed" || job.status === "stalled"
                                 ? "destructive"
+                                : job.status === "stopped"
+                                ? "outline"
                                 : "outline"
                             }
                           >
-                            {job.status}
+                            {stalled ? "stalled" : job.status}
                           </Badge>
+                        )}
+                        {isCurrentlyScraping && (
+                          <Loader2 className="w-4 h-4 animate-spin text-primary" />
                         )}
                       </div>
                       <p className="text-sm text-muted-foreground truncate max-w-lg">
@@ -227,7 +348,7 @@ export function BrandIngestPanel() {
                       </p>
 
                       {/* Progress */}
-                      {job && job.status === "running" && (
+                      {job && (job.status === "running" || isCurrentlyScraping) && (
                         <div className="mt-3">
                           <Progress
                             value={(job.progress / (job.total || 1)) * 100}
@@ -265,6 +386,25 @@ export function BrandIngestPanel() {
                     </div>
 
                     <div className="flex gap-2">
+                      {isCurrentlyScraping ? (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={handleStopScrape}
+                        >
+                          <Square className="w-4 h-4 mr-1" />
+                          Stop
+                        </Button>
+                      ) : (stalled || job?.status === "stopped" || job?.status === "stalled") ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleResumeScrape(brand, job)}
+                        >
+                          <RotateCcw className="w-4 h-4 mr-1" />
+                          Resume
+                        </Button>
+                      ) : null}
                       <Button
                         variant="ghost"
                         size="icon"
@@ -276,6 +416,7 @@ export function BrandIngestPanel() {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleDeleteBrand(brand.id)}
+                        disabled={isCurrentlyScraping}
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
