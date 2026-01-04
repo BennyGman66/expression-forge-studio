@@ -214,49 +214,43 @@ export function ThreadPanel({
         </div>
       </ScrollArea>
 
-      {/* Compose Area */}
+      {/* Compose Area - Always visible for internal users */}
       <div className="p-3 border-t border-border space-y-2">
-        {/* Draw Annotation Button - only for internal users */}
-        {isInternal && onToggleDrawing && (
-          <Button
-            variant={isDrawing ? 'default' : 'outline'}
-            size="sm"
-            onClick={onToggleDrawing}
-            className="w-full gap-2"
-          >
-            <Pencil className="h-3 w-3" />
-            {isDrawing ? 'Drawing... (click & drag on image)' : 'Draw + Comment'}
-          </Button>
+        {/* Internal-only toggle */}
+        {isInternal && (
+          <div className="flex items-center gap-2">
+            <Switch
+              id="internal-only"
+              checked={isInternalOnly}
+              onCheckedChange={setIsInternalOnly}
+              className="scale-75"
+            />
+            <Label htmlFor="internal-only" className="text-xs text-muted-foreground flex items-center gap-1">
+              <Lock className="h-3 w-3" />
+              Internal only
+            </Label>
+          </div>
         )}
         
-        {/* Comment input - show when there's a selected annotation OR for general comments */}
-        {(selectedAnnotationId || showGeneralCommentInput) && (
+        {/* Comment input with inline draw icon */}
+        {(isInternal || selectedAnnotationId || showGeneralCommentInput) && (
           <>
-            {isInternal && (
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="internal-only"
-                  checked={isInternalOnly}
-                  onCheckedChange={setIsInternalOnly}
-                  className="scale-75"
-                />
-                <Label htmlFor="internal-only" className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Lock className="h-3 w-3" />
-                  Internal only
-                </Label>
-              </div>
-            )}
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-end">
               <Textarea
                 ref={textareaRef}
-                placeholder={pendingAnnotationId === selectedAnnotationId 
-                  ? "Describe the issue..." 
-                  : "Reply..."
+                placeholder={
+                  isDrawing 
+                    ? "Draw on image, then describe..." 
+                    : pendingAnnotationId === selectedAnnotationId 
+                      ? "Describe the issue..." 
+                      : selectedAnnotationId 
+                        ? "Reply..." 
+                        : "Click draw to annotate..."
                 }
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
                 className={cn(
-                  "min-h-[60px] text-sm resize-none",
+                  "min-h-[60px] text-sm resize-none flex-1",
                   pendingAnnotationId === selectedAnnotationId && "ring-2 ring-primary/50"
                 )}
                 onKeyDown={(e) => {
@@ -265,17 +259,38 @@ export function ThreadPanel({
                   }
                 }}
               />
-              <Button
-                size="icon"
-                onClick={handleSendComment}
-                disabled={!newComment.trim() || addComment.isPending || !selectedAnnotationId}
-                className="shrink-0"
-              >
-                <Send className="h-4 w-4" />
-              </Button>
+              <div className="flex flex-col gap-1">
+                {/* Draw icon - inline next to textarea */}
+                {isInternal && onToggleDrawing && (
+                  <Button
+                    variant={isDrawing ? 'default' : 'ghost'}
+                    size="icon"
+                    onClick={onToggleDrawing}
+                    className={cn(
+                      "shrink-0 h-8 w-8",
+                      isDrawing && "bg-primary text-primary-foreground"
+                    )}
+                    title="Draw annotation (D)"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                )}
+                <Button
+                  size="icon"
+                  onClick={handleSendComment}
+                  disabled={!newComment.trim() || addComment.isPending || !selectedAnnotationId}
+                  className="shrink-0 h-8 w-8"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <p className="text-[10px] text-muted-foreground">
-              {selectedAnnotationId ? '⌘+Enter to send' : 'Select a comment to reply'}
+              {isDrawing 
+                ? 'Click & drag on image to draw' 
+                : selectedAnnotationId 
+                  ? '⌘+Enter to send' 
+                  : 'Press D to draw'}
             </p>
           </>
         )}

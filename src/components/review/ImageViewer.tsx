@@ -58,6 +58,8 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
     const [imageLoaded, setImageLoaded] = useState(false);
     const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
     const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
+    const [prevSrc, setPrevSrc] = useState<string | null>(null);
+    const [isTransitioning, setIsTransitioning] = useState(false);
 
     const handleZoomIn = () => setZoom(prev => Math.min(prev * 1.25, 5));
     const handleZoomOut = () => setZoom(prev => Math.max(prev / 1.25, 0.25));
@@ -78,7 +80,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       const fitZoom = Math.min(
         availableWidth / imageDimensions.width,
         availableHeight / imageDimensions.height,
-        1 // Don't zoom in beyond 100%
+        2 // Allow up to 200% for better initial visibility
       );
       
       setZoom(fitZoom);
@@ -174,10 +176,12 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       setIsPanning(false);
     }, [drawStart, drawCurrent, isDrawing, onAnnotationCreate]);
 
-    // Reset and fit on image change
+    // Handle image change with smooth transition (no flash)
     useEffect(() => {
-      setZoom(1);
-      setPan({ x: 0, y: 0 });
+      if (prevSrc && prevSrc !== src) {
+        setIsTransitioning(true);
+      }
+      setPrevSrc(src);
       setImageLoaded(false);
       setImageDimensions({ width: 0, height: 0 });
     }, [src]);
@@ -193,6 +197,8 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       const img = e.currentTarget;
       setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
       setImageLoaded(true);
+      // End transition after a brief delay to allow fit to apply
+      setTimeout(() => setIsTransitioning(false), 50);
     };
 
     // Calculate drawing rect for preview
@@ -252,7 +258,10 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
                   ref={imageRef}
                   src={src}
                   alt={alt}
-                  className="max-h-full max-w-full object-contain select-none"
+                  className={cn(
+                    "max-h-full max-w-full object-contain select-none transition-opacity duration-150",
+                    isTransitioning && !imageLoaded ? "opacity-0" : "opacity-100"
+                  )}
                   draggable={false}
                   onLoad={handleImageLoad}
                 />
