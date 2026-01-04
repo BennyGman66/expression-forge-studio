@@ -95,7 +95,7 @@ export function ClayGenerationPanel() {
 
   useKeyboardShortcuts({
     onInclude: () => {}, // Not applicable for clay generation
-    onExclude: () => {},
+    onExclude: handleBulkDelete,
     onMoveToSlotA: () => handleBulkMove("A"),
     onMoveToSlotB: () => handleBulkMove("B"),
     onMoveToSlotC: () => handleBulkMove("C"),
@@ -336,7 +336,16 @@ export function ClayGenerationPanel() {
         return next;
       });
     } else {
-      setSelectedImages(new Set([imageId]));
+      // Plain click - toggle selection (add/remove)
+      setSelectedImages((prev) => {
+        const next = new Set(prev);
+        if (next.has(imageId)) {
+          next.delete(imageId);
+        } else {
+          next.add(imageId);
+        }
+        return next;
+      });
     }
     setLastClickedId(imageId);
   };
