@@ -61,6 +61,11 @@ export function useKeyboardShortcuts({
           e.preventDefault();
           onMoveToSlotD();
           break;
+        case "delete":
+        case "backspace":
+          e.preventDefault();
+          onExclude(); // Using exclude as delete action
+          break;
         case "escape":
           e.preventDefault();
           onClearSelection();
