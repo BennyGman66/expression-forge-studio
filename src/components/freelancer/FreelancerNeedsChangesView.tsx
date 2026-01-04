@@ -239,13 +239,10 @@ export function FreelancerNeedsChangesView({
     <div className="flex flex-col h-full">
       {/* Main Layout */}
       <div className="flex flex-1 min-h-0 border rounded-lg overflow-hidden bg-card">
-        {/* Left: Asset Queue */}
-        <div className="w-52 border-r border-border bg-muted/20 flex flex-col">
-          <div className="p-3 border-b border-border">
-            <h3 className="font-medium text-sm">Assets</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {requiredCount > 0 ? `${requiredCount} need${requiredCount > 1 ? '' : 's'} changes` : 'All approved'}
-            </p>
+        {/* Left: Asset Queue - Compact Thumbnails */}
+        <div className="w-24 border-r border-border bg-muted/20 flex flex-col">
+          <div className="p-2 border-b border-border">
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Assets</p>
           </div>
           <ScrollArea className="flex-1">
             <div className="p-2 space-y-2">
@@ -260,74 +257,50 @@ export function FreelancerNeedsChangesView({
                   <div
                     key={asset.id}
                     className={cn(
-                      "relative rounded-lg border cursor-pointer transition-all overflow-hidden",
+                      "relative rounded-md border-2 cursor-pointer transition-all overflow-hidden",
                       isSelected 
                         ? "border-primary ring-2 ring-primary/30" 
-                        : "border-border hover:border-muted-foreground",
-                      hasChangesRequested && !assetReplacement && "border-orange-500/50 bg-orange-500/5",
-                      isApproved && "opacity-70"
+                        : "border-transparent hover:border-muted-foreground/50",
                     )}
                     onClick={() => handleSelectAsset(asset)}
                   >
-                    {/* Thumbnail */}
-                    <div className="relative aspect-square bg-muted">
+                    {/* Thumbnail - 3:4 aspect ratio for full image visibility */}
+                    <div className="relative aspect-[3/4] bg-muted">
                       <img
                         src={assetReplacement?.preview || asset.file_url || ''}
                         alt={asset.label || 'Asset'}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-contain"
                       />
                       
-                      {/* Status icon */}
-                      <div className="absolute top-1 right-1">
-                        {isApproved ? (
-                          <div className="bg-green-500 rounded-full p-0.5">
-                            <CheckCircle className="h-3 w-3 text-white" />
+                      {/* Status badge overlay - larger and clearer */}
+                      <div className="absolute bottom-0 left-0 right-0 p-1">
+                        {isApproved && (
+                          <div className="flex items-center justify-center gap-1 bg-green-500 text-white rounded px-1.5 py-0.5">
+                            <CheckCircle className="h-3 w-3" />
+                            <span className="text-[10px] font-semibold">Approved</span>
                           </div>
-                        ) : hasChangesRequested ? (
-                          <div className="bg-orange-500 rounded-full p-0.5">
-                            <AlertTriangle className="h-3 w-3 text-white" />
+                        )}
+                        {hasChangesRequested && !assetReplacement && (
+                          <div className="flex items-center justify-center gap-1 bg-orange-500 text-white rounded px-1.5 py-0.5">
+                            <AlertTriangle className="h-3 w-3" />
+                            <span className="text-[10px] font-semibold">Fix</span>
                           </div>
-                        ) : null}
+                        )}
+                        {assetReplacement && (
+                          <div className="flex items-center justify-center gap-1 bg-blue-500 text-white rounded px-1.5 py-0.5">
+                            <CheckCircle className="h-3 w-3" />
+                            <span className="text-[10px] font-semibold">Ready</span>
+                          </div>
+                        )}
                       </div>
                       
-                      {/* Replacement ready indicator */}
-                      {assetReplacement && (
-                        <div className="absolute bottom-1 left-1">
-                          <Badge className="text-[10px] px-1 py-0 bg-blue-500 text-white">
-                            Ready
-                          </Badge>
-                        </div>
-                      )}
-                      
-                      {/* Comment count pill */}
+                      {/* Comment count pill - top right */}
                       {commentCount > 0 && (
-                        <div className="absolute bottom-1 right-1 flex items-center gap-0.5 bg-background/90 rounded-full px-1.5 py-0.5 text-[10px]">
+                        <div className="absolute top-1 right-1 flex items-center gap-0.5 bg-background/90 rounded-full px-1 py-0.5 text-[9px] font-medium">
                           <MessageSquare className="h-2.5 w-2.5" />
                           {commentCount}
                         </div>
                       )}
-                    </div>
-                    
-                    {/* Label + Status */}
-                    <div className="p-1.5 space-y-1">
-                      <p className="text-xs font-medium truncate">{asset.label || 'Untitled'}</p>
-                      <div className="flex items-center gap-1">
-                        {hasChangesRequested && !assetReplacement && (
-                          <Badge variant="outline" className="text-[9px] h-4 px-1 text-orange-500 border-orange-500/50">
-                            Required
-                          </Badge>
-                        )}
-                        {assetReplacement && (
-                          <Badge variant="outline" className="text-[9px] h-4 px-1 text-blue-500 border-blue-500/50">
-                            ✓ Ready
-                          </Badge>
-                        )}
-                        {isApproved && (
-                          <Badge variant="outline" className="text-[9px] h-4 px-1 text-green-500 border-green-500/50">
-                            ✓ Approved
-                          </Badge>
-                        )}
-                      </div>
                     </div>
                   </div>
                 );
