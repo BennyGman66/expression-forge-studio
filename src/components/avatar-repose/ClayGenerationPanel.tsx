@@ -44,11 +44,10 @@ export function ClayGenerationPanel() {
     { value: "google/gemini-3-pro-image-preview", label: "Pro" },
   ];
 
-  // Get filtered pending images
+  // Get filtered images - show ALL images matching filters
   const existingClayIds = new Set(clayImages.map((c) => c.product_image_id));
-  const pendingImages = productImages.filter(
-    (img) => selectedSlots.has(img.slot) && !existingClayIds.has(img.id)
-  );
+  const filteredImages = productImages.filter((img) => selectedSlots.has(img.slot));
+  const pendingImages = filteredImages.filter((img) => !existingClayIds.has(img.id));
 
   // Keyboard shortcuts
   const handleBulkMove = useCallback(async (newSlot: string) => {
@@ -87,8 +86,8 @@ export function ClayGenerationPanel() {
   }, [selectedImages]);
 
   const selectAll = useCallback(() => {
-    setSelectedImages(new Set(pendingImages.map((img) => img.id)));
-  }, [pendingImages]);
+    setSelectedImages(new Set(filteredImages.map((img) => img.id)));
+  }, [filteredImages]);
 
   const clearSelection = useCallback(() => {
     setSelectedImages(new Set());
@@ -316,7 +315,7 @@ export function ClayGenerationPanel() {
   // Selection with shift-click support
   const handleImageClick = (imageId: string, e: React.MouseEvent) => {
     if (e.shiftKey && lastClickedId) {
-      const ids = pendingImages.map((img) => img.id);
+      const ids = filteredImages.map((img) => img.id);
       const start = ids.indexOf(lastClickedId);
       const end = ids.indexOf(imageId);
       if (start !== -1 && end !== -1) {
@@ -482,10 +481,10 @@ export function ClayGenerationPanel() {
 
       {/* Dense Image Grid - Grouped by Slot */}
       <div className="flex-1 overflow-auto p-3 space-y-4" ref={gridRef}>
-        {selectedBrand && pendingImages.length > 0 && (
+        {selectedBrand && filteredImages.length > 0 && (
           <>
             {SLOTS.filter((slot) => selectedSlots.has(slot)).map((slot) => {
-              const slotImages = pendingImages.filter((img) => img.slot === slot);
+              const slotImages = filteredImages.filter((img) => img.slot === slot);
               if (slotImages.length === 0) return null;
               return (
                 <div key={slot}>
@@ -500,6 +499,7 @@ export function ClayGenerationPanel() {
                   <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-12 xl:grid-cols-14 gap-1.5">
                     {slotImages.map((img) => {
                       const isSelected = selectedImages.has(img.id);
+                      const hasClay = existingClayIds.has(img.id);
                       return (
                         <div
                           key={img.id}
@@ -513,6 +513,13 @@ export function ClayGenerationPanel() {
                           ) : (
                             <div className="w-full h-full bg-muted flex items-center justify-center">
                               <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                            </div>
+                          )}
+
+                          {/* Clay status indicator */}
+                          {hasClay && (
+                            <div className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-green-500/90 flex items-center justify-center">
+                              <Check className="w-2.5 h-2.5 text-white" />
                             </div>
                           )}
 
@@ -551,11 +558,11 @@ export function ClayGenerationPanel() {
           </Card>
         )}
 
-        {selectedBrand && productImages.length > 0 && pendingImages.length === 0 && (
+        {selectedBrand && productImages.length > 0 && filteredImages.length === 0 && (
           <Card className="p-6 text-center border-primary/30 bg-primary/5">
             <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-primary" />
-            <p className="font-medium">All images have clay versions</p>
-            <p className="text-sm text-muted-foreground">{completedCount} clay poses ready</p>
+            <p className="font-medium">No images match the current filters</p>
+            <p className="text-sm text-muted-foreground">Try adjusting slot or gender filters</p>
           </Card>
         )}
 
@@ -573,18 +580,18 @@ export function ClayGenerationPanel() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => (selectedImages.size === pendingImages.length ? clearSelection() : selectAll())}
-            disabled={pendingImages.length === 0}
+            onClick={() => (selectedImages.size === filteredImages.length ? clearSelection() : selectAll())}
+            disabled={filteredImages.length === 0}
           >
-            {selectedImages.size === pendingImages.length && pendingImages.length > 0 ? (
+            {selectedImages.size === filteredImages.length && filteredImages.length > 0 ? (
               <XIcon className="w-4 h-4 mr-1" />
             ) : (
-              <Checkbox checked={selectedImages.size > 0 && selectedImages.size === pendingImages.length} className="mr-1" />
+              <Checkbox checked={selectedImages.size > 0 && selectedImages.size === filteredImages.length} className="mr-1" />
             )}
-            {selectedImages.size === pendingImages.length && pendingImages.length > 0 ? "Deselect All" : "Select All"}
+            {selectedImages.size === filteredImages.length && filteredImages.length > 0 ? "Deselect All" : "Select All"}
           </Button>
           <span className="text-sm text-muted-foreground">
-            {pendingImages.length} images{selectedImages.size > 0 && ` · ${selectedImages.size} selected`}
+            {filteredImages.length} images · {pendingImages.length} pending{selectedImages.size > 0 && ` · ${selectedImages.size} selected`}
           </span>
         </div>
 

@@ -5,27 +5,35 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const CLASSIFICATION_PROMPT = `Analyze this product/fashion image and classify it.
+const CLASSIFICATION_PROMPT = `You are a fashion image classifier. Analyze this image and respond with EXACTLY ONE code.
 
-FIRST, determine if this image should be DELETED:
-- Is this a photo of a CHILD (anyone who appears under 18)? → DELETE
-- Is this a PRODUCT-ONLY shot with NO PERSON visible (flat lay, just clothing/accessories on a surface or mannequin)? → DELETE
+## STEP 1: CHECK FOR DELETION (do this first!)
 
-IF the image should be kept (adult model visible), classify into the correct SLOT:
-- A (Full Front): Full body visible from head to at least mid-thigh/knees, FRONT-facing view (face visible)
-- B (Cropped Front): Upper body only (waist up), FRONT-facing, legs NOT fully visible, OR 3/4 angle views
-- C (Full Back): Full body visible from head to at least mid-thigh/knees, BACK view (back of head visible)
-- D (Detail): Close-up/detail shot, OR side profile, OR very tight crop showing specific body parts
+DELETE_CHILD - Use if ANY person in the image appears to be under 18 years old. This includes:
+  - Children
+  - Teenagers
+  - Young-looking models (when in doubt about age, DELETE)
 
-RESPONSE FORMAT (exactly one of):
-DELETE_CHILD - if showing a child/minor
-DELETE_PRODUCT - if product-only with no person
-A - Full front body shot
-B - Cropped front / upper body
-C - Full back body shot
-D - Detail / close-up / side profile
+DELETE_PRODUCT - Use if there is NO HUMAN BODY visible. This includes:
+  - Flat lay shots (clothing laid flat on a surface)
+  - Clothing on mannequins or dress forms
+  - Close-ups of just fabric, texture, or material
+  - Accessories only (bags, shoes, jewelry, hats) with no person wearing them
+  - Ghost mannequin / invisible model shots
+  - Hanger shots
 
-Respond with ONLY the classification code, nothing else.`;
+## STEP 2: CLASSIFY (only if adult human model is clearly visible)
+
+A - FULL FRONT: Must show face + torso + legs (at least to mid-thigh). Person faces the camera.
+B - CROPPED FRONT: Shows face and upper body (waist up). Legs NOT visible or cut off. Also use for 3/4 angle views.
+C - FULL BACK: Full body view but person's BACK is to camera. Back of head visible, face not visible.
+D - DETAIL: Everything else - side profiles, close-ups of specific body parts, unusual angles, partial body shots.
+
+## RULES
+- Respond with ONLY the code: DELETE_CHILD, DELETE_PRODUCT, A, B, C, or D
+- No explanations, no punctuation, just the code
+- When in doubt about age → DELETE_CHILD
+- When in doubt about whether a person is present → DELETE_PRODUCT`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
