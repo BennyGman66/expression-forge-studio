@@ -128,31 +128,28 @@ export function FreelancerNeedsChangesView({
     }));
   }, [annotations, threads]);
 
-  // Get ALL threads for the entire submission (not just selected asset) - Frame.io style
-  const allThreads = useMemo(() => {
+  // Get threads for the SELECTED asset only
+  const selectedAssetThreads = useMemo(() => {
     return threads
+      .filter(t => t.asset_id === selectedAsset?.id)
       .map(thread => ({
         ...thread,
         comments: thread.comments?.filter(c => c.visibility === 'SHARED'),
       }))
       // Include if has comments OR has an annotation (visual feedback)
       .filter(t => (t.comments?.length || 0) > 0 || t.annotation_id);
-  }, [threads]);
+  }, [threads, selectedAsset?.id]);
 
-  // Build flat list of ALL feedback items across ALL assets (chronological)
-  const allFeedbackItems = useMemo(() => {
+  // Build flat list of feedback items for SELECTED asset only
+  const selectedAssetFeedbackItems = useMemo(() => {
     const items: Array<{
       type: 'comment' | 'annotation-only';
       comment?: NonNullable<ReviewThread['comments']>[0];
       thread: ReviewThread;
-      assetId: string | null;
-      assetLabel: string | null;
       annotationId: string | null;
     }> = [];
 
-    allThreads.forEach(thread => {
-      const asset = assets.find(a => a.id === thread.asset_id);
-      
+    selectedAssetThreads.forEach(thread => {
       if (thread.comments && thread.comments.length > 0) {
         // Threads with actual text comments
         thread.comments.forEach(comment => {
@@ -160,8 +157,6 @@ export function FreelancerNeedsChangesView({
             type: 'comment',
             comment,
             thread,
-            assetId: thread.asset_id,
-            assetLabel: asset?.label || 'Untitled',
             annotationId: thread.annotation_id || null,
           });
         });
@@ -170,8 +165,6 @@ export function FreelancerNeedsChangesView({
         items.push({
           type: 'annotation-only',
           thread,
-          assetId: thread.asset_id,
-          assetLabel: asset?.label || 'Untitled',
           annotationId: thread.annotation_id,
         });
       }
@@ -182,7 +175,7 @@ export function FreelancerNeedsChangesView({
       const bTime = b.comment?.created_at || b.thread.created_at;
       return new Date(aTime).getTime() - new Date(bTime).getTime();
     });
-  }, [allThreads, assets]);
+  }, [selectedAssetThreads]);
 
   // Assets needing replacement
   const assetsNeedingReplacement = useMemo(() => {
@@ -216,20 +209,12 @@ export function FreelancerNeedsChangesView({
     setSelectedAnnotationId(annotationId);
   }, []);
 
-  // Jump to annotation - can switch assets if needed
-  const handleJumpToAnnotation = useCallback((annotationId: string, targetAssetId?: string | null) => {
-    // If annotation is on a different asset, switch to it first
-    if (targetAssetId && targetAssetId !== selectedAssetId) {
-      setSelectedAssetId(targetAssetId);
-    }
+  // Highlight annotation - just flash, no scrolling/panning
+  const handleHighlightAnnotation = useCallback((annotationId: string) => {
     setSelectedAnnotationId(annotationId);
     setFlashingAnnotationId(annotationId);
     setTimeout(() => setFlashingAnnotationId(null), 600);
-    // Only scroll if on same asset (otherwise image isn't loaded yet)
-    if (!targetAssetId || targetAssetId === selectedAssetId) {
-      imageViewerRef.current?.scrollToAnnotation(annotationId);
-    }
-  }, [selectedAssetId]);
+  }, []);
 
   // Handle file replacement
   const handleReplaceFile = (assetId: string, file: File) => {
@@ -258,7 +243,7 @@ export function FreelancerNeedsChangesView({
   };
 
   // Send reply to selected annotation's thread
-  const selectedAnnotationThread = allThreads.find(t => t.annotation_id === selectedAnnotationId);
+  const selectedAnnotationThread = selectedAssetThreads.find(t => t.annotation_id === selectedAnnotationId);
   
   const handleSendReply = async () => {
     if (!replyText.trim() || !selectedAnnotationThread) return;
@@ -523,7 +508,7 @@ export function FreelancerNeedsChangesView({
             </div>
           )}
 
-          {/* Comments Panel - Shows ALL feedback from ALL assets */}
+          {/* Comments Panel - Shows feedback for SELECTED asset only */}
           <div className="flex-1 flex flex-col min-h-0">
             <div className="p-3 border-b border-border/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -531,19 +516,18 @@ export function FreelancerNeedsChangesView({
                 <span className="text-xs uppercase tracking-wide text-muted-foreground">Feedback</span>
               </div>
               <Badge variant="outline" className="text-[10px] h-5">
-                {allFeedbackItems.length}
+                {selectedAssetFeedbackItems.length}
               </Badge>
             </div>
             
             <ScrollArea className="flex-1">
               <div className="p-3 space-y-2">
-                {allFeedbackItems.length > 0 ? (
-                  allFeedbackItems.map((item, idx) => {
-                    const isOnSelectedAsset = item.assetId === selectedAsset?.id;
-                    const annotationIndex = item.annotationId && isOnSelectedAsset
+                {selectedAssetFeedbackItems.length > 0 ? (
+                  selectedAssetFeedbackItems.map((item, idx) => {
+                    const annotationIndex = item.annotationId
                       ? enrichedAnnotations.findIndex(a => a.id === item.annotationId)
                       : null;
-                    const isSelected = item.annotationId === selectedAnnotationId && isOnSelectedAsset;
+                    const isSelected = item.annotationId === selectedAnnotationId;
                     const isFlashing = item.type === 'comment' 
                       ? flashingCommentId === item.comment?.id 
                       : flashingCommentId === item.thread.id;
@@ -562,13 +546,13 @@ export function FreelancerNeedsChangesView({
                           )}
                           onClick={() => {
                             if (item.annotationId) {
-                              handleJumpToAnnotation(item.annotationId, item.assetId);
+                              handleHighlightAnnotation(item.annotationId);
                             }
                           }}
                         >
                           <div className="flex items-center gap-2">
                             <Target className="h-3.5 w-3.5 text-orange-500 shrink-0" />
-                            <span className="text-xs font-medium truncate">{item.assetLabel}</span>
+                            <span className="text-xs font-medium">Annotation</span>
                             {annotationIndex !== null && annotationIndex >= 0 && (
                               <span className="ml-auto font-mono text-[10px] text-muted-foreground">
                                 #{annotationIndex + 1}
@@ -594,18 +578,10 @@ export function FreelancerNeedsChangesView({
                         )}
                         onClick={() => {
                           if (item.annotationId) {
-                            handleJumpToAnnotation(item.annotationId, item.assetId);
+                            handleHighlightAnnotation(item.annotationId);
                           }
                         }}
                       >
-                        {/* Asset label as subtle header when not on selected asset */}
-                        {!isOnSelectedAsset && (
-                          <div className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1">
-                            <span className="font-medium">{item.assetLabel}</span>
-                            {item.annotationId && <Target className="h-2.5 w-2.5" />}
-                          </div>
-                        )}
-                        
                         <div className="flex items-center gap-2">
                           <Avatar className="h-4 w-4 shrink-0">
                             <AvatarFallback className="text-[8px]">
@@ -621,7 +597,7 @@ export function FreelancerNeedsChangesView({
                             {format(new Date(comment.created_at), 'MMM d')}
                           </span>
                           
-                          {isOnSelectedAsset && annotationIndex !== null && annotationIndex >= 0 && (
+                          {annotationIndex !== null && annotationIndex >= 0 && (
                             <div className="ml-auto flex items-center gap-0.5 text-[10px] text-muted-foreground">
                               <span className="font-mono">#{annotationIndex + 1}</span>
                               <Target className="h-2.5 w-2.5" />
@@ -638,7 +614,7 @@ export function FreelancerNeedsChangesView({
                 ) : (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     <MessageSquare className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                    <p>No feedback yet</p>
+                    <p>No feedback for this asset</p>
                   </div>
                 )}
               </div>
