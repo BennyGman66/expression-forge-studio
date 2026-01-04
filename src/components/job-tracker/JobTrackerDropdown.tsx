@@ -4,18 +4,23 @@ import { JobRow } from './JobRow';
 import { JobDetailModal } from './JobDetailModal';
 import { useState } from 'react';
 import type { PipelineJob } from '@/types/pipeline-jobs';
+import type { EnhancedPipelineJob } from '@/hooks/useActiveJobs';
 
 interface JobTrackerDropdownProps {
-  activeJobs: PipelineJob[];
-  recentJobs: PipelineJob[];
+  activeJobs: EnhancedPipelineJob[];
+  recentJobs: EnhancedPipelineJob[];
+  onMarkStalled?: (jobId: string) => void;
 }
 
-export function JobTrackerDropdown({ activeJobs, recentJobs }: JobTrackerDropdownProps) {
+export function JobTrackerDropdown({ activeJobs, recentJobs, onMarkStalled }: JobTrackerDropdownProps) {
   const [selectedJob, setSelectedJob] = useState<PipelineJob | null>(null);
 
   const hasActiveJobs = activeJobs.length > 0;
   const hasRecentJobs = recentJobs.length > 0;
   const isEmpty = !hasActiveJobs && !hasRecentJobs;
+
+  // Count stalled jobs
+  const stalledCount = activeJobs.filter(j => j.isStalled).length;
 
   return (
     <>
@@ -32,12 +37,16 @@ export function JobTrackerDropdown({ activeJobs, recentJobs }: JobTrackerDropdow
             <div>
               <div className="px-3 py-2 bg-muted/50 text-xs font-medium text-muted-foreground sticky top-0">
                 ACTIVE ({activeJobs.length})
+                {stalledCount > 0 && (
+                  <span className="text-destructive ml-2">· {stalledCount} stalled</span>
+                )}
               </div>
               {activeJobs.map((job) => (
                 <JobRow 
                   key={job.id} 
                   job={job} 
                   onOpenDetail={setSelectedJob}
+                  onMarkStalled={onMarkStalled}
                 />
               ))}
             </div>
@@ -55,6 +64,7 @@ export function JobTrackerDropdown({ activeJobs, recentJobs }: JobTrackerDropdow
                   key={job.id} 
                   job={job} 
                   onOpenDetail={setSelectedJob}
+                  onMarkStalled={onMarkStalled}
                 />
               ))}
             </div>

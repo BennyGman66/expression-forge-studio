@@ -1,19 +1,34 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import type { PipelineJob } from '@/types/pipeline-jobs';
+import type { PipelineJob, PipelineJobStatus } from '@/types/pipeline-jobs';
+
+// Jobs are considered stalled if not updated in 5 minutes
+const STALL_THRESHOLD_MS = 5 * 60 * 1000;
+
+export interface EnhancedPipelineJob extends PipelineJob {
+  isStalled: boolean;
+}
 
 interface UseActiveJobsReturn {
-  activeJobs: PipelineJob[];
-  recentJobs: PipelineJob[];
+  activeJobs: EnhancedPipelineJob[];
+  recentJobs: EnhancedPipelineJob[];
   activeCount: number;
   totalProgress: { done: number; total: number };
   isLoading: boolean;
   refetch: () => Promise<void>;
+  markJobStalled: (jobId: string) => Promise<void>;
+}
+
+function enhanceJob(job: PipelineJob): EnhancedPipelineJob {
+  const updatedAt = new Date(job.updated_at).getTime();
+  const now = Date.now();
+  const isStalled = job.status === 'RUNNING' && (now - updatedAt) > STALL_THRESHOLD_MS;
+  return { ...job, isStalled };
 }
 
 export function useActiveJobs(): UseActiveJobsReturn {
-  const [activeJobs, setActiveJobs] = useState<PipelineJob[]>([]);
-  const [recentJobs, setRecentJobs] = useState<PipelineJob[]>([]);
+  const [activeJobs, setActiveJobs] = useState<EnhancedPipelineJob[]>([]);
+  const [recentJobs, setRecentJobs] = useState<EnhancedPipelineJob[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchJobs = useCallback(async () => {
@@ -41,14 +56,32 @@ export function useActiveJobs(): UseActiveJobsReturn {
 
       if (recentError) throw recentError;
 
-      setActiveJobs((active || []) as PipelineJob[]);
-      setRecentJobs((recent || []) as PipelineJob[]);
+      setActiveJobs((active || []).map(j => enhanceJob(j as PipelineJob)));
+      setRecentJobs((recent || []).map(j => enhanceJob(j as PipelineJob)));
     } catch (err) {
       console.error('Failed to fetch jobs:', err);
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  // Mark a job as failed due to stall
+  const markJobStalled = useCallback(async (jobId: string) => {
+    const { error } = await supabase
+      .from('pipeline_jobs')
+      .update({ 
+        status: 'FAILED' as PipelineJobStatus,
+        progress_message: 'Stalled - user navigated away',
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+    
+    if (error) {
+      console.error('Failed to mark job as stalled:', error);
+    } else {
+      await fetchJobs();
+    }
+  }, [fetchJobs]);
 
   // Initial fetch
   useEffect(() => {
@@ -78,6 +111,14 @@ export function useActiveJobs(): UseActiveJobsReturn {
     };
   }, [fetchJobs]);
 
+  // Periodically check for stalled jobs (every 30 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActiveJobs(prev => prev.map(job => enhanceJob(job)));
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Calculate aggregate progress
   const totalProgress = activeJobs.reduce(
     (acc, job) => ({
@@ -94,5 +135,6 @@ export function useActiveJobs(): UseActiveJobsReturn {
     totalProgress,
     isLoading,
     refetch: fetchJobs,
+    markJobStalled,
   };
 }
