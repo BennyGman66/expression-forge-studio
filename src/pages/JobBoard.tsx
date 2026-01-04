@@ -38,6 +38,16 @@ const statusColors: Record<JobStatus, string> = {
   CLOSED: "bg-muted text-muted-foreground border-muted",
 };
 
+const statusLabels: Record<JobStatus, string> = {
+  OPEN: "OPEN",
+  ASSIGNED: "ASSIGNED",
+  IN_PROGRESS: "IN PROGRESS",
+  SUBMITTED: "AWAITING REVIEW",
+  NEEDS_CHANGES: "NEEDS CHANGES",
+  APPROVED: "APPROVED",
+  CLOSED: "CLOSED",
+};
+
 const typeLabels: Record<JobType, string> = {
   PHOTOSHOP_FACE_APPLY: "Photoshop Face Apply",
   RETOUCH_FINAL: "Final Retouch",
@@ -130,7 +140,7 @@ export default function JobBoard() {
               <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
               <SelectItem value="SUBMITTED">
                 <span className="flex items-center gap-2">
-                  Submitted
+                  Awaiting Review
                   {needsReviewCount > 0 && (
                     <Badge variant="destructive" className="h-4 px-1 text-[10px]">
                       {needsReviewCount}
@@ -219,7 +229,7 @@ export default function JobBoard() {
                             variant="outline"
                             className={statusColors[job.status]}
                           >
-                            {job.status.replace("_", " ")}
+                            {statusLabels[job.status]}
                           </Badge>
                           {/* Review Progress Indicator */}
                           {reviewProgress?.[job.id] && (
