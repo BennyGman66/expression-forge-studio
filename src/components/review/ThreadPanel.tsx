@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Target,
+  Pencil,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ReviewThread, ReviewComment, ImageAnnotation, CommentVisibility } from '@/types/review';
@@ -34,6 +35,11 @@ interface ThreadPanelProps {
   allAnnotations?: { annotationId: string; assetId: string; assetLabel?: string }[];
   currentIssueIndex?: number;
   onNavigateIssue?: (direction: 'prev' | 'next') => void;
+  // Drawing mode controls (moved from ImageViewer header)
+  isDrawing?: boolean;
+  onToggleDrawing?: () => void;
+  // Flag for newly created annotation awaiting comment
+  pendingAnnotationId?: string | null;
 }
 
 export function ThreadPanel({
@@ -48,6 +54,9 @@ export function ThreadPanel({
   allAnnotations = [],
   currentIssueIndex = -1,
   onNavigateIssue,
+  isDrawing = false,
+  onToggleDrawing,
+  pendingAnnotationId,
 }: ThreadPanelProps) {
   const { user } = useAuth();
   const [newComment, setNewComment] = useState('');
@@ -55,6 +64,7 @@ export function ThreadPanel({
   const [activeTab, setActiveTab] = useState<'all' | 'annotations'>('annotations');
   const scrollRef = useRef<HTMLDivElement>(null);
   const selectedAnnotationRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const addComment = useAddComment();
   const createThread = useCreateThread();
@@ -117,6 +127,18 @@ export function ThreadPanel({
       selectedAnnotationRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [selectedAnnotationId]);
+
+  // Auto-focus textarea when a new annotation is created (pendingAnnotationId is set)
+  useEffect(() => {
+    if (pendingAnnotationId && textareaRef.current) {
+      // Switch to Issues tab if not already there
+      setActiveTab('annotations');
+      // Focus the textarea after a brief delay to ensure render
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 50);
+    }
+  }, [pendingAnnotationId]);
 
   const getInitials = (name: string | null | undefined, email: string | undefined) => {
     if (name) return name.slice(0, 2).toUpperCase();
@@ -277,48 +299,78 @@ export function ThreadPanel({
       </ScrollArea>
 
       {/* Compose Area */}
-      {(activeTab === 'all' || selectedAnnotationId) && (
-        <div className="p-3 border-t border-border space-y-2">
-          {isInternal && (
-            <div className="flex items-center gap-2">
-              <Switch
-                id="internal-only"
-                checked={isInternalOnly}
-                onCheckedChange={setIsInternalOnly}
-                className="scale-75"
-              />
-              <Label htmlFor="internal-only" className="text-xs text-muted-foreground flex items-center gap-1">
-                <Lock className="h-3 w-3" />
-                Internal only
-              </Label>
-            </div>
-          )}
-          <div className="flex gap-2">
-            <Textarea
-              placeholder="Add a comment..."
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              className="min-h-[60px] text-sm resize-none"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  handleSendComment();
+      <div className="p-3 border-t border-border space-y-2">
+        {/* Draw Annotation Button - moved here from image viewer header */}
+        {isInternal && onToggleDrawing && (
+          <Button
+            variant={isDrawing ? 'default' : 'outline'}
+            size="sm"
+            onClick={onToggleDrawing}
+            className="w-full gap-2"
+          >
+            <Pencil className="h-3 w-3" />
+            {isDrawing ? 'Drawing... (click & drag on image)' : 'Draw + Comment'}
+          </Button>
+        )}
+        
+        {/* Comment input - show when there's a selected annotation or in general tab */}
+        {(activeTab === 'all' || selectedAnnotationId) && (
+          <>
+            {isInternal && (
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="internal-only"
+                  checked={isInternalOnly}
+                  onCheckedChange={setIsInternalOnly}
+                  className="scale-75"
+                />
+                <Label htmlFor="internal-only" className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Lock className="h-3 w-3" />
+                  Internal only
+                </Label>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Textarea
+                ref={textareaRef}
+                placeholder={pendingAnnotationId === selectedAnnotationId 
+                  ? "Describe the issue with this area..." 
+                  : "Add a comment..."
                 }
-              }}
-            />
-            <Button
-              size="icon"
-              onClick={handleSendComment}
-              disabled={!newComment.trim() || addComment.isPending}
-              className="shrink-0"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
-          <p className="text-[10px] text-muted-foreground">
-            ⌘+Enter to send
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                className={cn(
+                  "min-h-[60px] text-sm resize-none",
+                  pendingAnnotationId === selectedAnnotationId && "ring-2 ring-primary/50"
+                )}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    handleSendComment();
+                  }
+                }}
+              />
+              <Button
+                size="icon"
+                onClick={handleSendComment}
+                disabled={!newComment.trim() || addComment.isPending}
+                className="shrink-0"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              ⌘+Enter to send
+            </p>
+          </>
+        )}
+        
+        {/* Hint when no annotation selected in Issues tab */}
+        {activeTab === 'annotations' && !selectedAnnotationId && !isDrawing && (
+          <p className="text-xs text-muted-foreground text-center py-2">
+            Select an issue above or draw a new one
           </p>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
