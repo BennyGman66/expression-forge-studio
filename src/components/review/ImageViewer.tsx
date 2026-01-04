@@ -66,7 +66,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
     const handleZoomIn = () => setZoom(prev => Math.min(prev * 1.25, 5));
     const handleZoomOut = () => setZoom(prev => Math.max(prev / 1.25, 0.25));
 
-    // Fit entire image in viewport - no cropping
+    // Fit entire image in viewport with small margins
     const handleFit = useCallback(() => {
       if (!containerRef.current || !imageDimensions.width) {
         setZoom(1);
@@ -75,18 +75,27 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       }
       
       const container = containerRef.current.getBoundingClientRect();
-      const padding = 16; // Minimal padding
+      const padding = 8; // Small margin
       const availableWidth = container.width - padding;
       const availableHeight = container.height - padding;
       
-      // Always use the smaller ratio to ensure full image fits
-      const fitZoom = Math.min(
-        availableWidth / imageDimensions.width,
-        availableHeight / imageDimensions.height
-      );
+      const aspectRatio = imageDimensions.width / imageDimensions.height;
+      const isPortrait = aspectRatio < 0.8;
       
-      // No minimum floor - let it be as small as needed to show full image
-      setZoom(fitZoom);
+      let fitZoom;
+      if (isPortrait) {
+        // For portrait images: fill ~90% of height for better visibility
+        fitZoom = (availableHeight * 0.9) / imageDimensions.height;
+      } else {
+        // For landscape/square: standard fit
+        fitZoom = Math.min(
+          availableWidth / imageDimensions.width,
+          availableHeight / imageDimensions.height
+        );
+      }
+      
+      // Ensure reasonable minimum zoom (40%)
+      setZoom(Math.max(fitZoom, 0.4));
       setPan({ x: 0, y: 0 });
     }, [imageDimensions]);
 
