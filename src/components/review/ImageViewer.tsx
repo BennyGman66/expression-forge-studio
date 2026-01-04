@@ -22,6 +22,7 @@ interface ImageViewerProps {
   showAnnotations: boolean;
   onToggleAnnotations: () => void;
   className?: string;
+  readOnly?: boolean; // Disables drawing but still shows annotations
 }
 
 export interface ImageViewerHandle {
@@ -42,6 +43,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       showAnnotations,
       onToggleAnnotations,
       className,
+      readOnly = false,
     },
     ref
   ) {
@@ -128,7 +130,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
     }, []);
 
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
-      if (isDrawing) {
+      if (isDrawing && !readOnly) {
         const coords = getNormalizedCoords(e.clientX, e.clientY);
         if (coords) {
           setDrawStart(coords);
@@ -139,10 +141,10 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
         setIsPanning(true);
         setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
       }
-    }, [isDrawing, getNormalizedCoords, zoom, pan]);
+    }, [isDrawing, readOnly, getNormalizedCoords, zoom, pan]);
 
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
-      if (drawStart && isDrawing) {
+      if (drawStart && isDrawing && !readOnly) {
         const coords = getNormalizedCoords(e.clientX, e.clientY);
         if (coords) {
           setDrawCurrent(coords);
@@ -153,7 +155,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
           y: e.clientY - panStart.y,
         });
       }
-    }, [drawStart, isDrawing, getNormalizedCoords, isPanning, panStart]);
+    }, [drawStart, isDrawing, readOnly, getNormalizedCoords, isPanning, panStart]);
 
     const handleMouseUp = useCallback(() => {
       if (drawStart && drawCurrent && isDrawing) {
@@ -351,8 +353,8 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
               </div>
             </div>
 
-            {/* Drawing hint */}
-            {isDrawing && !drawStart && (
+          {/* Drawing hint */}
+            {isDrawing && !drawStart && !readOnly && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-muted-foreground bg-background/80 backdrop-blur px-3 py-1.5 rounded-full border border-border">
                 Click and drag to draw an annotation
               </div>

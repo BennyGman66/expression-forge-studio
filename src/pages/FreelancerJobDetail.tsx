@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useJob, useJobInputs, useJobOutputs, useJobNotes, useUpdateJobStatus, useAddJobNote } from '@/hooks/useJobs';
-import { useCreateSubmission } from '@/hooks/useReviewSystem';
+import { useCreateSubmission, useLatestSubmission, useCreateResubmission } from '@/hooks/useReviewSystem';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -14,8 +14,9 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, Download, Upload, Send, Clock, CheckCircle, Play, FileImage, ArrowRight, AlertTriangle, DownloadCloud, X } from 'lucide-react';
+import { ArrowLeft, Download, Upload, Send, Clock, CheckCircle, Play, FileImage, ArrowRight, AlertTriangle, DownloadCloud, X, Eye } from 'lucide-react';
 import { format } from 'date-fns';
+import { SubmissionReviewViewer } from '@/components/freelancer/SubmissionReviewViewer';
 
 // Pending upload with view assignment
 interface PendingUpload {
@@ -55,15 +56,18 @@ export default function FreelancerJobDetail() {
   const { data: inputs = [] } = useJobInputs(jobId!);
   const { data: outputs = [], refetch: refetchOutputs } = useJobOutputs(jobId!);
   const { data: notes = [] } = useJobNotes(jobId!);
+  const { data: latestSubmission } = useLatestSubmission(jobId!);
   
   const updateStatus = useUpdateJobStatus();
   const addNote = useAddJobNote();
   const createSubmission = useCreateSubmission();
+  const createResubmission = useCreateResubmission();
   
   const [noteText, setNoteText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [pendingReplacements, setPendingReplacements] = useState<Map<string, { file: File; preview: string }>>(new Map());
 
   // Group inputs by view (Front, Side, Back) for Foundation Face Replace
   const groupedInputs = useMemo(() => {
@@ -327,6 +331,59 @@ export default function FreelancerJobDetail() {
     return notes.find(note => note.author_id !== user?.id);
   }, [notes, job?.status, user?.id]);
 
+  // Handle resubmission with replacements
+  const handleResubmit = async () => {
+    if (!latestSubmission || pendingReplacements.size === 0) {
+      toast.error('Please replace at least one asset before resubmitting');
+      return;
+    }
+    
+    setUploading(true);
+    try {
+      // Upload replacement files and build URL map
+      const replacementUrls = new Map<string, string>();
+      
+      for (const [assetId, { file }] of pendingReplacements) {
+        const fileName = `${jobId}/${Date.now()}-replacement-${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from('images')
+          .upload(fileName, file);
+        
+        if (uploadError) throw uploadError;
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('images')
+          .getPublicUrl(fileName);
+        
+        replacementUrls.set(assetId, publicUrl);
+      }
+      
+      // Create resubmission
+      await createResubmission.mutateAsync({
+        jobId: jobId!,
+        previousSubmissionId: latestSubmission.id,
+        replacements: replacementUrls,
+      });
+      
+      // Clean up preview URLs
+      for (const { preview } of pendingReplacements.values()) {
+        URL.revokeObjectURL(preview);
+      }
+      setPendingReplacements(new Map());
+      
+      toast.success('Resubmitted for review!');
+    } catch (error) {
+      console.error('Resubmission error:', error);
+      toast.error('Failed to resubmit');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleReplacementsReady = useCallback((replacements: Map<string, { file: File; preview: string }>) => {
+    setPendingReplacements(replacements);
+  }, []);
+
   if (jobLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -413,13 +470,39 @@ export default function FreelancerJobDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Admin Feedback - Show prominently for NEEDS_CHANGES */}
+            {/* Submission Review Viewer - Show for SUBMITTED and NEEDS_CHANGES when there's a submission */}
+            {(job.status === 'SUBMITTED' || job.status === 'NEEDS_CHANGES') && latestSubmission && (
+              <Card className="bg-card border-border">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Eye className="h-5 w-5" />
+                    {job.status === 'NEEDS_CHANGES' ? 'Review Feedback & Update' : 'Your Submission'}
+                    <Badge variant="outline" className="ml-2">v{latestSubmission.version_number}</Badge>
+                  </CardTitle>
+                  {job.status === 'NEEDS_CHANGES' && (
+                    <p className="text-sm text-muted-foreground">
+                      Review the annotations and comments, then replace the assets that need changes.
+                    </p>
+                  )}
+                </CardHeader>
+                <CardContent className="p-0">
+                  <SubmissionReviewViewer
+                    submissionId={latestSubmission.id}
+                    jobId={jobId!}
+                    showReplaceMode={job.status === 'NEEDS_CHANGES'}
+                    onReplacementReady={handleReplacementsReady}
+                  />
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Admin Feedback (legacy notes) - Show prominently for NEEDS_CHANGES */}
             {job.status === 'NEEDS_CHANGES' && adminFeedback && (
               <Card className="bg-orange-500/10 border-orange-500/30">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2 text-orange-300">
                     <AlertTriangle className="h-5 w-5" />
-                    Reviewer Feedback
+                    Additional Notes
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -844,7 +927,34 @@ export default function FreelancerJobDetail() {
                     <p>Waiting for review</p>
                   </div>
                 )}
-                {job.status === 'NEEDS_CHANGES' && (
+                {job.status === 'NEEDS_CHANGES' && latestSubmission && (
+                  <>
+                    {/* Resubmit with replacements */}
+                    <div className="p-3 rounded-lg bg-muted/30 border border-border text-sm space-y-2">
+                      <p className="font-medium text-muted-foreground">Ready to resubmit:</p>
+                      <div className="flex items-center gap-2">
+                        <div className={`h-4 w-4 rounded-full flex items-center justify-center ${pendingReplacements.size > 0 ? 'bg-green-500' : 'bg-muted'}`}>
+                          {pendingReplacements.size > 0 && <CheckCircle className="h-3 w-3 text-white" />}
+                        </div>
+                        <span className={pendingReplacements.size > 0 ? 'text-foreground' : 'text-muted-foreground'}>
+                          {pendingReplacements.size} replacement(s) ready
+                        </span>
+                      </div>
+                    </div>
+                    <Button 
+                      onClick={handleResubmit} 
+                      className="w-full" 
+                      disabled={uploading || createResubmission.isPending || pendingReplacements.size === 0}
+                    >
+                      <Send className="mr-2 h-4 w-4" /> 
+                      {uploading || createResubmission.isPending ? 'Resubmitting...' : 'Resubmit for Review'}
+                    </Button>
+                    <p className="text-xs text-muted-foreground text-center">
+                      Replace the flagged assets above, then resubmit
+                    </p>
+                  </>
+                )}
+                {job.status === 'NEEDS_CHANGES' && !latestSubmission && (
                   <>
                     <Button onClick={handleStartJob} className="w-full" disabled={updateStatus.isPending}>
                       <Play className="mr-2 h-4 w-4" /> Resume Working

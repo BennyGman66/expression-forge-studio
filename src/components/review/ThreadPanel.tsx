@@ -31,6 +31,7 @@ interface ThreadPanelProps {
   isDrawing?: boolean;
   onToggleDrawing?: () => void;
   pendingAnnotationId?: string | null;
+  showGeneralCommentInput?: boolean; // Allow general comments without annotation
 }
 
 export function ThreadPanel({
@@ -45,6 +46,7 @@ export function ThreadPanel({
   isDrawing = false,
   onToggleDrawing,
   pendingAnnotationId,
+  showGeneralCommentInput = false,
 }: ThreadPanelProps) {
   const { user } = useAuth();
   const [newComment, setNewComment] = useState('');
@@ -56,6 +58,7 @@ export function ThreadPanel({
   const createThread = useCreateThread();
 
   // Build a flat list of all comments with annotation context (Frame.io style)
+  // For non-internal users, only show SHARED comments
   const allComments = useMemo(() => {
     const comments: Array<{
       comment: ReviewComment;
@@ -70,6 +73,11 @@ export function ThreadPanel({
         : null;
 
       thread.comments?.forEach(comment => {
+        // Filter internal comments for non-internal users
+        if (!isInternal && comment.visibility === 'INTERNAL_ONLY') {
+          return;
+        }
+        
         comments.push({
           comment,
           thread,
@@ -83,7 +91,7 @@ export function ThreadPanel({
     return comments.sort((a, b) => 
       new Date(a.comment.created_at).getTime() - new Date(b.comment.created_at).getTime()
     );
-  }, [threads, annotations]);
+  }, [threads, annotations, isInternal]);
 
   // Find thread for selected annotation
   const selectedAnnotationThread = threads.find(
@@ -208,7 +216,7 @@ export function ThreadPanel({
 
       {/* Compose Area */}
       <div className="p-3 border-t border-border space-y-2">
-        {/* Draw Annotation Button */}
+        {/* Draw Annotation Button - only for internal users */}
         {isInternal && onToggleDrawing && (
           <Button
             variant={isDrawing ? 'default' : 'outline'}
@@ -221,8 +229,8 @@ export function ThreadPanel({
           </Button>
         )}
         
-        {/* Comment input - show when there's a selected annotation */}
-        {selectedAnnotationId && (
+        {/* Comment input - show when there's a selected annotation OR for general comments */}
+        {(selectedAnnotationId || showGeneralCommentInput) && (
           <>
             {isInternal && (
               <div className="flex items-center gap-2">
@@ -260,22 +268,29 @@ export function ThreadPanel({
               <Button
                 size="icon"
                 onClick={handleSendComment}
-                disabled={!newComment.trim() || addComment.isPending}
+                disabled={!newComment.trim() || addComment.isPending || !selectedAnnotationId}
                 className="shrink-0"
               >
                 <Send className="h-4 w-4" />
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground">
-              ⌘+Enter to send
+              {selectedAnnotationId ? '⌘+Enter to send' : 'Select a comment to reply'}
             </p>
           </>
         )}
         
-        {/* Hint when no annotation selected */}
-        {!selectedAnnotationId && !isDrawing && allComments.length > 0 && (
+        {/* Hint when no annotation selected - adjusted for internal vs external */}
+        {!selectedAnnotationId && !isDrawing && allComments.length > 0 && !showGeneralCommentInput && (
           <p className="text-xs text-muted-foreground text-center py-2">
             Click a comment to view its annotation
+          </p>
+        )}
+        
+        {/* Hint for freelancers when no comments exist */}
+        {!isInternal && allComments.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-2">
+            No feedback yet on this asset
           </p>
         )}
       </div>
