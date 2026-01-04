@@ -725,3 +725,57 @@ export function useJobsNeedingReview() {
     },
   });
 }
+
+// ============ REVIEW PROGRESS ============
+
+export type ReviewProgressMap = Record<string, {
+  approved: number;
+  changesRequested: number;
+  pending: number;
+  total: number;
+}>;
+
+export function useJobsReviewProgress() {
+  return useQuery({
+    queryKey: ['jobs-review-progress'],
+    queryFn: async () => {
+      // Fetch all submission assets with their job IDs
+      const { data, error } = await supabase
+        .from('submission_assets')
+        .select(`
+          id,
+          review_status,
+          submission:job_submissions!inner(job_id)
+        `);
+      
+      if (error) throw error;
+      
+      // Aggregate by job_id
+      const progressMap: ReviewProgressMap = {};
+      
+      for (const asset of data || []) {
+        const jobId = (asset.submission as any)?.job_id;
+        if (!jobId) continue;
+        
+        if (!progressMap[jobId]) {
+          progressMap[jobId] = { approved: 0, changesRequested: 0, pending: 0, total: 0 };
+        }
+        
+        progressMap[jobId].total++;
+        
+        switch (asset.review_status) {
+          case 'APPROVED':
+            progressMap[jobId].approved++;
+            break;
+          case 'CHANGES_REQUESTED':
+            progressMap[jobId].changesRequested++;
+            break;
+          default:
+            progressMap[jobId].pending++;
+        }
+      }
+      
+      return progressMap;
+    },
+  });
+}
