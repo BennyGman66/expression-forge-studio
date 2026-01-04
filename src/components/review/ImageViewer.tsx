@@ -222,39 +222,6 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
     return (
       <TooltipProvider>
         <div className={cn("flex flex-col h-full", className)}>
-          {/* Toolbar */}
-          <div className="flex items-center gap-2 p-2 border-b border-border bg-card">
-            <Button variant="ghost" size="icon" onClick={handleZoomOut}>
-              <ZoomOut className="h-4 w-4" />
-            </Button>
-            <span className="text-xs text-muted-foreground w-12 text-center">
-              {Math.round(zoom * 100)}%
-            </span>
-            <Button variant="ghost" size="icon" onClick={handleZoomIn}>
-              <ZoomIn className="h-4 w-4" />
-            </Button>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={handleFit}>
-                  <Maximize2 className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Fit to screen</TooltipContent>
-            </Tooltip>
-            <div className="flex-1" />
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={onToggleAnnotations}
-              className="gap-2"
-            >
-              {showAnnotations ? (
-                <><Eye className="h-4 w-4" /> Annotations</>
-              ) : (
-                <><EyeOff className="h-4 w-4" /> Annotations</>
-              )}
-            </Button>
-          </div>
 
           {/* Image Container */}
           <div 
@@ -389,12 +356,40 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
               </div>
             )}
 
-            {/* Empty state hint */}
-            {imageLoaded && showAnnotations && annotations.length === 0 && !isDrawing && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-muted-foreground bg-background/80 backdrop-blur px-3 py-1.5 rounded-full border border-border">
-                Click "Draw Annotation" to mark issues on this image
-              </div>
-            )}
+            {/* Bottom Floating Toolbar */}
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-background/90 backdrop-blur border border-border rounded-full px-2 py-1 shadow-lg">
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleZoomOut}>
+                <ZoomOut className="h-3.5 w-3.5" />
+              </Button>
+              <span className="text-xs text-muted-foreground w-10 text-center">
+                {Math.round(zoom * 100)}%
+              </span>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleZoomIn}>
+                <ZoomIn className="h-3.5 w-3.5" />
+              </Button>
+              <div className="w-px h-4 bg-border mx-1" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleFit}>
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Fit to screen</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-7 w-7"
+                    onClick={onToggleAnnotations}
+                  >
+                    {showAnnotations ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{showAnnotations ? 'Hide annotations' : 'Show annotations'}</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
         </div>
       </TooltipProvider>

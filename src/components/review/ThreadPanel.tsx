@@ -4,7 +4,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
@@ -61,7 +61,7 @@ export function ThreadPanel({
   const { user } = useAuth();
   const [newComment, setNewComment] = useState('');
   const [isInternalOnly, setIsInternalOnly] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'annotations'>('annotations');
+  // Unified view - no tabs needed
   const scrollRef = useRef<HTMLDivElement>(null);
   const selectedAnnotationRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -69,20 +69,18 @@ export function ThreadPanel({
   const addComment = useAddComment();
   const createThread = useCreateThread();
 
-  // Filter threads based on active tab and selected asset
-  const filteredThreads = threads.filter(t => {
-    if (activeTab === 'all') return t.scope === 'JOB';
-    if (activeTab === 'annotations') return t.scope === 'ANNOTATION' && t.asset_id === selectedAssetId;
-    return false;
-  });
+  // Get annotation threads for current asset
+  const annotationThreads = threads.filter(t => t.scope === 'ANNOTATION' && t.asset_id === selectedAssetId);
+  // Get job-level threads
+  const jobThreads = threads.filter(t => t.scope === 'JOB');
 
   // Find thread for selected annotation
   const selectedAnnotationThread = threads.find(
     t => t.annotation_id === selectedAnnotationId
   );
 
-  // Get the thread to show in detail
-  const activeThread = selectedAnnotationThread || filteredThreads[0];
+  // Get the thread to show in detail - prioritize selected annotation thread
+  const activeThread = selectedAnnotationThread || annotationThreads[0] || jobThreads[0];
 
   // Total comment count
   const totalComments = threads.reduce((acc, t) => acc + (t.comments?.length || 0), 0);
@@ -95,17 +93,6 @@ export function ThreadPanel({
       // Add to existing thread
       await addComment.mutateAsync({
         threadId: activeThread.id,
-        body: newComment.trim(),
-        visibility: isInternal && isInternalOnly ? 'INTERNAL_ONLY' : 'SHARED',
-      });
-    } else if (activeTab === 'all') {
-      // Create job-level thread first
-      const thread = await createThread.mutateAsync({
-        submissionId,
-        scope: 'JOB',
-      });
-      await addComment.mutateAsync({
-        threadId: thread.id,
         body: newComment.trim(),
         visibility: isInternal && isInternalOnly ? 'INTERNAL_ONLY' : 'SHARED',
       });
@@ -131,8 +118,6 @@ export function ThreadPanel({
   // Auto-focus textarea when a new annotation is created (pendingAnnotationId is set)
   useEffect(() => {
     if (pendingAnnotationId && textareaRef.current) {
-      // Switch to Issues tab if not already there
-      setActiveTab('annotations');
       // Focus the textarea after a brief delay to ensure render
       setTimeout(() => {
         textareaRef.current?.focus();
@@ -148,31 +133,24 @@ export function ThreadPanel({
 
   return (
     <div className="flex flex-col h-full border-l border-border bg-card">
-      {/* Header */}
+      {/* Header - Simplified */}
       <div className="p-3 border-b border-border">
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2">
           <MessageSquare className="h-4 w-4 text-muted-foreground" />
-          <span className="font-medium text-sm">Comments</span>
-          <Badge variant="secondary" className="ml-auto text-xs">
-            {totalComments}
+          <span className="font-medium text-sm">Feedback</span>
+          {annotations.length > 0 && (
+            <Badge variant="secondary" className="text-xs">
+              {annotations.length} {annotations.length === 1 ? 'issue' : 'issues'}
+            </Badge>
+          )}
+          <Badge variant="outline" className="ml-auto text-xs">
+            {totalComments} {totalComments === 1 ? 'comment' : 'comments'}
           </Badge>
         </div>
-
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-          <TabsList className="w-full grid grid-cols-2">
-            <TabsTrigger value="all" className="text-xs">General</TabsTrigger>
-            <TabsTrigger value="annotations" className="text-xs">
-              Issues
-              {annotations.length > 0 && (
-                <span className="ml-1 text-primary">({annotations.length})</span>
-              )}
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
       </div>
 
-      {/* Issue Navigation (when in annotations tab) */}
-      {activeTab === 'annotations' && totalIssues > 0 && onNavigateIssue && (
+      {/* Issue Navigation */}
+      {totalIssues > 0 && onNavigateIssue && (
         <div className="px-3 py-2 border-b border-border bg-muted/30 flex items-center justify-between">
           <Button
             variant="ghost"
@@ -200,8 +178,8 @@ export function ThreadPanel({
         </div>
       )}
 
-      {/* Annotation List (when in annotations tab) */}
-      {activeTab === 'annotations' && (
+      {/* Annotation List */}
+      {annotations.length > 0 && (
         <div className="border-b border-border">
           <ScrollArea className="max-h-40">
             <div className="p-2 space-y-1">
@@ -289,9 +267,7 @@ export function ThreadPanel({
             <div className="text-center py-8 text-muted-foreground text-sm">
               {selectedAnnotationId 
                 ? "Add a comment about this annotation"
-                : activeTab === 'all'
-                  ? "Start a conversation about this submission"
-                  : "Select an annotation to view comments"
+                : "Select an annotation to view comments"
               }
             </div>
           )}
@@ -313,8 +289,8 @@ export function ThreadPanel({
           </Button>
         )}
         
-        {/* Comment input - show when there's a selected annotation or in general tab */}
-        {(activeTab === 'all' || selectedAnnotationId) && (
+        {/* Comment input - show when there's a selected annotation */}
+        {selectedAnnotationId && (
           <>
             {isInternal && (
               <div className="flex items-center gap-2">
@@ -364,10 +340,10 @@ export function ThreadPanel({
           </>
         )}
         
-        {/* Hint when no annotation selected in Issues tab */}
-        {activeTab === 'annotations' && !selectedAnnotationId && !isDrawing && (
+        {/* Hint when no annotation selected */}
+        {!selectedAnnotationId && !isDrawing && (
           <p className="text-xs text-muted-foreground text-center py-2">
-            Select an issue above or draw a new one
+            {annotations.length > 0 ? 'Select an issue above or draw a new one' : 'Draw on the image to add feedback'}
           </p>
         )}
       </div>
