@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Textarea } from '@/components/ui/textarea';
+
 import { ImageViewer, ImageViewerHandle } from './ImageViewer';
 import { ThreadPanel } from './ThreadPanel';
 import { AssetThumbnails } from './AssetThumbnails';
@@ -70,7 +70,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [pendingAnnotationId, setPendingAnnotationId] = useState<string | null>(null);
   const [showChangesDialog, setShowChangesDialog] = useState(false);
-  const [changesNote, setChangesNote] = useState('');
+  
   const [showApproveDialog, setShowApproveDialog] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -223,13 +223,6 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
         });
       }
       
-      if (changesNote.trim()) {
-        await addComment.mutateAsync({
-          threadId: assetThread.id,
-          body: changesNote.trim(),
-          visibility: 'SHARED',
-        });
-      }
 
       // Update asset status
       const result = await updateAssetStatus.mutateAsync({
@@ -252,7 +245,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
 
       toast.success(`Changes requested for ${selectedAsset.label || 'asset'}`);
       setShowChangesDialog(false);
-      setChangesNote('');
+      
     } catch (error) {
       toast.error('Failed to request changes');
     }
@@ -542,22 +535,16 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
             <AlertDialogHeader>
               <AlertDialogTitle>Request Changes</AlertDialogTitle>
               <AlertDialogDescription>
-                Add a note describing what needs to be fixed:
+                The freelancer will see your comments and annotations for this asset.
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <Textarea
-              placeholder="Describe the changes needed..."
-              value={changesNote}
-              onChange={(e) => setChangesNote(e.target.value)}
-              className="min-h-[100px]"
-            />
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleRequestChangesAsset}
                 disabled={updateAssetStatus.isPending}
               >
-                Request Changes
+                Confirm
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
