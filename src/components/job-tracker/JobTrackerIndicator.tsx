@@ -53,7 +53,7 @@ export function JobTrackerIndicator() {
       </PopoverTrigger>
       <PopoverContent 
         align="end" 
-        className="p-0 w-80"
+        className="p-0 w-80 bg-popover"
         sideOffset={8}
       >
         <JobTrackerDropdown activeJobs={activeJobs} recentJobs={recentJobs} />
