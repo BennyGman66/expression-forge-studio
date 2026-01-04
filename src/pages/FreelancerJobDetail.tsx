@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useJob, useJobInputs, useJobOutputs, useJobNotes, useUpdateJobStatus, useAddJobNote } from '@/hooks/useJobs';
+import { useCreateSubmission } from '@/hooks/useReviewSystem';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -57,6 +58,7 @@ export default function FreelancerJobDetail() {
   
   const updateStatus = useUpdateJobStatus();
   const addNote = useAddJobNote();
+  const createSubmission = useCreateSubmission();
   
   const [noteText, setNoteText] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -109,7 +111,7 @@ export default function FreelancerJobDetail() {
     );
   };
 
-  const handleSubmitJob = () => {
+  const handleSubmitJob = async () => {
     if (outputs.length === 0) {
       toast.error('Please upload at least one output before submitting');
       return;
@@ -118,9 +120,24 @@ export default function FreelancerJobDetail() {
       toast.error(`Please upload all ${expectedOutputs} outputs before submitting`);
       return;
     }
-    updateStatus.mutate(
-      { jobId: jobId!, status: 'SUBMITTED' },
-      { onSuccess: () => toast.success('Job submitted for review!') }
+    
+    // Build assets from job outputs with proper labels
+    const assets = outputs.map((output, index) => ({
+      fileUrl: output.file_url || output.artifact?.file_url || '',
+      label: output.label || `Output ${index + 1}`,
+      sortIndex: index,
+    }));
+    
+    // Create submission with assets - this also updates job status to SUBMITTED
+    createSubmission.mutate(
+      { jobId: jobId!, assets },
+      { 
+        onSuccess: () => toast.success('Job submitted for review!'),
+        onError: (error) => {
+          console.error('Submission error:', error);
+          toast.error('Failed to submit job');
+        }
+      }
     );
   };
 
@@ -815,9 +832,9 @@ export default function FreelancerJobDetail() {
                     <Button 
                       onClick={handleSubmitJob} 
                       className="w-full" 
-                      disabled={updateStatus.isPending || outputs.length < expectedOutputs}
+                      disabled={updateStatus.isPending || createSubmission.isPending || outputs.length < expectedOutputs}
                     >
-                      <CheckCircle className="mr-2 h-4 w-4" /> Submit for Review
+                      <CheckCircle className="mr-2 h-4 w-4" /> {createSubmission.isPending ? 'Submitting...' : 'Submit for Review'}
                     </Button>
                   </>
                 )}
