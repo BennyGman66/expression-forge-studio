@@ -303,11 +303,20 @@ export default function FreelancerJobDetail() {
       case 'OPEN': return 'bg-blue-500/20 text-blue-400';
       case 'ASSIGNED': return 'bg-cyan-500/20 text-cyan-400';
       case 'IN_PROGRESS': return 'bg-yellow-500/20 text-yellow-400';
-      case 'SUBMITTED': return 'bg-purple-500/20 text-purple-400';
+      case 'SUBMITTED': return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
       case 'APPROVED': return 'bg-green-500/20 text-green-400';
       case 'NEEDS_CHANGES': return 'bg-orange-500/20 text-orange-400';
       case 'CLOSED': return 'bg-muted text-muted-foreground';
       default: return 'bg-muted text-muted-foreground';
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'SUBMITTED': return 'IN REVIEW';
+      case 'NEEDS_CHANGES': return 'NEEDS CHANGES';
+      case 'IN_PROGRESS': return 'IN PROGRESS';
+      default: return status;
     }
   };
 
@@ -461,7 +470,7 @@ export default function FreelancerJobDetail() {
               </div>
             </div>
             <Badge className={`${getStatusColor(job.status)} text-sm px-3 py-1`}>
-              {job.status === 'NEEDS_CHANGES' ? 'NEEDS CHANGES' : job.status}
+              {getStatusLabel(job.status)}
             </Badge>
           </div>
         </div>
