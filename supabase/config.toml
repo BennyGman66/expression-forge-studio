@@ -102,5 +102,5 @@ verify_jwt = false
 [functions.assign-role]
 verify_jwt = false
 
-[functions.assign-role]
+[functions.resume-clay-job]
 verify_jwt = false
