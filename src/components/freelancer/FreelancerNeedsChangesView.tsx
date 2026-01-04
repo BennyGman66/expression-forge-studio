@@ -26,6 +26,7 @@ import {
   Target,
   Send,
   FileText,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -426,33 +427,47 @@ export function FreelancerNeedsChangesView({
           {/* Actions Panel - Fix Checklist - Only show assets that need changes */}
           {requiredCount > 0 && (
             <div className="p-3 border-b border-border bg-muted/10">
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {assetsNeedingReplacement.map(asset => {
                   const assetReplacement = replacements.get(asset.id);
                   const commentCount = getAssetCommentCount(asset.id);
                   
                   return (
-                    <div 
-                      key={asset.id} 
-                      className={cn(
-                        "flex items-center justify-between py-1 px-2 rounded text-sm",
-                        assetReplacement ? "bg-blue-500/10" : "bg-orange-500/10"
-                      )}
-                    >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <div key={asset.id} className="space-y-1.5">
+                      {/* Asset header */}
+                      <div className="flex items-center gap-2">
                         {assetReplacement ? (
-                          <CheckCircle className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
                         ) : (
                           <AlertTriangle className="h-3.5 w-3.5 text-orange-500 shrink-0" />
                         )}
-                        <span className="truncate text-xs">{asset.label || 'Untitled'}</span>
+                        <span className="text-xs font-medium">{asset.label || 'Untitled'}</span>
                         {commentCount > 0 && (
                           <span className="text-[10px] text-muted-foreground">({commentCount})</span>
                         )}
                       </div>
                       
-                      {!assetReplacement && (
-                        <>
+                      {/* Upload zone or uploaded file */}
+                      {!assetReplacement ? (
+                        <div
+                          className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-3 text-center hover:border-primary/50 hover:bg-primary/5 transition-colors cursor-pointer"
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.currentTarget.classList.add('border-primary', 'bg-primary/10');
+                          }}
+                          onDragLeave={(e) => {
+                            e.currentTarget.classList.remove('border-primary', 'bg-primary/10');
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.currentTarget.classList.remove('border-primary', 'bg-primary/10');
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) {
+                              handleReplaceFile(asset.id, file);
+                            }
+                          }}
+                          onClick={() => document.getElementById(`replace-${asset.id}`)?.click()}
+                        >
                           <Input
                             type="file"
                             accept="image/*,.psd,.ai,.pdf,.tiff"
@@ -464,38 +479,34 @@ export function FreelancerNeedsChangesView({
                               e.target.value = '';
                             }}
                             className="hidden"
-                            id={`replace-checklist-${asset.id}`}
+                            id={`replace-${asset.id}`}
                           />
-                          <Label htmlFor={`replace-checklist-${asset.id}`}>
-                            <Button variant="ghost" size="sm" asChild className="h-5 px-1.5 text-[10px]">
-                              <span>
-                                <Upload className="h-3 w-3 mr-0.5" />
-                                Upload
-                              </span>
-                            </Button>
-                          </Label>
-                        </>
-                      )}
-                      
-                      {assetReplacement && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveReplacement(asset.id)}
-                          className="h-5 px-1.5 text-[10px]"
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
+                          <Upload className="h-4 w-4 mx-auto text-muted-foreground mb-1" />
+                          <p className="text-[10px] text-muted-foreground">
+                            Drop file here or <span className="text-primary underline">browse</span>
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 px-2 py-1.5 bg-green-500/10 rounded-md">
+                          <ImageIcon className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                          <span className="text-xs truncate flex-1">{assetReplacement.file.name}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveReplacement(asset.id)}
+                            className="h-5 w-5 p-0 hover:bg-destructive/20"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
                       )}
                     </div>
                   );
                 })}
               </div>
-            {/* Progress + Resubmit */}
+              
+              {/* Resubmit button */}
               <div className="mt-3 pt-2 border-t border-border">
-                <p className="text-[10px] text-muted-foreground mb-2">
-                  {readyCount}/{requiredCount} replacements ready
-                </p>
                 <Button 
                   className="w-full" 
                   disabled={!canResubmit || isResubmitting}
