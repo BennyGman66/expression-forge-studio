@@ -518,9 +518,6 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
               onSelectAnnotation={setSelectedAnnotationId}
               onJumpToAnnotation={handleJumpToAnnotation}
               isInternal={isInternal}
-              allAnnotations={allAnnotations}
-              currentIssueIndex={currentIssueIndex}
-              onNavigateIssue={handleNavigateIssue}
               isDrawing={isDrawing}
               onToggleDrawing={() => setIsDrawing(!isDrawing)}
               pendingAnnotationId={pendingAnnotationId}
