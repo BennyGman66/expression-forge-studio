@@ -19,11 +19,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useJobs } from "@/hooks/useJobs";
-import { useNeedsReviewCount, useLatestSubmission } from "@/hooks/useReviewSystem";
 import { JobStatus, JobType } from "@/types/jobs";
-import { ArrowLeft, Plus, Search, Clock, User, Briefcase, Eye, MessageSquare } from "lucide-react";
+import { ArrowLeft, Plus, Search, Clock, User, Briefcase, Eye, MessageSquare, CheckCircle } from "lucide-react";
 import { format } from "date-fns";
 import { JobDetailPanel } from "@/components/jobs/JobDetailPanel";
 import { CreateJobDialog } from "@/components/jobs/CreateJobDialog";
@@ -45,6 +43,9 @@ const typeLabels: Record<JobType, string> = {
   FOUNDATION_FACE_REPLACE: "Foundation Face Replace",
 };
 
+// Statuses that can have a review panel opened
+const reviewableStatuses: JobStatus[] = ["SUBMITTED", "NEEDS_CHANGES", "APPROVED", "CLOSED"];
+
 export default function JobBoard() {
   const navigate = useNavigate();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -53,9 +54,6 @@ export default function JobBoard() {
   const [statusFilter, setStatusFilter] = useState<JobStatus | "all">("all");
   const [typeFilter, setTypeFilter] = useState<JobType | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [viewTab, setViewTab] = useState<"all" | "needs-review">("all");
-
-  const { data: needsReviewCount } = useNeedsReviewCount();
 
   const { data: jobs, isLoading } = useJobs({
     status: statusFilter !== "all" ? statusFilter : undefined,
@@ -63,15 +61,18 @@ export default function JobBoard() {
   });
 
   const filteredJobs = jobs?.filter((job) => {
-    if (viewTab === "needs-review" && job.status !== "SUBMITTED") return false;
     if (!searchQuery) return true;
     const searchLower = searchQuery.toLowerCase();
     return (
       job.id.toLowerCase().includes(searchLower) ||
+      job.title?.toLowerCase().includes(searchLower) ||
       job.assigned_user?.display_name?.toLowerCase().includes(searchLower) ||
       job.assigned_user?.email?.toLowerCase().includes(searchLower)
     );
   });
+
+  // Count jobs needing review (SUBMITTED status)
+  const needsReviewCount = jobs?.filter(j => j.status === "SUBMITTED").length || 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -101,25 +102,8 @@ export default function JobBoard() {
           </Button>
         </div>
 
-        {/* View Tabs */}
-        <div className="mb-4">
-          <Tabs value={viewTab} onValueChange={(v) => setViewTab(v as "all" | "needs-review")}>
-            <TabsList>
-              <TabsTrigger value="all">All Jobs</TabsTrigger>
-              <TabsTrigger value="needs-review" className="gap-2">
-                Needs Review
-                {(needsReviewCount || 0) > 0 && (
-                  <Badge variant="destructive" className="h-5 px-1.5 text-xs">
-                    {needsReviewCount}
-                  </Badge>
-                )}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-
         {/* Filters */}
-        <div className="flex gap-4 mb-6">
+        <div className="flex gap-4 mb-6 flex-wrap">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -129,42 +113,47 @@ export default function JobBoard() {
               className="pl-10"
             />
           </div>
-          {viewTab === "all" && (
-            <>
-              <Select
-                value={statusFilter}
-                onValueChange={(v) => setStatusFilter(v as JobStatus | "all")}
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  <SelectItem value="OPEN">Open</SelectItem>
-                  <SelectItem value="ASSIGNED">Assigned</SelectItem>
-                  <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
-                  <SelectItem value="SUBMITTED">Submitted</SelectItem>
-                  <SelectItem value="NEEDS_CHANGES">Needs Changes</SelectItem>
-                  <SelectItem value="APPROVED">Approved</SelectItem>
-                  <SelectItem value="CLOSED">Closed</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={typeFilter}
-                onValueChange={(v) => setTypeFilter(v as JobType | "all")}
-              >
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="PHOTOSHOP_FACE_APPLY">Photoshop Face Apply</SelectItem>
-                  <SelectItem value="RETOUCH_FINAL">Final Retouch</SelectItem>
-                  <SelectItem value="FOUNDATION_FACE_REPLACE">Foundation Face Replace</SelectItem>
-                </SelectContent>
-              </Select>
-            </>
-          )}
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as JobStatus | "all")}
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="OPEN">Open</SelectItem>
+              <SelectItem value="ASSIGNED">Assigned</SelectItem>
+              <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+              <SelectItem value="SUBMITTED">
+                <span className="flex items-center gap-2">
+                  Submitted
+                  {needsReviewCount > 0 && (
+                    <Badge variant="destructive" className="h-4 px-1 text-[10px]">
+                      {needsReviewCount}
+                    </Badge>
+                  )}
+                </span>
+              </SelectItem>
+              <SelectItem value="NEEDS_CHANGES">Needs Changes</SelectItem>
+              <SelectItem value="APPROVED">Approved</SelectItem>
+              <SelectItem value="CLOSED">Closed</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={typeFilter}
+            onValueChange={(v) => setTypeFilter(v as JobType | "all")}
+          >
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="Type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="PHOTOSHOP_FACE_APPLY">Photoshop Face Apply</SelectItem>
+              <SelectItem value="RETOUCH_FINAL">Final Retouch</SelectItem>
+              <SelectItem value="FOUNDATION_FACE_REPLACE">Foundation Face Replace</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Jobs Table */}
@@ -172,25 +161,26 @@ export default function JobBoard() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Job ID</TableHead>
+                <TableHead className="w-32">Job ID</TableHead>
+                <TableHead>Title</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Assignee</TableHead>
                 <TableHead>Due Date</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead className="w-20"></TableHead>
+                <TableHead className="w-24"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8">
+                  <TableCell colSpan={8} className="text-center py-8">
                     Loading jobs...
                   </TableCell>
                 </TableRow>
               ) : filteredJobs?.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8">
+                  <TableCell colSpan={8} className="text-center py-8">
                     <div className="flex flex-col items-center gap-2">
                       <Briefcase className="h-8 w-8 text-muted-foreground" />
                       <p className="text-muted-foreground">No jobs found</p>
@@ -198,79 +188,99 @@ export default function JobBoard() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredJobs?.map((job) => (
-                  <TableRow
-                    key={job.id}
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => setSelectedJobId(job.id)}
-                  >
-                    <TableCell className="font-mono text-xs">
-                      {job.id.slice(0, 8)}...
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm">{typeLabels[job.type]}</span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant="outline"
-                          className={statusColors[job.status]}
-                        >
-                          {job.status.replace("_", " ")}
-                        </Badge>
-                        {job.status === "SUBMITTED" && (
-                          <Badge variant="secondary" className="text-[10px] h-5 px-1.5 gap-1">
-                            <MessageSquare className="h-3 w-3" />
-                            New
+                filteredJobs?.map((job) => {
+                  const canReview = reviewableStatuses.includes(job.status);
+                  const needsReview = job.status === "SUBMITTED";
+                  const wasReviewed = job.status === "APPROVED" || job.status === "NEEDS_CHANGES";
+                  
+                  return (
+                    <TableRow
+                      key={job.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setSelectedJobId(job.id)}
+                    >
+                      <TableCell className="font-mono text-xs">
+                        {job.id.slice(0, 8)}...
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm font-medium">
+                          {job.title || "Untitled Job"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-muted-foreground">{typeLabels[job.type]}</span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant="outline"
+                            className={statusColors[job.status]}
+                          >
+                            {job.status.replace("_", " ")}
                           </Badge>
+                          {needsReview && (
+                            <Badge variant="secondary" className="text-[10px] h-5 px-1.5 gap-1 bg-cyan-500/20 text-cyan-600 border-cyan-500/30">
+                              <MessageSquare className="h-3 w-3" />
+                              Review
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {job.assigned_user ? (
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm">
+                              {job.assigned_user.display_name || job.assigned_user.email}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">Unassigned</span>
                         )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {job.assigned_user ? (
-                        <div className="flex items-center gap-2">
-                          <User className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">
-                            {job.assigned_user.display_name || job.assigned_user.email}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">Unassigned</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {job.due_date ? (
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">
-                            {format(new Date(job.due_date), "MMM d, yyyy")}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {format(new Date(job.created_at), "MMM d, yyyy")}
-                    </TableCell>
-                    <TableCell>
-                      {job.status === "SUBMITTED" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="gap-1"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setReviewJobId(job.id);
-                          }}
-                        >
-                          <Eye className="h-3 w-3" />
-                          Review
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))
+                      </TableCell>
+                      <TableCell>
+                        {job.due_date ? (
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm">
+                              {format(new Date(job.due_date), "MMM d, yyyy")}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-sm">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {format(new Date(job.created_at), "MMM d, yyyy")}
+                      </TableCell>
+                      <TableCell>
+                        {canReview && (
+                          <Button
+                            variant={needsReview ? "default" : "outline"}
+                            size="sm"
+                            className="gap-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReviewJobId(job.id);
+                            }}
+                          >
+                            {wasReviewed ? (
+                              <>
+                                <CheckCircle className="h-3 w-3" />
+                                View
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="h-3 w-3" />
+                                Review
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
