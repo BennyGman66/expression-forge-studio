@@ -550,17 +550,17 @@ export function FreelancerNeedsChangesView({
                             }
                           }}
                         >
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2">
                             <Target className="h-3.5 w-3.5 text-orange-500 shrink-0" />
-                            <span className="text-xs font-medium">Annotation</span>
-                            {annotationIndex !== null && annotationIndex >= 0 && (
-                              <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                                #{annotationIndex + 1}
-                              </span>
-                            )}
+                            <span className="text-xs font-medium">
+                              Area {annotationIndex !== null && annotationIndex >= 0 ? `#${annotationIndex + 1}` : ''}
+                            </span>
+                            <span className="ml-auto text-[10px] text-muted-foreground">
+                              Click to highlight
+                            </span>
                           </div>
                           <p className="text-[10px] text-muted-foreground mt-1 pl-5">
-                            Marked for review
+                            No comment — see marked area on image
                           </p>
                         </div>
                       );
