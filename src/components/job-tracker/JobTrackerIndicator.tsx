@@ -9,8 +9,11 @@ import { Progress } from '@/components/ui/progress';
 import { JobTrackerDropdown } from './JobTrackerDropdown';
 import { useActiveJobs } from '@/hooks/useActiveJobs';
 
+import { useState } from 'react';
+
 export function JobTrackerIndicator() {
   const { activeJobs, recentJobs, activeCount, totalProgress, isLoading, markJobStalled } = useActiveJobs();
+  const [isOpen, setIsOpen] = useState(false);
 
   const hasActiveJobs = activeCount > 0;
   const stalledCount = activeJobs.filter(j => j.isStalled).length;
@@ -24,7 +27,7 @@ export function JobTrackerIndicator() {
   const primaryJob = activeJobs[0];
 
   return (
-    <Popover>
+    <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
         <Button
           variant={hasStalled ? 'destructive' : hasActiveJobs ? 'default' : 'ghost'}
@@ -70,6 +73,7 @@ export function JobTrackerIndicator() {
           activeJobs={activeJobs} 
           recentJobs={recentJobs} 
           onMarkStalled={markJobStalled}
+          onClose={() => setIsOpen(false)}
         />
       </PopoverContent>
     </Popover>
