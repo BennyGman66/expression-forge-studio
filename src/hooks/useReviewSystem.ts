@@ -600,6 +600,96 @@ export function useCreateNotification() {
   });
 }
 
+// ============ RESUBMISSION WITH REPLACEMENTS ============
+
+export function useCreateResubmission() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: async ({
+      jobId,
+      previousSubmissionId,
+      replacements,
+    }: {
+      jobId: string;
+      previousSubmissionId: string;
+      replacements: Map<string, string>; // assetId -> new file URL
+    }) => {
+      // Get current max version
+      const { data: existing } = await supabase
+        .from('job_submissions')
+        .select('version_number')
+        .eq('job_id', jobId)
+        .order('version_number', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      const nextVersion = (existing?.version_number || 0) + 1;
+      
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Get previous submission's assets
+      const { data: prevAssets, error: fetchError } = await supabase
+        .from('submission_assets')
+        .select('*')
+        .eq('submission_id', previousSubmissionId)
+        .order('sort_index');
+      
+      if (fetchError) throw fetchError;
+      
+      // Create new submission
+      const { data: submission, error: subError } = await supabase
+        .from('job_submissions')
+        .insert({
+          job_id: jobId,
+          submitted_by_user_id: user?.id,
+          version_number: nextVersion,
+          summary_note: `Resubmission (v${nextVersion}) with updated assets`,
+          status: 'SUBMITTED' as SubmissionStatus,
+        })
+        .select()
+        .single();
+      
+      if (subError) throw subError;
+      
+      // Create new assets - use replacement URLs where provided, otherwise copy from previous
+      const newAssets = (prevAssets || []).map((asset, index) => ({
+        submission_id: submission.id,
+        file_url: replacements.get(asset.id) || asset.file_url,
+        label: asset.label,
+        sort_index: index,
+        // Reset review status for new submission
+        review_status: null,
+        reviewed_by_user_id: null,
+        reviewed_at: null,
+      }));
+      
+      if (newAssets.length > 0) {
+        const { error: assetError } = await supabase
+          .from('submission_assets')
+          .insert(newAssets);
+        
+        if (assetError) throw assetError;
+      }
+      
+      // Update job status to SUBMITTED
+      await supabase
+        .from('unified_jobs')
+        .update({ status: 'SUBMITTED' })
+        .eq('id', jobId);
+      
+      return submission;
+    },
+    onSuccess: (_, { jobId }) => {
+      queryClient.invalidateQueries({ queryKey: ['job-submissions', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['latest-submission', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['job', jobId] });
+    },
+  });
+}
+
 // ============ REVIEW COUNTS FOR JOB BOARD ============
 
 export function useNeedsReviewCount() {
