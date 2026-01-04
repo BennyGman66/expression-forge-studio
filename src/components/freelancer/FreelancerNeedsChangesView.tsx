@@ -90,11 +90,16 @@ export function FreelancerNeedsChangesView({
     });
   }, [assets, threads]);
 
-  // Get comment count for an asset
+  // Get comment count for an asset (includes annotation-only threads as visual feedback)
   function getAssetCommentCount(assetId: string): number {
-    return threads
-      .filter(t => t.asset_id === assetId)
-      .reduce((sum, t) => sum + (t.comments?.filter(c => c.visibility === 'SHARED')?.length || 0), 0);
+    const assetThreads = threads.filter(t => t.asset_id === assetId);
+    const textComments = assetThreads.reduce((sum, t) => 
+      sum + (t.comments?.filter(c => c.visibility === 'SHARED')?.length || 0), 0);
+    // Also count annotation-only threads (no text but has visual feedback)
+    const annotationOnlyCount = assetThreads.filter(t => 
+      t.annotation_id && (!t.comments || t.comments.filter(c => c.visibility === 'SHARED').length === 0)
+    ).length;
+    return textComments + annotationOnlyCount;
   }
 
   // Auto-select first NEEDS_CHANGES asset, or first asset
@@ -123,7 +128,7 @@ export function FreelancerNeedsChangesView({
     }));
   }, [annotations, threads]);
 
-  // Filter threads for this asset (only SHARED comments)
+  // Filter threads for this asset (SHARED comments OR annotation-only threads)
   const assetThreads = useMemo(() => {
     return threads
       .filter(t => t.asset_id === selectedAsset?.id)
@@ -131,8 +136,16 @@ export function FreelancerNeedsChangesView({
         ...thread,
         comments: thread.comments?.filter(c => c.visibility === 'SHARED'),
       }))
-      .filter(t => (t.comments?.length || 0) > 0);
+      // Include if has comments OR has an annotation (visual feedback without text)
+      .filter(t => (t.comments?.length || 0) > 0 || t.annotation_id);
   }, [threads, selectedAsset?.id]);
+
+  // Separate annotation-only threads (no text comments but have visual markers)
+  const annotationOnlyThreads = useMemo(() => {
+    return assetThreads.filter(t => 
+      t.annotation_id && (!t.comments || t.comments.length === 0)
+    );
+  }, [assetThreads]);
 
   // Build flat comment list for selected asset (chronological)
   const assetComments = useMemo(() => {
@@ -259,9 +272,9 @@ export function FreelancerNeedsChangesView({
   return (
     <div className="flex flex-col h-full">
       {/* Main Layout */}
-      <div className="flex flex-1 min-h-0 border rounded-lg overflow-hidden bg-card">
+      <div className="flex flex-1 min-h-0 gap-1 overflow-hidden">
         {/* Left: Asset Queue - Compact Thumbnails */}
-        <div className="w-24 border-r border-border bg-muted/20 flex flex-col">
+        <div className="w-24 border rounded-lg border-border bg-muted/10 flex flex-col">
           <div className="p-2 border-b border-border">
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Assets</p>
           </div>
@@ -331,7 +344,7 @@ export function FreelancerNeedsChangesView({
         </div>
 
         {/* Center: Image Viewer */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 border rounded-lg overflow-hidden bg-card">
           {/* Status line above viewer */}
           <div className="px-4 py-2 border-b border-border flex items-center justify-between bg-muted/30">
             <div className="flex items-center gap-2">
@@ -420,11 +433,11 @@ export function FreelancerNeedsChangesView({
         </div>
 
         {/* Right: Actions + Comments */}
-        <div className="w-80 border-l border-border flex flex-col">
+        <div className="w-72 border rounded-lg border-border flex flex-col bg-card">
           {/* Actions Panel - Fix Checklist */}
-          <div className="p-3 border-b border-border bg-muted/30">
-            <h4 className="font-medium text-sm mb-3">Required Fixes</h4>
-            <div className="space-y-2">
+          <div className="p-4 border-b border-border bg-muted/20">
+            <h4 className="text-xs uppercase tracking-wide text-muted-foreground mb-3">Required Fixes</h4>
+            <div className="space-y-1.5">
               {assets.map(asset => {
                 const needsChanges = asset.review_status === 'CHANGES_REQUESTED';
                 const isApproved = asset.review_status === 'APPROVED';
@@ -521,18 +534,57 @@ export function FreelancerNeedsChangesView({
 
           {/* Comments Panel */}
           <div className="flex-1 flex flex-col min-h-0">
-            <div className="p-3 border-b border-border flex items-center justify-between">
+            <div className="p-4 border-b border-border/50 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium text-sm">Comments</span>
+                <span className="text-xs uppercase tracking-wide text-muted-foreground">Comments</span>
               </div>
-              <Badge variant="outline" className="text-xs">
-                {assetComments.length}
+              <Badge variant="outline" className="text-[10px] h-5">
+                {assetComments.length + annotationOnlyThreads.length}
               </Badge>
             </div>
             
             <ScrollArea className="flex-1">
-              <div className="p-3 space-y-2">
+              <div className="p-4 space-y-3">
+                {/* Annotation-only threads (visual markers without text) */}
+                {annotationOnlyThreads.map((thread) => {
+                  const annotationIndex = enrichedAnnotations.findIndex(a => a.id === thread.annotation_id);
+                  const isSelected = thread.annotation_id === selectedAnnotationId;
+                  const isFlashing = flashingCommentId === thread.id;
+                  
+                  return (
+                    <div
+                      key={thread.id}
+                      className={cn(
+                        "rounded-lg p-3 transition-colors cursor-pointer border",
+                        isFlashing && "animate-flash-comment",
+                        isSelected 
+                          ? "bg-orange-500/10 border-orange-500/30" 
+                          : "bg-orange-500/5 border-orange-500/20 hover:bg-orange-500/10"
+                      )}
+                      onClick={() => {
+                        if (thread.annotation_id) {
+                          handleJumpToAnnotation(thread.annotation_id);
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Target className="h-4 w-4 text-orange-500" />
+                        <span className="text-sm font-medium text-orange-600 dark:text-orange-400">
+                          Annotation marked for review
+                        </span>
+                        <span className="ml-auto font-mono text-xs text-muted-foreground">
+                          #{annotationIndex + 1}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1.5 pl-6">
+                        Click to view on image
+                      </p>
+                    </div>
+                  );
+                })}
+                
+                {/* Regular comments */}
                 {assetComments.length > 0 ? (
                   assetComments.map(({ comment, annotationIndex, annotationId }) => {
                     const isSelected = annotationId === selectedAnnotationId;
@@ -542,7 +594,7 @@ export function FreelancerNeedsChangesView({
                       <div
                         key={comment.id}
                         className={cn(
-                          "rounded-lg p-2 transition-colors cursor-pointer",
+                          "rounded-lg p-3 transition-colors cursor-pointer",
                           isFlashing && "animate-flash-comment",
                           isSelected ? "bg-primary/10" : "hover:bg-muted/50"
                         )}
@@ -575,18 +627,18 @@ export function FreelancerNeedsChangesView({
                           )}
                         </div>
                         
-                        <p className="text-sm mt-1 pl-7 text-foreground/90">
+                        <p className="text-sm mt-1.5 pl-7 text-foreground/90">
                           {comment.body}
                         </p>
                       </div>
                     );
                   })
-                ) : (
+                ) : annotationOnlyThreads.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm">
                     <MessageSquare className="h-6 w-6 mx-auto mb-2 opacity-50" />
                     <p>No comments on this asset</p>
                   </div>
-                )}
+                ) : null}
               </div>
             </ScrollArea>
             

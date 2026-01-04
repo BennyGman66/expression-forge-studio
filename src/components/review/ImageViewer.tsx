@@ -66,7 +66,7 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
     const handleZoomIn = () => setZoom(prev => Math.min(prev * 1.25, 5));
     const handleZoomOut = () => setZoom(prev => Math.max(prev / 1.25, 0.25));
 
-    // True fit-to-screen calculation
+    // True fit-to-screen calculation - prioritize filling the viewport
     const handleFit = useCallback(() => {
       if (!containerRef.current || !imageDimensions.width) {
         setZoom(1);
@@ -75,18 +75,31 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       }
       
       const container = containerRef.current.getBoundingClientRect();
-      const padding = 32; // 16px padding on each side
+      const padding = 24; // Reduced padding for more image visibility
       const availableWidth = container.width - padding;
       const availableHeight = container.height - padding;
       
-      const fitZoom = Math.min(
-        availableWidth / imageDimensions.width,
-        availableHeight / imageDimensions.height,
-        3 // Allow up to 300% for better initial visibility (especially portraits)
-      );
+      const aspectRatio = imageDimensions.width / imageDimensions.height;
+      const isPortrait = aspectRatio < 0.85;
       
-      // Use at least 0.5 zoom to avoid tiny images
-      setZoom(Math.max(fitZoom, 0.5));
+      let fitZoom;
+      if (isPortrait) {
+        // For portrait images (like fashion photos), prioritize height fit
+        fitZoom = Math.min(
+          availableHeight / imageDimensions.height,
+          availableWidth / imageDimensions.width,
+          3.5 // Allow up to 350% for portraits
+        );
+      } else {
+        fitZoom = Math.min(
+          availableWidth / imageDimensions.width,
+          availableHeight / imageDimensions.height,
+          3 // Allow up to 300% for landscape/square
+        );
+      }
+      
+      // Use at least 0.6 zoom to avoid tiny images
+      setZoom(Math.max(fitZoom, 0.6));
       setPan({ x: 0, y: 0 });
     }, [imageDimensions]);
 
@@ -189,10 +202,15 @@ export const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(
       setImageDimensions({ width: 0, height: 0 });
     }, [src]);
 
-    // Auto-fit when image loads
+    // Auto-fit when image loads (with slight delay for stable container dimensions)
     useEffect(() => {
       if (imageLoaded && imageDimensions.width > 0) {
-        handleFit();
+        // Double RAF to ensure container is fully rendered and stable
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            handleFit();
+          });
+        });
       }
     }, [imageLoaded, imageDimensions, handleFit]);
 
