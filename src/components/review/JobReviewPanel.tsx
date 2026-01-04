@@ -43,13 +43,7 @@ import {
   X,
   Check,
   AlertTriangle,
-  Pencil,
-  Eye,
   User,
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
-  Keyboard,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -423,42 +417,22 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Keyboard shortcuts help */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => setShowShortcuts(prev => !prev)}
-                >
-                  <Keyboard className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-[200px]">
-                <div className="text-xs space-y-1">
-                  <p><kbd className="px-1 bg-muted rounded">←→</kbd> Navigate assets</p>
-                  <p><kbd className="px-1 bg-muted rounded">[]</kbd> Navigate issues</p>
-                  <p><kbd className="px-1 bg-muted rounded">D</kbd> Toggle draw mode</p>
-                  <p><kbd className="px-1 bg-muted rounded">Esc</kbd> Cancel/deselect</p>
-                </div>
-              </TooltipContent>
-            </Tooltip>
-            
-            {/* Version Selector */}
-            <Select value={selectedVersion || ''} onValueChange={setSelectedVersion}>
-              <SelectTrigger className="w-32">
-                <SelectValue placeholder="Version" />
-              </SelectTrigger>
-              <SelectContent>
-                {submissions.map((sub) => (
-                  <SelectItem key={sub.id} value={sub.id}>
-                    v{sub.version_number}
-                    {sub.status === 'APPROVED' && ' ✓'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* Version Selector - only show when multiple versions */}
+            {submissions.length > 1 && (
+              <Select value={selectedVersion || ''} onValueChange={setSelectedVersion}>
+                <SelectTrigger className="w-24 h-8">
+                  <SelectValue placeholder="Version" />
+                </SelectTrigger>
+                <SelectContent>
+                  {submissions.map((sub) => (
+                    <SelectItem key={sub.id} value={sub.id}>
+                      v{sub.version_number}
+                      {sub.status === 'APPROVED' && ' ✓'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
             {/* Status Badge */}
             <Badge 
@@ -511,49 +485,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
 
           {/* Center: Image Viewer */}
           <div className="flex-1 flex flex-col min-w-0">
-            {/* Asset Navigation */}
-            <div className="h-10 border-b border-border bg-card/50 px-4 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={currentAssetIndex <= 0}
-                  onClick={() => {
-                    if (currentAssetIndex > 0) {
-                      setSelectedAsset(assets[currentAssetIndex - 1]);
-                      setSelectedAnnotationId(null);
-                    }
-                  }}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-sm">
-                  {selectedAsset?.label || `Asset ${currentAssetIndex + 1}`}
-                  <span className="text-muted-foreground ml-2">
-                    ({currentAssetIndex + 1}/{assets.length})
-                  </span>
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={currentAssetIndex >= assets.length - 1}
-                  onClick={() => {
-                    if (currentAssetIndex < assets.length - 1) {
-                      setSelectedAsset(assets[currentAssetIndex + 1]);
-                      setSelectedAnnotationId(null);
-                    }
-                  }}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-
-              {/* Draw button moved to ThreadPanel for better annotation↔comment linking */}
-            </div>
-
-            {/* Image Viewer */}
+            {/* Image Viewer - removed redundant asset navigation bar */}
             {selectedAsset?.file_url ? (
               <ImageViewer
                 ref={imageViewerRef}
