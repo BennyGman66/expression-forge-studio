@@ -10,9 +10,10 @@ interface JobTrackerDropdownProps {
   activeJobs: EnhancedPipelineJob[];
   recentJobs: EnhancedPipelineJob[];
   onMarkStalled?: (jobId: string) => void;
+  onClose?: () => void;
 }
 
-export function JobTrackerDropdown({ activeJobs, recentJobs, onMarkStalled }: JobTrackerDropdownProps) {
+export function JobTrackerDropdown({ activeJobs, recentJobs, onMarkStalled, onClose }: JobTrackerDropdownProps) {
   const [selectedJob, setSelectedJob] = useState<PipelineJob | null>(null);
 
   const hasActiveJobs = activeJobs.length > 0;
@@ -47,6 +48,7 @@ export function JobTrackerDropdown({ activeJobs, recentJobs, onMarkStalled }: Jo
                   job={job} 
                   onOpenDetail={setSelectedJob}
                   onMarkStalled={onMarkStalled}
+                  onClose={onClose}
                 />
               ))}
             </div>
@@ -65,6 +67,7 @@ export function JobTrackerDropdown({ activeJobs, recentJobs, onMarkStalled }: Jo
                   job={job} 
                   onOpenDetail={setSelectedJob}
                   onMarkStalled={onMarkStalled}
+                  onClose={onClose}
                 />
               ))}
             </div>

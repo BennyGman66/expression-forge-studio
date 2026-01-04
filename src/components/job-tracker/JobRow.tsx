@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ExternalLink, Pause, Play, RotateCcw, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -20,11 +20,17 @@ interface JobRowProps {
   onOpenDetail?: (job: PipelineJob) => void;
   onMarkStalled?: (jobId: string) => void;
   onResume?: (job: PipelineJob) => void;
+  onClose?: () => void;
 }
 
-export function JobRow({ job, onOpenDetail, onMarkStalled, onResume }: JobRowProps) {
+export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: JobRowProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { pauseJob, resumeJob } = usePipelineJobs();
+  
+  // Check if user is already on the origin page
+  const originPath = job.origin_route.split('?')[0];
+  const isOnOriginPage = location.pathname === originPath;
   
   const isActive = job.status === 'RUNNING' || job.status === 'QUEUED';
   const progressPercent = job.progress_total > 0 
@@ -51,6 +57,12 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume }: JobRowPro
     e.stopPropagation();
     if (onResume) {
       onResume(job);
+    } else if (isOnOriginPage) {
+      // Already on the origin page - dispatch custom event to trigger resume in-place
+      window.dispatchEvent(new CustomEvent('resume-job', { 
+        detail: { jobId: job.id } 
+      }));
+      onClose?.();
     } else {
       // Navigate to origin with resume param
       const url = new URL(job.origin_route, window.location.origin);

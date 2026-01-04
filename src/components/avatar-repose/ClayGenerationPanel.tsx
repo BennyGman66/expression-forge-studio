@@ -196,7 +196,26 @@ export function ClayGenerationPanel() {
     checkInterruptedJob();
   }, [selectedBrand, getJob]);
 
-  // Subscribe to new clay images in real-time
+  // Listen for resume-job custom events (when user clicks Resume while already on this page)
+  useEffect(() => {
+    const handleResumeEvent = async (e: Event) => {
+      const customEvent = e as CustomEvent<{ jobId: string }>;
+      const { jobId } = customEvent.detail;
+      const job = await getJob(jobId);
+      if (job && job.status === 'RUNNING') {
+        // Auto-select brand from job context if needed
+        const context = job.origin_context as Record<string, unknown>;
+        if (context?.brandId && typeof context.brandId === 'string' && context.brandId !== selectedBrand) {
+          setSelectedBrand(context.brandId);
+        }
+        setInterruptedJob(job);
+      }
+    };
+    
+    window.addEventListener('resume-job', handleResumeEvent);
+    return () => window.removeEventListener('resume-job', handleResumeEvent);
+  }, [getJob, selectedBrand]);
+
   useEffect(() => {
     if (!selectedBrand) return;
     const channel = supabase
