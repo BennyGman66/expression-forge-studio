@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Download, Upload, Send, Clock, CheckCircle, Play, FileImage, ArrowRight, AlertTriangle, DownloadCloud, X, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { SubmissionReviewViewer } from '@/components/freelancer/SubmissionReviewViewer';
+import { FreelancerNeedsChangesView } from '@/components/freelancer/FreelancerNeedsChangesView';
 
 // Pending upload with view assignment
 interface PendingUpload {
@@ -467,49 +468,42 @@ export default function FreelancerJobDetail() {
       </header>
 
       <main className="container mx-auto px-6 py-8">
+        {/* NEEDS_CHANGES - Dedicated full-width view */}
+        {job.status === 'NEEDS_CHANGES' && latestSubmission && (
+          <div className="h-[calc(100vh-200px)] min-h-[600px]">
+            <FreelancerNeedsChangesView
+              submissionId={latestSubmission.id}
+              jobId={jobId!}
+              versionNumber={latestSubmission.version_number}
+              instructions={job.instructions || undefined}
+              onReplacementsChange={handleReplacementsReady}
+              onResubmit={handleResubmit}
+              isResubmitting={uploading || createResubmission.isPending}
+            />
+          </div>
+        )}
+
+        {/* Standard layout for other statuses */}
+        {job.status !== 'NEEDS_CHANGES' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Submission Review Viewer - Show for SUBMITTED and NEEDS_CHANGES when there's a submission */}
-            {(job.status === 'SUBMITTED' || job.status === 'NEEDS_CHANGES') && latestSubmission && (
+            {/* Submission Review Viewer - Show for SUBMITTED when there's a submission */}
+            {job.status === 'SUBMITTED' && latestSubmission && (
               <Card className="bg-card border-border">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Eye className="h-5 w-5" />
-                    {job.status === 'NEEDS_CHANGES' ? 'Review Feedback & Update' : 'Your Submission'}
+                    Your Submission
                     <Badge variant="outline" className="ml-2">v{latestSubmission.version_number}</Badge>
                   </CardTitle>
-                  {job.status === 'NEEDS_CHANGES' && (
-                    <p className="text-sm text-muted-foreground">
-                      Review the annotations and comments, then replace the assets that need changes.
-                    </p>
-                  )}
                 </CardHeader>
                 <CardContent className="p-0">
                   <SubmissionReviewViewer
                     submissionId={latestSubmission.id}
                     jobId={jobId!}
-                    showReplaceMode={job.status === 'NEEDS_CHANGES'}
-                    onReplacementReady={handleReplacementsReady}
+                    showReplaceMode={false}
                   />
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Admin Feedback (legacy notes) - Show prominently for NEEDS_CHANGES */}
-            {job.status === 'NEEDS_CHANGES' && adminFeedback && (
-              <Card className="bg-orange-500/10 border-orange-500/30">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-lg flex items-center gap-2 text-orange-300">
-                    <AlertTriangle className="h-5 w-5" />
-                    Additional Notes
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-foreground">{adminFeedback.body}</p>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {format(new Date(adminFeedback.created_at!), 'MMM d, yyyy h:mm a')}
-                  </p>
                 </CardContent>
               </Card>
             )}
@@ -927,43 +921,6 @@ export default function FreelancerJobDetail() {
                     <p>Waiting for review</p>
                   </div>
                 )}
-                {job.status === 'NEEDS_CHANGES' && latestSubmission && (
-                  <>
-                    {/* Resubmit with replacements */}
-                    <div className="p-3 rounded-lg bg-muted/30 border border-border text-sm space-y-2">
-                      <p className="font-medium text-muted-foreground">Ready to resubmit:</p>
-                      <div className="flex items-center gap-2">
-                        <div className={`h-4 w-4 rounded-full flex items-center justify-center ${pendingReplacements.size > 0 ? 'bg-green-500' : 'bg-muted'}`}>
-                          {pendingReplacements.size > 0 && <CheckCircle className="h-3 w-3 text-white" />}
-                        </div>
-                        <span className={pendingReplacements.size > 0 ? 'text-foreground' : 'text-muted-foreground'}>
-                          {pendingReplacements.size} replacement(s) ready
-                        </span>
-                      </div>
-                    </div>
-                    <Button 
-                      onClick={handleResubmit} 
-                      className="w-full" 
-                      disabled={uploading || createResubmission.isPending || pendingReplacements.size === 0}
-                    >
-                      <Send className="mr-2 h-4 w-4" /> 
-                      {uploading || createResubmission.isPending ? 'Resubmitting...' : 'Resubmit for Review'}
-                    </Button>
-                    <p className="text-xs text-muted-foreground text-center">
-                      Replace the flagged assets above, then resubmit
-                    </p>
-                  </>
-                )}
-                {job.status === 'NEEDS_CHANGES' && !latestSubmission && (
-                  <>
-                    <Button onClick={handleStartJob} className="w-full" disabled={updateStatus.isPending}>
-                      <Play className="mr-2 h-4 w-4" /> Resume Working
-                    </Button>
-                    <p className="text-xs text-muted-foreground text-center">
-                      Make the requested changes and resubmit
-                    </p>
-                  </>
-                )}
                 {job.status === 'APPROVED' && (
                   <div className="text-center text-green-400 py-4">
                     <CheckCircle className="h-8 w-8 mx-auto mb-2" />
@@ -1017,6 +974,7 @@ export default function FreelancerJobDetail() {
             </Card>
           </div>
         </div>
+        )}
       </main>
     </div>
   );
