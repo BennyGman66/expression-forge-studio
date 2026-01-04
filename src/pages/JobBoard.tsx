@@ -20,8 +20,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useJobs } from "@/hooks/useJobs";
+import { useJobsReviewProgress } from "@/hooks/useReviewSystem";
 import { JobStatus, JobType } from "@/types/jobs";
-import { ArrowLeft, Plus, Search, Clock, User, Briefcase, Eye, MessageSquare, CheckCircle } from "lucide-react";
+import { ArrowLeft, Plus, Search, Clock, User, Briefcase, Eye, MessageSquare, CheckCircle, AlertTriangle } from "lucide-react";
 import { format } from "date-fns";
 import { JobDetailPanel } from "@/components/jobs/JobDetailPanel";
 import { CreateJobDialog } from "@/components/jobs/CreateJobDialog";
@@ -59,6 +60,8 @@ export default function JobBoard() {
     status: statusFilter !== "all" ? statusFilter : undefined,
     type: typeFilter !== "all" ? typeFilter : undefined,
   });
+
+  const { data: reviewProgress } = useJobsReviewProgress();
 
   const filteredJobs = jobs?.filter((job) => {
     if (!searchQuery) return true;
@@ -218,11 +221,27 @@ export default function JobBoard() {
                           >
                             {job.status.replace("_", " ")}
                           </Badge>
-                          {needsReview && (
-                            <Badge variant="secondary" className="text-[10px] h-5 px-1.5 gap-1 bg-cyan-500/20 text-cyan-600 border-cyan-500/30">
-                              <MessageSquare className="h-3 w-3" />
-                              Review
-                            </Badge>
+                          {/* Review Progress Indicator */}
+                          {reviewProgress?.[job.id] && (
+                            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              {reviewProgress[job.id].approved > 0 && (
+                                <span className="flex items-center gap-0.5 text-green-500">
+                                  <CheckCircle className="h-3 w-3" />
+                                  {reviewProgress[job.id].approved}
+                                </span>
+                              )}
+                              {reviewProgress[job.id].changesRequested > 0 && (
+                                <span className="flex items-center gap-0.5 text-orange-500">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {reviewProgress[job.id].changesRequested}
+                                </span>
+                              )}
+                              {reviewProgress[job.id].pending > 0 && job.status !== "APPROVED" && (
+                                <span className="text-muted-foreground/60">
+                                  {reviewProgress[job.id].pending} pending
+                                </span>
+                              )}
+                            </span>
                           )}
                         </div>
                       </TableCell>
