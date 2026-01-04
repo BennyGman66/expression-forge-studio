@@ -11,7 +11,8 @@ import {
   SubmissionStatus,
   CommentVisibility,
   AnnotationRect,
-  ThreadScope
+  ThreadScope,
+  AssetReviewStatus
 } from '@/types/review';
 
 // ============ SUBMISSIONS ============
@@ -183,7 +184,7 @@ export function useSubmissionAssets(submissionId: string | null) {
       if (!submissionId) return [];
       const { data, error } = await supabase
         .from('submission_assets')
-        .select('*')
+        .select('*, review_status, reviewed_by_user_id, reviewed_at')
         .eq('submission_id', submissionId)
         .order('sort_index');
       
@@ -191,6 +192,86 @@ export function useSubmissionAssets(submissionId: string | null) {
       return data as SubmissionAsset[];
     },
     enabled: !!submissionId,
+  });
+}
+
+// ============ PER-ASSET REVIEW ============
+
+export function useUpdateAssetStatus() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: async ({ 
+      assetId, 
+      status,
+      submissionId,
+      jobId
+    }: { 
+      assetId: string; 
+      status: 'APPROVED' | 'CHANGES_REQUESTED';
+      submissionId: string;
+      jobId: string;
+    }) => {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Update the individual asset
+      const { error: assetError } = await supabase
+        .from('submission_assets')
+        .update({ 
+          review_status: status,
+          reviewed_by_user_id: user?.id,
+          reviewed_at: new Date().toISOString()
+        })
+        .eq('id', assetId);
+      
+      if (assetError) throw assetError;
+      
+      // Fetch all assets to determine aggregate status
+      const { data: allAssets, error: fetchError } = await supabase
+        .from('submission_assets')
+        .select('review_status')
+        .eq('submission_id', submissionId);
+      
+      if (fetchError) throw fetchError;
+      
+      // Calculate aggregate status
+      const statuses = allAssets.map(a => a.review_status);
+      const anyChangesRequested = statuses.some(s => s === 'CHANGES_REQUESTED');
+      const allApproved = statuses.every(s => s === 'APPROVED');
+      
+      let submissionStatus: SubmissionStatus = 'IN_REVIEW';
+      let jobStatus: 'SUBMITTED' | 'NEEDS_CHANGES' | 'APPROVED' = 'SUBMITTED';
+      
+      if (anyChangesRequested) {
+        submissionStatus = 'CHANGES_REQUESTED';
+        jobStatus = 'NEEDS_CHANGES';
+      } else if (allApproved) {
+        submissionStatus = 'APPROVED';
+        jobStatus = 'APPROVED';
+      }
+      
+      // Update submission status
+      await supabase
+        .from('job_submissions')
+        .update({ status: submissionStatus })
+        .eq('id', submissionId);
+      
+      // Update job status
+      await supabase
+        .from('unified_jobs')
+        .update({ status: jobStatus })
+        .eq('id', jobId);
+      
+      return { allApproved, anyChangesRequested };
+    },
+    onSuccess: (_, { submissionId, jobId }) => {
+      queryClient.invalidateQueries({ queryKey: ['submission-assets', submissionId] });
+      queryClient.invalidateQueries({ queryKey: ['job-submissions'] });
+      queryClient.invalidateQueries({ queryKey: ['latest-submission'] });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['job', jobId] });
+    },
   });
 }
 
