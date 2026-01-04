@@ -1,15 +1,18 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ExternalLink, Pause, Play, RotateCcw, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ExternalLink, Pause, Play, RotateCcw, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { JobTypeBadge } from './JobTypeBadge';
 import { usePipelineJobs } from '@/hooks/usePipelineJobs';
+import { supabase } from '@/integrations/supabase/client';
 import { 
   JOB_STATUS_CONFIG, 
   type PipelineJob 
 } from '@/types/pipeline-jobs';
 import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
+import { useState } from 'react';
 
 interface EnhancedPipelineJob extends PipelineJob {
   isStalled?: boolean;
@@ -27,6 +30,7 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
   const navigate = useNavigate();
   const location = useLocation();
   const { pauseJob, resumeJob } = usePipelineJobs();
+  const [isResuming, setIsResuming] = useState(false);
   
   // Check if user is already on the origin page
   const originPath = job.origin_route.split('?')[0];
@@ -53,18 +57,42 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
     }
   };
 
-  const handleResume = (e: React.MouseEvent) => {
+  const handleResume = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    
+    // For CLAY_GENERATION jobs, use server-side resume (works from anywhere)
+    if (job.type === 'CLAY_GENERATION') {
+      setIsResuming(true);
+      try {
+        const { error } = await supabase.functions.invoke('resume-clay-job', {
+          body: { jobId: job.id }
+        });
+        
+        if (error) {
+          console.error('Resume error:', error);
+          toast.error('Failed to resume job');
+        } else {
+          toast.success('Job resumed in background');
+        }
+      } catch (err) {
+        console.error('Resume exception:', err);
+        toast.error('Failed to resume job');
+      } finally {
+        setIsResuming(false);
+        onClose?.();
+      }
+      return;
+    }
+    
+    // For other job types, fall back to existing behavior
     if (onResume) {
       onResume(job);
     } else if (isOnOriginPage) {
-      // Already on the origin page - dispatch custom event to trigger resume in-place
       window.dispatchEvent(new CustomEvent('resume-job', { 
         detail: { jobId: job.id } 
       }));
       onClose?.();
     } else {
-      // Navigate to origin with resume param
       const url = new URL(job.origin_route, window.location.origin);
       url.searchParams.set('resumeJobId', job.id);
       navigate(url.pathname + url.search);
@@ -142,9 +170,14 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
               size="sm"
               className="h-6 px-2 text-xs"
               onClick={handleResume}
+              disabled={isResuming}
             >
-              <RefreshCw className="h-3 w-3 mr-1" />
-              Resume
+              {isResuming ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3 mr-1" />
+              )}
+              {isResuming ? 'Resuming...' : 'Resume'}
             </Button>
             <Button
               variant="ghost"
