@@ -2344,6 +2344,51 @@ export type Database = {
           },
         ]
       }
+      production_projects: {
+        Row: {
+          brand_id: string | null
+          created_at: string
+          created_by_user_id: string | null
+          id: string
+          name: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          name: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          name?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "production_projects_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "production_projects_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           brand_id: string
@@ -2378,6 +2423,51 @@ export type Database = {
             columns: ["brand_id"]
             isOneToOne: false
             referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      project_looks: {
+        Row: {
+          created_at: string
+          id: string
+          look_name: string
+          project_id: string
+          selected_talent_id: string | null
+          sku_code: string | null
+          source_files_json: Json | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          look_name: string
+          project_id: string
+          selected_talent_id?: string | null
+          sku_code?: string | null
+          source_files_json?: Json | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          look_name?: string
+          project_id?: string
+          selected_talent_id?: string | null
+          sku_code?: string | null
+          source_files_json?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "project_looks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "production_projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "project_looks_selected_talent_id_fkey"
+            columns: ["selected_talent_id"]
+            isOneToOne: false
+            referencedRelation: "digital_talents"
             referencedColumns: ["id"]
           },
         ]
@@ -2482,6 +2572,7 @@ export type Database = {
           created_at: string | null
           id: string
           job_id: string
+          project_id: string | null
           status: string
           updated_at: string | null
         }
@@ -2491,6 +2582,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           job_id: string
+          project_id?: string | null
           status?: string
           updated_at?: string | null
         }
@@ -2500,6 +2592,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           job_id?: string
+          project_id?: string | null
           status?: string
           updated_at?: string | null
         }
@@ -2516,6 +2609,13 @@ export type Database = {
             columns: ["job_id"]
             isOneToOne: true
             referencedRelation: "unified_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repose_batches_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "production_projects"
             referencedColumns: ["id"]
           },
         ]

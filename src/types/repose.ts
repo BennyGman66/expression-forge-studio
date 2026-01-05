@@ -2,7 +2,8 @@ import type { OutputShotType, CropTarget } from './shot-types';
 
 export interface ReposeBatch {
   id: string;
-  job_id: string;
+  job_id: string | null;
+  project_id: string | null;
   brand_id: string | null;
   status: 'DRAFT' | 'RUNNING' | 'COMPLETE' | 'FAILED';
   config_json: ReposeConfig;

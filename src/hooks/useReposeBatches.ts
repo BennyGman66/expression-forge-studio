@@ -39,6 +39,24 @@ export function useReposeBatchByJobId(jobId: string | undefined) {
   });
 }
 
+// Fetch batch by project ID (for checking if one already exists)
+export function useReposeBatchByProjectId(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ["repose-batch-by-project", projectId],
+    queryFn: async () => {
+      if (!projectId) return null;
+      const { data, error } = await supabase
+        .from("repose_batches")
+        .select("*")
+        .eq("project_id", projectId)
+        .maybeSingle();
+      if (error) throw error;
+      return data as ReposeBatch | null;
+    },
+    enabled: !!projectId,
+  });
+}
+
 // Fetch all batches (for listing)
 export function useReposeBatches() {
   return useQuery({
@@ -90,17 +108,19 @@ export function useReposeOutputs(batchId: string | undefined) {
   });
 }
 
-// Create a new batch from a job
+// Create a new batch from a job OR project
 export function useCreateReposeBatch() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({ 
-      jobId, 
+      jobId,
+      projectId,
       brandId,
       outputs 
     }: { 
-      jobId: string; 
+      jobId?: string;
+      projectId?: string;
       brandId?: string;
       outputs: Array<{ look_id?: string; view: string; source_output_id?: string; source_url: string }>;
     }) => {
@@ -108,7 +128,8 @@ export function useCreateReposeBatch() {
       const { data: batch, error: batchError } = await supabase
         .from("repose_batches")
         .insert({
-          job_id: jobId,
+          job_id: jobId || null,
+          project_id: projectId || null,
           brand_id: brandId || null,
           status: 'DRAFT',
           config_json: {},
@@ -118,7 +139,7 @@ export function useCreateReposeBatch() {
 
       if (batchError) throw batchError;
 
-      // Create batch items from job outputs
+      // Create batch items from outputs
       if (outputs.length > 0) {
         const batchItems = outputs.map(output => ({
           batch_id: batch.id,

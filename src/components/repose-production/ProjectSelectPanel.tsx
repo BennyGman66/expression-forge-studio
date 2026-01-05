@@ -1,0 +1,326 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { 
+  FolderOpen, 
+  ArrowRight, 
+  Images, 
+  AlertCircle, 
+  CheckCircle2, 
+  ChevronLeft,
+  Users
+} from "lucide-react";
+import { useProjectsEligibleForRepose, useApprovedProjectLooks } from "@/hooks/useProductionProjects";
+import { useCreateReposeBatch, useReposeBatchByProjectId } from "@/hooks/useReposeBatches";
+import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
+import { ProductionProject } from "@/types/production-projects";
+import { cn } from "@/lib/utils";
+
+interface ProjectSelectPanelProps {
+  onBatchCreated?: (batchId: string) => void;
+}
+
+export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) {
+  const navigate = useNavigate();
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedLookIds, setSelectedLookIds] = useState<Set<string>>(new Set());
+  
+  const { data: eligibleProjects, isLoading: projectsLoading } = useProjectsEligibleForRepose();
+  const { data: approvedLooks, isLoading: looksLoading } = useApprovedProjectLooks(selectedProjectId);
+  const { data: existingBatch, isLoading: checkingBatch } = useReposeBatchByProjectId(selectedProjectId || undefined);
+  const createBatch = useCreateReposeBatch();
+
+  const selectedProject = eligibleProjects?.find(p => p.id === selectedProjectId);
+
+  // Auto-select all looks when project is selected
+  const handleSelectProject = (projectId: string) => {
+    setSelectedProjectId(projectId);
+    setSelectedLookIds(new Set()); // Clear selection, will auto-select all when looks load
+  };
+
+  // Select all approved looks
+  const handleSelectAll = () => {
+    setSelectedLookIds(new Set(approvedLooks?.map(l => l.id) || []));
+  };
+
+  // Toggle look selection
+  const toggleLook = (lookId: string) => {
+    const newSet = new Set(selectedLookIds);
+    if (newSet.has(lookId)) {
+      newSet.delete(lookId);
+    } else {
+      newSet.add(lookId);
+    }
+    setSelectedLookIds(newSet);
+  };
+
+  // Back to project selection
+  const handleBack = () => {
+    setSelectedProjectId(null);
+    setSelectedLookIds(new Set());
+  };
+
+  // Create batch from selected looks
+  const handleCreateBatch = async () => {
+    if (!selectedProjectId || selectedLookIds.size === 0) return;
+
+    // If batch already exists for this project, navigate to it
+    if (existingBatch) {
+      navigate(`/repose-production/batch/${existingBatch.id}?tab=setup`);
+      return;
+    }
+
+    // Collect all outputs from selected looks
+    const outputs: Array<{ view: string; source_output_id: string; source_url: string }> = [];
+    
+    approvedLooks?.filter(l => selectedLookIds.has(l.id)).forEach(look => {
+      (look.job_outputs || []).forEach((output: any) => {
+        if (output.file_url) {
+          outputs.push({
+            view: output.label || 'unknown',
+            source_output_id: output.id,
+            source_url: output.file_url,
+          });
+        }
+      });
+    });
+
+    if (outputs.length === 0) {
+      return;
+    }
+
+    createBatch.mutate(
+      { projectId: selectedProjectId, outputs },
+      {
+        onSuccess: (batch) => {
+          navigate(`/repose-production/batch/${batch.id}?tab=setup`);
+          onBatchCreated?.(batch.id);
+        },
+      }
+    );
+  };
+
+  if (projectsLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LeapfrogLoader />
+      </div>
+    );
+  }
+
+  // Look selection view
+  if (selectedProjectId && selectedProject) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" onClick={handleBack}>
+                <ChevronLeft className="w-5 h-5" />
+              </Button>
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <FolderOpen className="w-5 h-5" />
+                  {selectedProject.name}
+                </CardTitle>
+                <CardDescription>
+                  Select which approved looks to include in the repose batch
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {looksLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <LeapfrogLoader />
+              </div>
+            ) : !approvedLooks || approvedLooks.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No approved looks available in this project.</p>
+              </div>
+            ) : (
+              <>
+                {existingBatch && (
+                  <div className="p-3 bg-primary/10 rounded-lg border border-primary/20">
+                    <p className="text-sm text-primary">
+                      A repose batch already exists for this project. Clicking proceed will open the existing batch.
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">
+                    {selectedLookIds.size} of {approvedLooks.length} looks selected
+                  </span>
+                  <Button variant="outline" size="sm" onClick={handleSelectAll}>
+                    Select All
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-[400px] overflow-y-auto p-1">
+                  {approvedLooks.map((look) => {
+                    const isSelected = selectedLookIds.has(look.id);
+                    const outputCount = look.job_outputs?.length || 0;
+                    
+                    return (
+                      <Card
+                        key={look.id}
+                        className={cn(
+                          "cursor-pointer transition-all hover:border-primary/50",
+                          isSelected && "border-primary bg-primary/5"
+                        )}
+                        onClick={() => toggleLook(look.id)}
+                      >
+                        <CardContent className="p-3">
+                          <div className="flex items-start gap-2">
+                            <Checkbox 
+                              checked={isSelected}
+                              onCheckedChange={() => toggleLook(look.id)}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm truncate">
+                                {look.look_name}
+                              </p>
+                              {look.sku_code && (
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {look.sku_code}
+                                </p>
+                              )}
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge variant="secondary" className="text-[10px] px-1">
+                                  <Images className="w-2.5 h-2.5 mr-0.5" />
+                                  {outputCount}
+                                </Badge>
+                                <Badge variant="outline" className="text-[10px] px-1 text-green-600">
+                                  <CheckCircle2 className="w-2.5 h-2.5 mr-0.5" />
+                                  Approved
+                                </Badge>
+                              </div>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-end">
+                  <Button
+                    onClick={handleCreateBatch}
+                    disabled={selectedLookIds.size === 0 || createBatch.isPending || checkingBatch}
+                    className="gap-2"
+                  >
+                    {existingBatch ? "Open Existing Batch" : `Create Batch (${selectedLookIds.size} looks)`}
+                    <ArrowRight className="w-4 h-4" />
+                  </Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Project selection view
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FolderOpen className="w-5 h-5" />
+            Select Production Project
+          </CardTitle>
+          <CardDescription>
+            Choose a project with approved looks to create a repose batch
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!eligibleProjects || eligibleProjects.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p>No projects with approved looks available.</p>
+              <p className="text-sm mt-2">
+                Approve jobs in the Job Board to make projects available for reposing.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {eligibleProjects.map((project) => (
+                <ProjectTile
+                  key={project.id}
+                  project={project}
+                  onClick={() => handleSelectProject(project.id)}
+                />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Project tile component
+function ProjectTile({ project, onClick }: { project: ProductionProject; onClick: () => void }) {
+  const approvedCount = project.approved_looks_count || 0;
+  const totalCount = project.jobs_count || 0;
+  const isReady = approvedCount > 0;
+
+  return (
+    <Card 
+      className={cn(
+        "cursor-pointer transition-all hover:border-primary/50 hover:shadow-md",
+        isReady && "border-green-500/30"
+      )}
+      onClick={onClick}
+    >
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold truncate">{project.name}</h3>
+            {project.brand && (
+              <p className="text-xs text-muted-foreground">{project.brand.name}</p>
+            )}
+          </div>
+          {isReady ? (
+            <Badge variant="outline" className="text-green-600 border-green-500/30 bg-green-500/10">
+              Ready
+            </Badge>
+          ) : (
+            <Badge variant="secondary">In Progress</Badge>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+            <span>{approvedCount} approved</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-muted-foreground">
+            <Images className="w-3.5 h-3.5" />
+            <span>{totalCount} total</span>
+          </div>
+        </div>
+
+        {totalCount > 0 && (
+          <div className="mt-3">
+            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-green-500 transition-all"
+                style={{ width: `${(approvedCount / totalCount) * 100}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1 text-right">
+              {Math.round((approvedCount / totalCount) * 100)}% complete
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
