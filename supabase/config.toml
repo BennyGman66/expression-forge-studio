@@ -107,3 +107,6 @@ verify_jwt = false
 
 [functions.resume-face-scrape]
 verify_jwt = false
+
+[functions.generate-repose-single]
+verify_jwt = false

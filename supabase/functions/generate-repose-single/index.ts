@@ -180,8 +180,9 @@ The first image is the product photograph to repose. The second image is the gre
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
-  } catch (error) {
-    console.error('[generate-repose-single] Error:', error);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[generate-repose-single] Error:', errorMessage);
     
     // Try to mark as failed if we have the outputId
     try {
@@ -208,7 +209,7 @@ The first image is the product photograph to repose. The second image is the gre
     }
 
     return new Response(
-      JSON.stringify({ error: error.message || 'Unknown error' }),
+      JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
