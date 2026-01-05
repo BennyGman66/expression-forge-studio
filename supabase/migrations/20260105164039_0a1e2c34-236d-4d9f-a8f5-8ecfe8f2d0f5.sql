@@ -1,0 +1,1 @@
+ALTER TABLE public.repose_outputs ADD COLUMN IF NOT EXISTS pose_url TEXT;

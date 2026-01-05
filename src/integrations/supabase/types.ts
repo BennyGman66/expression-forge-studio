@@ -2522,6 +2522,7 @@ export type Database = {
           created_at: string | null
           id: string
           pose_id: string | null
+          pose_url: string | null
           result_url: string | null
           slot: string | null
           status: string
@@ -2533,6 +2534,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           pose_id?: string | null
+          pose_url?: string | null
           result_url?: string | null
           slot?: string | null
           status?: string
@@ -2544,6 +2546,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           pose_id?: string | null
+          pose_url?: string | null
           result_url?: string | null
           slot?: string | null
           status?: string
