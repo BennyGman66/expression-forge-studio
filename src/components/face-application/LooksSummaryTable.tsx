@@ -207,7 +207,7 @@ export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) 
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => navigate(`/job-board?job=${existingJob.jobId}`)}
+                        onClick={() => navigate(`/jobs?job=${existingJob.jobId}`)}
                       >
                         <ExternalLink className="h-4 w-4 mr-1.5" />
                         View Job
