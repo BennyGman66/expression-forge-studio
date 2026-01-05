@@ -118,10 +118,13 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     }
   }, [batch]);
 
-  // Count views in batch items
+  // Count views in batch items - extract view type from "front view - filename.jpg" format
   const viewCounts = batchItems?.reduce((acc, item) => {
     const view = item.view.toLowerCase();
-    acc[view] = (acc[view] || 0) + 1;
+    if (view.startsWith('front')) acc['front'] = (acc['front'] || 0) + 1;
+    else if (view.startsWith('back')) acc['back'] = (acc['back'] || 0) + 1;
+    else if (view.startsWith('side')) acc['side'] = (acc['side'] || 0) + 1;
+    else if (view.startsWith('detail')) acc['detail'] = (acc['detail'] || 0) + 1;
     return acc;
   }, {} as Record<string, number>) || {};
 
@@ -138,14 +141,15 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
       const view = item.view.toLowerCase();
       let posesForView = 0;
 
-      if (view === 'front') {
+      // Use startsWith() to handle "front view - filename.jpg" format
+      if (view.startsWith('front')) {
         if (rules.frontToSlotA) posesForView += Math.min(randomPosesPerSlot, selectedBrandCounts.slotA);
         if (rules.frontToSlotB) posesForView += Math.min(randomPosesPerSlot, selectedBrandCounts.slotB);
-      } else if (view === 'back') {
+      } else if (view.startsWith('back')) {
         if (rules.backToSlotC) posesForView += Math.min(randomPosesPerSlot, selectedBrandCounts.slotC);
-      } else if (view === 'detail') {
+      } else if (view.startsWith('detail')) {
         if (rules.detailToSlotD) posesForView += Math.min(randomPosesPerSlot, selectedBrandCounts.slotD);
-      } else if (view === 'side') {
+      } else if (view.startsWith('side')) {
         if (rules.sideToSlotB) posesForView += Math.min(randomPosesPerSlot, selectedBrandCounts.slotB);
       }
 
