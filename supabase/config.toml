@@ -104,3 +104,6 @@ verify_jwt = false
 
 [functions.resume-clay-job]
 verify_jwt = false
+
+[functions.resume-face-scrape]
+verify_jwt = false
