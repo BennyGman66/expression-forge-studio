@@ -37,6 +37,8 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
   const isOnOriginPage = location.pathname === originPath;
   
   const isActive = job.status === 'RUNNING' || job.status === 'QUEUED';
+  const isPaused = job.status === 'PAUSED';
+  const canResume = job.isStalled || isPaused;
   const progressPercent = job.progress_total > 0 
     ? Math.round((job.progress_done / job.progress_total) * 100) 
     : 0;
@@ -86,10 +88,17 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
     
     // For SCRAPE_FACES jobs, use server-side resume
     if (job.type === 'SCRAPE_FACES') {
+      // Get scrape_run_id from origin_context or fallback to source_job_id
+      const scrapeRunId = (job.origin_context as Record<string, unknown>)?.scrape_run_id || job.source_job_id;
+      if (!scrapeRunId) {
+        toast.error('Cannot resume: missing scrape run ID');
+        return;
+      }
+      
       setIsResuming(true);
       try {
         const { error } = await supabase.functions.invoke('resume-face-scrape', {
-          body: { runId: job.source_job_id }
+          body: { runId: scrapeRunId }
         });
         
         if (error) {
@@ -187,7 +196,7 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
       )}
       
       <div className="flex items-center gap-1">
-        {job.isStalled && (
+        {canResume && (
           <>
             <Button
               variant="default"
@@ -203,14 +212,16 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
               )}
               {isResuming ? 'Resuming...' : 'Resume'}
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs text-destructive"
-              onClick={handleMarkStalled}
-            >
-              Mark Failed
-            </Button>
+            {job.isStalled && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs text-destructive"
+                onClick={handleMarkStalled}
+              >
+                Mark Failed
+              </Button>
+            )}
           </>
         )}
         
