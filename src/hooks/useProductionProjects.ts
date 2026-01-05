@@ -133,14 +133,31 @@ export function useProjectLooks(projectId: string | null) {
   });
 }
 
-// Fetch approved looks for a project (for Repose)
+// Fetch approved looks for a project (for Repose) - queries talent_looks table
 export function useApprovedProjectLooks(projectId: string | null) {
   return useQuery({
     queryKey: ["approved-project-looks", projectId],
     queryFn: async () => {
       if (!projectId) return [];
 
-      // Get looks with approved jobs
+      // Get looks from talent_looks table (where Face Application stores them)
+      const { data: looks, error: looksError } = await supabase
+        .from("talent_looks")
+        .select(`
+          id,
+          name,
+          project_id,
+          digital_talent_id,
+          digital_talent:digital_talents(id, name, front_face_url)
+        `)
+        .eq("project_id", projectId);
+
+      if (looksError) throw looksError;
+      if (!looks || looks.length === 0) return [];
+
+      const lookIds = looks.map(l => l.id);
+
+      // Get jobs with APPROVED/CLOSED status for these looks
       const { data: jobs, error: jobsError } = await supabase
         .from("unified_jobs")
         .select(`
@@ -149,32 +166,69 @@ export function useApprovedProjectLooks(projectId: string | null) {
           status,
           job_outputs(id, file_url, label)
         `)
-        .eq("project_id", projectId)
+        .in("look_id", lookIds)
         .in("status", ["APPROVED", "CLOSED"]);
 
       if (jobsError) throw jobsError;
 
-      const lookIds = jobs?.map(j => j.look_id).filter(Boolean) || [];
-      if (lookIds.length === 0) return [];
-
-      const { data: looks, error } = await supabase
-        .from("project_looks")
-        .select(`
-          *,
-          selected_talent:digital_talents(id, name, front_face_url)
-        `)
-        .in("id", lookIds);
-
-      if (error) throw error;
-
-      // Map jobs to looks
+      // Filter to only looks with approved jobs
+      const approvedLookIds = new Set(jobs?.map(j => j.look_id).filter(Boolean));
       const jobMap = new Map(jobs?.map(j => [j.look_id, j]) || []);
 
-      return (looks || []).map(l => ({
+      return looks
+        .filter(l => approvedLookIds.has(l.id))
+        .map(l => ({
+          id: l.id,
+          look_name: l.name,
+          project_id: l.project_id,
+          selected_talent: l.digital_talent,
+          job_id: jobMap.get(l.id)?.id,
+          job_outputs: jobMap.get(l.id)?.job_outputs,
+        }));
+    },
+    enabled: !!projectId,
+  });
+}
+
+// Fetch all looks for a project with their job status (for showing pending looks)
+export function useAllProjectLooks(projectId: string | null) {
+  return useQuery({
+    queryKey: ["all-project-looks", projectId],
+    queryFn: async () => {
+      if (!projectId) return { approved: [], pending: [] };
+
+      // Get all looks from talent_looks
+      const { data: looks, error } = await supabase
+        .from("talent_looks")
+        .select("id, name, project_id")
+        .eq("project_id", projectId);
+
+      if (error) throw error;
+      if (!looks || looks.length === 0) return { approved: [], pending: [] };
+
+      // Get job statuses for all looks
+      const { data: jobs } = await supabase
+        .from("unified_jobs")
+        .select("id, look_id, status")
+        .in("look_id", looks.map(l => l.id));
+
+      const jobMap = new Map(jobs?.map(j => [j.look_id, j]) || []);
+
+      const approved = looks.filter(l => 
+        ['APPROVED', 'CLOSED'].includes(jobMap.get(l.id)?.status || '')
+      ).map(l => ({
         ...l,
-        job_id: jobMap.get(l.id)?.id,
-        job_outputs: jobMap.get(l.id)?.job_outputs,
+        job_status: jobMap.get(l.id)?.status,
       }));
+
+      const pending = looks.filter(l => 
+        !['APPROVED', 'CLOSED'].includes(jobMap.get(l.id)?.status || '')
+      ).map(l => ({
+        ...l,
+        job_status: jobMap.get(l.id)?.status || null,
+      }));
+
+      return { approved, pending };
     },
     enabled: !!projectId,
   });
