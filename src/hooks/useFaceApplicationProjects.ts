@@ -57,6 +57,7 @@ export function useFaceApplicationProjects() {
   }, [fetchProjects]);
 
   const createProject = async (name: string, description?: string) => {
+    // Create face_application_projects entry
     const { data, error } = await supabase
       .from("face_application_projects")
       .insert({ name, description })
@@ -67,6 +68,16 @@ export function useFaceApplicationProjects() {
       toast({ title: "Error creating project", description: error.message, variant: "destructive" });
       return null;
     }
+
+    // Also create a production_project for job tracking/repose workflow
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase
+      .from("production_projects")
+      .insert({ 
+        name, 
+        created_by_user_id: user?.id || null,
+        status: 'ACTIVE'
+      });
 
     await fetchProjects();
     return data;

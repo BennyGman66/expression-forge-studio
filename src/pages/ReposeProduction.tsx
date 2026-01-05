@@ -1,13 +1,13 @@
 import { useSearchParams, useParams } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { JobSelectPanel } from "@/components/repose-production/JobSelectPanel";
+import { ProjectSelectPanel } from "@/components/repose-production/ProjectSelectPanel";
 import { BatchSetupPanel } from "@/components/repose-production/BatchSetupPanel";
 import { GeneratePanel } from "@/components/repose-production/GeneratePanel";
 import { ReviewPanel } from "@/components/repose-production/ReviewPanel";
 import { ExportPanel } from "@/components/repose-production/ExportPanel";
 import { useReposeBatch, useReposeOutputs } from "@/hooks/useReposeBatches";
-import { Briefcase, Settings, Sparkles, ClipboardList, Download } from "lucide-react";
+import { FolderOpen, Settings, Sparkles, ClipboardList, Download } from "lucide-react";
 
 const VALID_TABS = ["select", "setup", "generate", "review", "export"];
 
@@ -49,8 +49,8 @@ export default function ReposeProduction() {
           <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
             <TabsList className="bg-secondary/50 p-1">
               <TabsTrigger value="select" className="gap-2">
-                <Briefcase className="w-4 h-4" />
-                Job Select
+                <FolderOpen className="w-4 h-4" />
+                Project Select
               </TabsTrigger>
               <TabsTrigger value="setup" className="gap-2" disabled={!hasBatch}>
                 <Settings className="w-4 h-4" />
@@ -71,9 +71,9 @@ export default function ReposeProduction() {
             </TabsList>
 
             <TabsContent value="select">
-              <JobSelectPanel 
+              <ProjectSelectPanel 
                 onBatchCreated={(newBatchId) => {
-                  // Navigate to the batch URL would happen in the panel
+                  // Navigation happens in the panel
                 }}
               />
             </TabsContent>

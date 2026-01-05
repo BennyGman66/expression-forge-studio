@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -21,12 +23,14 @@ import {
 } from "@/components/ui/table";
 import { useJobs } from "@/hooks/useJobs";
 import { useJobsReviewProgress } from "@/hooks/useReviewSystem";
+import { useProductionProjects } from "@/hooks/useProductionProjects";
 import { JobStatus, JobType } from "@/types/jobs";
-import { ArrowLeft, Plus, Search, Briefcase, Eye, CheckCircle, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Plus, Search, Briefcase, Eye, CheckCircle, AlertTriangle, FolderOpen } from "lucide-react";
 import { format } from "date-fns";
 import { JobDetailPanel } from "@/components/jobs/JobDetailPanel";
 import { CreateJobDialog } from "@/components/jobs/CreateJobDialog";
 import { JobReviewPanel } from "@/components/review";
+import { ProjectGroupRow, UngroupedJobsRow } from "@/components/job-board/ProjectGroupRow";
 import { cn } from "@/lib/utils";
 
 const statusColors: Record<JobStatus, string> = {
@@ -66,27 +70,51 @@ export default function JobBoard() {
   const [statusFilter, setStatusFilter] = useState<JobStatus | "all">("all");
   const [typeFilter, setTypeFilter] = useState<JobType | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [groupByProject, setGroupByProject] = useState(true);
 
-  const { data: jobs, isLoading } = useJobs({
+  const { data: jobs, isLoading: jobsLoading } = useJobs({
     status: statusFilter !== "all" ? statusFilter : undefined,
     type: typeFilter !== "all" ? typeFilter : undefined,
   });
 
+  const { data: projects, isLoading: projectsLoading } = useProductionProjects();
   const { data: reviewProgress } = useJobsReviewProgress();
 
-  const filteredJobs = jobs?.filter((job) => {
-    if (!searchQuery) return true;
-    const searchLower = searchQuery.toLowerCase();
-    return (
-      job.id.toLowerCase().includes(searchLower) ||
-      job.title?.toLowerCase().includes(searchLower) ||
-      job.assigned_user?.display_name?.toLowerCase().includes(searchLower) ||
-      job.assigned_user?.email?.toLowerCase().includes(searchLower)
-    );
-  });
+  const filteredJobs = useMemo(() => {
+    return jobs?.filter((job) => {
+      if (!searchQuery) return true;
+      const searchLower = searchQuery.toLowerCase();
+      return (
+        job.id.toLowerCase().includes(searchLower) ||
+        job.title?.toLowerCase().includes(searchLower) ||
+        job.assigned_user?.display_name?.toLowerCase().includes(searchLower) ||
+        job.assigned_user?.email?.toLowerCase().includes(searchLower)
+      );
+    }) || [];
+  }, [jobs, searchQuery]);
+
+  // Group jobs by project
+  const { groupedJobs, ungroupedJobs } = useMemo(() => {
+    const grouped = new Map<string, typeof filteredJobs>();
+    const ungrouped: typeof filteredJobs = [];
+
+    filteredJobs.forEach(job => {
+      if (job.project_id) {
+        const existing = grouped.get(job.project_id) || [];
+        existing.push(job);
+        grouped.set(job.project_id, existing);
+      } else {
+        ungrouped.push(job);
+      }
+    });
+
+    return { groupedJobs: grouped, ungroupedJobs: ungrouped };
+  }, [filteredJobs]);
 
   // Count jobs needing review (SUBMITTED status)
   const needsReviewCount = jobs?.filter(j => j.status === "SUBMITTED").length || 0;
+
+  const isLoading = jobsLoading || projectsLoading;
 
   return (
     <div className="min-h-screen bg-background">
@@ -117,7 +145,7 @@ export default function JobBoard() {
         </div>
 
         {/* Filters */}
-        <div className="flex gap-4 mb-6 flex-wrap">
+        <div className="flex gap-4 mb-6 flex-wrap items-center">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -168,136 +196,190 @@ export default function JobBoard() {
               <SelectItem value="FOUNDATION_FACE_REPLACE">Foundation Face Replace</SelectItem>
             </SelectContent>
           </Select>
+          
+          {/* Group by Project toggle */}
+          <div className="flex items-center gap-2 ml-auto">
+            <Switch
+              id="group-by-project"
+              checked={groupByProject}
+              onCheckedChange={setGroupByProject}
+            />
+            <Label htmlFor="group-by-project" className="text-sm cursor-pointer flex items-center gap-1.5">
+              <FolderOpen className="h-4 w-4" />
+              Group by Project
+            </Label>
+          </div>
         </div>
 
-        {/* Jobs Table */}
-        <div className="border rounded-lg">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-24">Job ID</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead className="w-28">Type</TableHead>
-                <TableHead className="w-48">Status</TableHead>
-                <TableHead className="w-32">Assignee</TableHead>
-                <TableHead className="w-20">Due</TableHead>
-                <TableHead className="w-20">Created</TableHead>
-                <TableHead className="w-20"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
+        {/* Jobs Display */}
+        {groupByProject ? (
+          // Grouped view
+          <div className="border rounded-lg overflow-hidden">
+            {isLoading ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Loading jobs...
+              </div>
+            ) : filteredJobs.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-8">
+                <Briefcase className="h-8 w-8 text-muted-foreground" />
+                <p className="text-muted-foreground">No jobs found</p>
+              </div>
+            ) : (
+              <>
+                {/* Projects with jobs */}
+                {projects?.filter(p => groupedJobs.has(p.id)).map(project => (
+                  <ProjectGroupRow
+                    key={project.id}
+                    project={project}
+                    jobs={groupedJobs.get(project.id) || []}
+                    onJobClick={setSelectedJobId}
+                    onReviewClick={setReviewJobId}
+                    reviewableStatuses={reviewableStatuses}
+                    reviewProgress={reviewProgress}
+                  />
+                ))}
+                
+                {/* Ungrouped jobs */}
+                <UngroupedJobsRow
+                  jobs={ungroupedJobs}
+                  onJobClick={setSelectedJobId}
+                  onReviewClick={setReviewJobId}
+                  reviewableStatuses={reviewableStatuses}
+                  reviewProgress={reviewProgress}
+                />
+              </>
+            )}
+          </div>
+        ) : (
+          // Table view (original)
+          <div className="border rounded-lg">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8">
-                    Loading jobs...
-                  </TableCell>
+                  <TableHead className="w-24">Job ID</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead className="w-28">Type</TableHead>
+                  <TableHead className="w-48">Status</TableHead>
+                  <TableHead className="w-32">Assignee</TableHead>
+                  <TableHead className="w-20">Due</TableHead>
+                  <TableHead className="w-20">Created</TableHead>
+                  <TableHead className="w-20"></TableHead>
                 </TableRow>
-              ) : filteredJobs?.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8">
-                    <div className="flex flex-col items-center gap-2">
-                      <Briefcase className="h-8 w-8 text-muted-foreground" />
-                      <p className="text-muted-foreground">No jobs found</p>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredJobs?.map((job) => {
-                  const canReview = reviewableStatuses.includes(job.status);
-                  const needsReview = job.status === "SUBMITTED";
-                  const wasReviewed = job.status === "APPROVED" || job.status === "NEEDS_CHANGES";
-                  
-                  return (
-                    <TableRow
-                      key={job.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => setSelectedJobId(job.id)}
-                    >
-                      <TableCell className="font-mono text-xs">
-                        {job.id.slice(0, 8)}
-                      </TableCell>
-                      <TableCell className="font-medium truncate max-w-[200px]">
-                        {job.title || "Untitled Job"}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {typeLabels[job.type]}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <Badge
-                            variant="outline"
-                            className={cn(statusColors[job.status], "text-[10px] px-1.5 py-0")}
-                          >
-                            {statusLabels[job.status]}
-                          </Badge>
-                          {reviewProgress?.[job.id] && (
-                            <span className="flex items-center gap-1 text-[10px]">
-                              {reviewProgress[job.id].approved > 0 && (
-                                <span className="flex items-center text-green-500">
-                                  <CheckCircle className="h-2.5 w-2.5 mr-0.5" />
-                                  {reviewProgress[job.id].approved}
-                                </span>
-                              )}
-                              {reviewProgress[job.id].changesRequested > 0 && (
-                                <span className="flex items-center text-orange-500">
-                                  <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
-                                  {reviewProgress[job.id].changesRequested}
-                                </span>
-                              )}
-                              {reviewProgress[job.id].pending > 0 && job.status !== "APPROVED" && (
-                                <span className="text-muted-foreground/60">
-                                  +{reviewProgress[job.id].pending}
-                                </span>
-                              )}
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs truncate max-w-[120px]">
-                        {job.assigned_user ? (
-                          job.assigned_user.display_name || job.assigned_user.email?.split('@')[0]
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {job.due_date ? format(new Date(job.due_date), "M/d") : "—"}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {format(new Date(job.created_at), "M/d")}
-                      </TableCell>
-                      <TableCell>
-                        {canReview && (
-                          <Button
-                            variant={needsReview ? "default" : "outline"}
-                            size="sm"
-                            className="gap-1"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setReviewJobId(job.id);
-                            }}
-                          >
-                            {wasReviewed ? (
-                              <>
-                                <CheckCircle className="h-3 w-3" />
-                                View
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="h-3 w-3" />
-                                Review
-                              </>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8">
+                      Loading jobs...
+                    </TableCell>
+                  </TableRow>
+                ) : filteredJobs?.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8">
+                      <div className="flex flex-col items-center gap-2">
+                        <Briefcase className="h-8 w-8 text-muted-foreground" />
+                        <p className="text-muted-foreground">No jobs found</p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredJobs?.map((job) => {
+                    const canReview = reviewableStatuses.includes(job.status);
+                    const needsReview = job.status === "SUBMITTED";
+                    const wasReviewed = job.status === "APPROVED" || job.status === "NEEDS_CHANGES";
+                    
+                    return (
+                      <TableRow
+                        key={job.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => setSelectedJobId(job.id)}
+                      >
+                        <TableCell className="font-mono text-xs">
+                          {job.id.slice(0, 8)}
+                        </TableCell>
+                        <TableCell className="font-medium truncate max-w-[200px]">
+                          {job.title || "Untitled Job"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {typeLabels[job.type]}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <Badge
+                              variant="outline"
+                              className={cn(statusColors[job.status], "text-[10px] px-1.5 py-0")}
+                            >
+                              {statusLabels[job.status]}
+                            </Badge>
+                            {reviewProgress?.[job.id] && (
+                              <span className="flex items-center gap-1 text-[10px]">
+                                {reviewProgress[job.id].approved > 0 && (
+                                  <span className="flex items-center text-green-500">
+                                    <CheckCircle className="h-2.5 w-2.5 mr-0.5" />
+                                    {reviewProgress[job.id].approved}
+                                  </span>
+                                )}
+                                {reviewProgress[job.id].changesRequested > 0 && (
+                                  <span className="flex items-center text-orange-500">
+                                    <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+                                    {reviewProgress[job.id].changesRequested}
+                                  </span>
+                                )}
+                                {reviewProgress[job.id].pending > 0 && job.status !== "APPROVED" && (
+                                  <span className="text-muted-foreground/60">
+                                    +{reviewProgress[job.id].pending}
+                                  </span>
+                                )}
+                              </span>
                             )}
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs truncate max-w-[120px]">
+                          {job.assigned_user ? (
+                            job.assigned_user.display_name || job.assigned_user.email?.split('@')[0]
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {job.due_date ? format(new Date(job.due_date), "M/d") : "—"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {format(new Date(job.created_at), "M/d")}
+                        </TableCell>
+                        <TableCell>
+                          {canReview && (
+                            <Button
+                              variant={needsReview ? "default" : "outline"}
+                              size="sm"
+                              className="gap-1"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setReviewJobId(job.id);
+                              }}
+                            >
+                              {wasReviewed ? (
+                                <>
+                                  <CheckCircle className="h-3 w-3" />
+                                  View
+                                </>
+                              ) : (
+                                <>
+                                  <Eye className="h-3 w-3" />
+                                  Review
+                                </>
+                              )}
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </main>
 
       {/* Job Detail Panel */}
