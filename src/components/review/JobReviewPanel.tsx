@@ -44,7 +44,6 @@ import {
   X,
   Check,
   AlertTriangle,
-  User,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -393,14 +392,6 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
               </span>
             </div>
 
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <User className="h-4 w-4" />
-              <span>
-                {selectedSubmission?.submitted_by?.display_name || 
-                 selectedSubmission?.submitted_by?.email || 
-                 'Unknown'}
-              </span>
-            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -421,13 +412,12 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
               </Select>
             )}
 
-            {/* Overall Progress */}
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>{reviewProgress.approved}/{reviewProgress.total} approved</span>
-              {reviewProgress.changesRequested > 0 && (
-                <span className="text-orange-400">({reviewProgress.changesRequested} needs changes)</span>
-              )}
-            </div>
+            {/* Progress - only show when not all approved */}
+            {reviewProgress.approved < reviewProgress.total && (
+              <span className="text-xs text-muted-foreground">
+                {reviewProgress.approved}/{reviewProgress.total}
+              </span>
+            )}
 
             {/* Status Badge */}
             <Badge 
@@ -473,12 +463,10 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                 </Button>
               </>
             )}
-            {isInternal && selectedAsset?.review_status === 'APPROVED' && (
-              <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
-                <Check className="h-3 w-3 mr-1" />
-                {selectedAsset.label || 'Asset'} Approved
-              </Badge>
-            )}
+            {/* Current asset label */}
+            <span className="text-sm text-muted-foreground">
+              {selectedAsset?.label || 'Asset'}
+            </span>
           </div>
         </div>
 
