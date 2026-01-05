@@ -11,9 +11,10 @@ import {
   AlertCircle, 
   CheckCircle2, 
   ChevronLeft,
-  Users
+  Clock,
+  CircleDashed
 } from "lucide-react";
-import { useProjectsEligibleForRepose, useApprovedProjectLooks } from "@/hooks/useProductionProjects";
+import { useProjectsEligibleForRepose, useApprovedProjectLooks, useAllProjectLooks } from "@/hooks/useProductionProjects";
 import { useCreateReposeBatch, useReposeBatchByProjectId } from "@/hooks/useReposeBatches";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { ProductionProject } from "@/types/production-projects";
@@ -30,6 +31,7 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
   
   const { data: eligibleProjects, isLoading: projectsLoading } = useProjectsEligibleForRepose();
   const { data: approvedLooks, isLoading: looksLoading } = useApprovedProjectLooks(selectedProjectId);
+  const { data: allLooks, isLoading: allLooksLoading } = useAllProjectLooks(selectedProjectId);
   const { data: existingBatch, isLoading: checkingBatch } = useReposeBatchByProjectId(selectedProjectId || undefined);
   const createBatch = useCreateReposeBatch();
 
@@ -133,14 +135,41 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {looksLoading ? (
+            {looksLoading || allLooksLoading ? (
               <div className="flex items-center justify-center py-8">
                 <LeapfrogLoader />
               </div>
             ) : !approvedLooks || approvedLooks.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No approved looks available in this project.</p>
+              <div className="space-y-6">
+                <div className="text-center py-8 text-muted-foreground">
+                  <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>No approved looks available in this project yet.</p>
+                </div>
+                
+                {/* Show pending looks */}
+                {allLooks?.pending && allLooks.pending.length > 0 && (
+                  <div className="pt-4 border-t">
+                    <h4 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      Pending Looks ({allLooks.pending.length})
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {allLooks.pending.map((look) => (
+                        <Card key={look.id} className="cursor-not-allowed bg-muted/30 opacity-60">
+                          <CardContent className="p-3">
+                            <p className="font-medium text-sm truncate">{look.name}</p>
+                            <Badge variant="secondary" className="mt-1 text-[10px]">
+                              <CircleDashed className="w-2.5 h-2.5 mr-0.5" />
+                              {look.job_status === 'IN_PROGRESS' ? 'In Progress' : 
+                               look.job_status === 'SUBMITTED' ? 'Submitted' :
+                               look.job_status === 'NEEDS_CHANGES' ? 'Needs Changes' : 'Open'}
+                            </Badge>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <>
@@ -185,11 +214,6 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
                               <p className="font-medium text-sm truncate">
                                 {look.look_name}
                               </p>
-                              {look.sku_code && (
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {look.sku_code}
-                                </p>
-                              )}
                               <div className="flex items-center gap-2 mt-1">
                                 <Badge variant="secondary" className="text-[10px] px-1">
                                   <Images className="w-2.5 h-2.5 mr-0.5" />
@@ -207,6 +231,31 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
                     );
                   })}
                 </div>
+
+                {/* Show pending looks below the approved ones */}
+                {allLooks?.pending && allLooks.pending.length > 0 && (
+                  <div className="pt-4 border-t">
+                    <h4 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      Not Yet Approved ({allLooks.pending.length})
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {allLooks.pending.map((look) => (
+                        <Card key={look.id} className="cursor-not-allowed bg-muted/30 opacity-60">
+                          <CardContent className="p-3">
+                            <p className="font-medium text-sm truncate">{look.name}</p>
+                            <Badge variant="secondary" className="mt-1 text-[10px]">
+                              <CircleDashed className="w-2.5 h-2.5 mr-0.5" />
+                              {look.job_status === 'IN_PROGRESS' ? 'In Progress' : 
+                               look.job_status === 'SUBMITTED' ? 'Submitted' :
+                               look.job_status === 'NEEDS_CHANGES' ? 'Needs Changes' : 'Open'}
+                            </Badge>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex justify-end">
                   <Button
