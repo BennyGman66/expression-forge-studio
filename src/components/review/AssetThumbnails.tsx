@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils';
 import { SubmissionAsset, AssetReviewStatus } from '@/types/review';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MessageSquare, Check, AlertTriangle } from 'lucide-react';
+import { MessageSquare, Check, AlertTriangle, Clock } from 'lucide-react';
 
 interface AssetThumbnailsProps {
   assets: SubmissionAsset[];
@@ -15,19 +15,24 @@ interface AssetThumbnailsProps {
 function getStatusIndicator(status: AssetReviewStatus) {
   if (status === 'APPROVED') {
     return (
-      <div className="absolute top-1 left-1 w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
-        <Check className="h-3 w-3 text-white" />
+      <div className="absolute top-1 left-1 w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shadow-lg ring-2 ring-green-500/30">
+        <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
       </div>
     );
   }
   if (status === 'CHANGES_REQUESTED') {
     return (
-      <div className="absolute top-1 left-1 w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center">
-        <AlertTriangle className="h-3 w-3 text-white" />
+      <div className="absolute top-1 left-1 w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center shadow-lg ring-2 ring-orange-500/30">
+        <AlertTriangle className="h-3.5 w-3.5 text-white" strokeWidth={2.5} />
       </div>
     );
   }
-  return null;
+  // Pending review - subtle indicator
+  return (
+    <div className="absolute top-1 left-1 w-5 h-5 rounded-full bg-muted-foreground/60 flex items-center justify-center">
+      <Clock className="h-3 w-3 text-white" />
+    </div>
+  );
 }
 
 export function AssetThumbnails({
@@ -63,8 +68,9 @@ export function AssetThumbnails({
               isSelected
                 ? "border-primary ring-2 ring-primary/30"
                 : "border-transparent hover:border-muted-foreground/30",
-              asset.review_status === 'APPROVED' && !isSelected && "border-green-500/50",
-              asset.review_status === 'CHANGES_REQUESTED' && !isSelected && "border-orange-500/50"
+              asset.review_status === 'APPROVED' && !isSelected && "border-green-500 bg-green-500/10",
+              asset.review_status === 'CHANGES_REQUESTED' && !isSelected && "border-orange-500 bg-orange-500/10",
+              !asset.review_status && !isSelected && "border-muted-foreground/30"
             )}
           >
             <div className={cn(

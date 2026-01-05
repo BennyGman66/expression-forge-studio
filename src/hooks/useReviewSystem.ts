@@ -655,9 +655,15 @@ export function useCreateResubmission() {
       
       // Create new assets - use replacement URLs where provided, otherwise copy from previous
       // Carry over APPROVED status for unchanged assets
+      // Convert Map keys to strings for safe comparison
+      const replacementKeys = new Set(Array.from(replacements.keys()).map(k => String(k)));
+      
       const newAssets = (prevAssets || []).map((asset, index) => {
-        const wasReplaced = replacements.has(asset.id);
+        const assetIdStr = String(asset.id);
+        const wasReplaced = replacementKeys.has(assetIdStr);
         const wasApproved = asset.review_status === 'APPROVED';
+        
+        console.log(`[Resubmission] Asset ${asset.label}: replaced=${wasReplaced}, wasApproved=${wasApproved}`);
         
         return {
           submission_id: submission.id,
@@ -665,7 +671,7 @@ export function useCreateResubmission() {
           label: asset.label,
           sort_index: index,
           // Keep APPROVED status if asset wasn't replaced and was previously approved
-          review_status: (!wasReplaced && wasApproved) ? 'APPROVED' : null,
+          review_status: (!wasReplaced && wasApproved) ? 'APPROVED' as const : null,
           reviewed_by_user_id: (!wasReplaced && wasApproved) ? asset.reviewed_by_user_id : null,
           reviewed_at: (!wasReplaced && wasApproved) ? asset.reviewed_at : null,
         };
