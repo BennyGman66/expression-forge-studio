@@ -79,7 +79,10 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const { data: submissions = [], refetch: refetchSubmissions } = useJobSubmissions(jobId);
   const { data: jobOutputs = [] } = useJobOutputs(jobId);
   
-  const selectedSubmission = submissions.find(s => s.id === selectedVersion) || submissions[0];
+  const latestSubmission = submissions[0];
+  const selectedSubmission = submissions.find(s => s.id === selectedVersion) || latestSubmission;
+  const isViewingSuperseded = selectedSubmission && latestSubmission && 
+    selectedSubmission.version_number < latestSubmission.version_number;
   const { data: assets = [] } = useSubmissionAssets(selectedSubmission?.id || null);
   const { data: threads = [] } = useReviewThreads(selectedSubmission?.id || null);
   const { data: annotations = [] } = useAssetAnnotations(selectedAsset?.id || null);
@@ -434,8 +437,15 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
               {selectedSubmission?.status?.replace('_', ' ')}
             </Badge>
 
-            {/* Per-Asset Actions */}
-            {isInternal && selectedAsset && selectedAsset.review_status !== 'APPROVED' && (
+            {/* Superseded Version Banner */}
+            {isViewingSuperseded && (
+              <Badge variant="outline" className="bg-muted text-muted-foreground border-muted-foreground/30">
+                Historical v{selectedSubmission?.version_number} — v{latestSubmission?.version_number} is current
+              </Badge>
+            )}
+
+            {/* Per-Asset Actions - disabled on superseded versions */}
+            {isInternal && selectedAsset && selectedAsset.review_status !== 'APPROVED' && !isViewingSuperseded && (
               <>
                 <div className="h-4 w-px bg-border" />
                 <span className="text-xs text-muted-foreground">
@@ -484,6 +494,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                 setSelectedAnnotationId(null);
               }}
               annotationCounts={annotationCounts}
+              submissionCreatedAt={selectedSubmission?.submitted_at}
             />
           </div>
 

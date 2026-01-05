@@ -128,8 +128,9 @@ export function useCreateSubmission() {
     onSuccess: (_, { jobId }) => {
       queryClient.invalidateQueries({ queryKey: ['job-submissions', jobId] });
       queryClient.invalidateQueries({ queryKey: ['latest-submission', jobId] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      queryClient.invalidateQueries({ queryKey: ['job', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['unified-jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['unified-job', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['jobs-review-progress'] });
     },
   });
 }
@@ -169,8 +170,9 @@ export function useUpdateSubmissionStatus() {
     onSuccess: (_, { jobId }) => {
       queryClient.invalidateQueries({ queryKey: ['job-submissions'] });
       queryClient.invalidateQueries({ queryKey: ['latest-submission'] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      queryClient.invalidateQueries({ queryKey: ['job', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['unified-jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['unified-job', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['jobs-review-progress'] });
     },
   });
 }
@@ -269,8 +271,9 @@ export function useUpdateAssetStatus() {
       queryClient.invalidateQueries({ queryKey: ['submission-assets', submissionId] });
       queryClient.invalidateQueries({ queryKey: ['job-submissions'] });
       queryClient.invalidateQueries({ queryKey: ['latest-submission'] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      queryClient.invalidateQueries({ queryKey: ['job', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['unified-jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['unified-job', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['jobs-review-progress'] });
     },
   });
 }
