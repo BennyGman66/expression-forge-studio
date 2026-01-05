@@ -60,7 +60,7 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
   const handleResume = async (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // For CLAY_GENERATION jobs, use server-side resume (works from anywhere)
+    // For CLAY_GENERATION jobs, use server-side resume
     if (job.type === 'CLAY_GENERATION') {
       setIsResuming(true);
       try {
@@ -77,6 +77,30 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
       } catch (err) {
         console.error('Resume exception:', err);
         toast.error('Failed to resume job');
+      } finally {
+        setIsResuming(false);
+        onClose?.();
+      }
+      return;
+    }
+    
+    // For SCRAPE_FACES jobs, use server-side resume
+    if (job.type === 'SCRAPE_FACES') {
+      setIsResuming(true);
+      try {
+        const { error } = await supabase.functions.invoke('resume-face-scrape', {
+          body: { runId: job.source_job_id }
+        });
+        
+        if (error) {
+          console.error('Resume error:', error);
+          toast.error('Failed to resume scrape');
+        } else {
+          toast.success('Scrape resumed in background');
+        }
+      } catch (err) {
+        console.error('Resume exception:', err);
+        toast.error('Failed to resume scrape');
       } finally {
         setIsResuming(false);
         onClose?.();
