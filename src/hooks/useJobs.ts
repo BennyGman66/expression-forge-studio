@@ -261,3 +261,32 @@ export function useAddJobNote() {
     },
   });
 }
+
+export function useDeleteJob() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (jobId: string) => {
+      // Delete related data first (cascade)
+      await supabase.from("job_outputs").delete().eq("job_id", jobId);
+      await supabase.from("job_inputs").delete().eq("job_id", jobId);
+      await supabase.from("job_notes").delete().eq("job_id", jobId);
+      await supabase.from("job_submissions").delete().eq("job_id", jobId);
+
+      // Delete the job
+      const { error } = await supabase
+        .from("unified_jobs")
+        .delete()
+        .eq("id", jobId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["unified-jobs"] });
+      toast.success("Job deleted");
+    },
+    onError: (error) => {
+      toast.error(`Failed to delete job: ${error.message}`);
+    },
+  });
+}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Pencil, FolderOpen, CheckCircle2, Clock, AlertTriangle, Briefcase } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, FolderOpen, CheckCircle2, Clock, AlertTriangle, Briefcase, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,9 +8,20 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ProductionProject } from "@/types/production-projects";
 import { UnifiedJob, JobStatus } from "@/types/jobs";
 import { useUpdateProductionProject } from "@/hooks/useProductionProjects";
+import { useDeleteJob } from "@/hooks/useJobs";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 
@@ -19,6 +30,7 @@ interface ProjectGroupRowProps {
   jobs: UnifiedJob[];
   onJobClick: (jobId: string) => void;
   onReviewClick: (jobId: string) => void;
+  onDeleteJob?: (jobId: string) => void;
   reviewableStatuses: JobStatus[];
   reviewProgress?: Record<string, { approved: number; changesRequested: number; pending: number }>;
 }
@@ -54,13 +66,16 @@ export function ProjectGroupRow({
   jobs,
   onJobClick,
   onReviewClick,
+  onDeleteJob,
   reviewableStatuses,
   reviewProgress,
 }: ProjectGroupRowProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(project.name);
+  const [jobToDelete, setJobToDelete] = useState<string | null>(null);
   const updateProject = useUpdateProductionProject();
+  const deleteJob = useDeleteJob();
 
   const openCount = jobs.filter(j => j.status === 'OPEN' || j.status === 'ASSIGNED').length;
   const inProgressCount = jobs.filter(j => j.status === 'IN_PROGRESS' || j.status === 'SUBMITTED').length;
@@ -221,7 +236,7 @@ export function ProjectGroupRow({
                   <span className="text-xs text-muted-foreground w-12">
                     {format(new Date(job.created_at), "M/d")}
                   </span>
-                  <div className="w-16">
+                  <div className="flex items-center gap-1 w-24">
                     {canReview && (
                       <Button
                         variant={needsReview ? "default" : "outline"}
@@ -235,6 +250,17 @@ export function ProjectGroupRow({
                         {wasReviewed ? "View" : "Review"}
                       </Button>
                     )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setJobToDelete(job.id);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </div>
               );
@@ -242,6 +268,32 @@ export function ProjectGroupRow({
           </div>
         </CollapsibleContent>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!jobToDelete} onOpenChange={(open) => !open && setJobToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Job</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this job and all associated outputs, notes, and submissions. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (jobToDelete) {
+                  await deleteJob.mutateAsync(jobToDelete);
+                  setJobToDelete(null);
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Collapsible>
   );
 }
@@ -262,6 +314,8 @@ export function UngroupedJobsRow({
   reviewProgress,
 }: UngroupedJobsRowProps) {
   const [isOpen, setIsOpen] = useState(true);
+  const [jobToDelete, setJobToDelete] = useState<string | null>(null);
+  const deleteJob = useDeleteJob();
 
   if (jobs.length === 0) return null;
 
@@ -330,7 +384,7 @@ export function UngroupedJobsRow({
                   <span className="text-xs text-muted-foreground w-12">
                     {format(new Date(job.created_at), "M/d")}
                   </span>
-                  <div className="w-16">
+                  <div className="flex items-center gap-1 w-24">
                     {canReview && (
                       <Button
                         variant={needsReview ? "default" : "outline"}
@@ -344,6 +398,17 @@ export function UngroupedJobsRow({
                         {wasReviewed ? "View" : "Review"}
                       </Button>
                     )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setJobToDelete(job.id);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 </div>
               );
@@ -351,6 +416,32 @@ export function UngroupedJobsRow({
           </div>
         </CollapsibleContent>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!jobToDelete} onOpenChange={(open) => !open && setJobToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Job</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this job and all associated outputs, notes, and submissions. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (jobToDelete) {
+                  await deleteJob.mutateAsync(jobToDelete);
+                  setJobToDelete(null);
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Collapsible>
   );
 }
