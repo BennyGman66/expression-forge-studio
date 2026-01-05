@@ -1444,6 +1444,7 @@ export type Database = {
           images_per_product: number
           logs: Json | null
           max_products: number
+          pipeline_job_id: string | null
           progress: number | null
           start_url: string
           status: string
@@ -1457,6 +1458,7 @@ export type Database = {
           images_per_product?: number
           logs?: Json | null
           max_products?: number
+          pipeline_job_id?: string | null
           progress?: number | null
           start_url: string
           status?: string
@@ -1470,13 +1472,22 @@ export type Database = {
           images_per_product?: number
           logs?: Json | null
           max_products?: number
+          pipeline_job_id?: string | null
           progress?: number | null
           start_url?: string
           status?: string
           total?: number | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "face_scrape_runs_pipeline_job_id_fkey"
+            columns: ["pipeline_job_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       generation_jobs: {
         Row: {

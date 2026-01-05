@@ -43,6 +43,7 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
 
   useEffect(() => {
     fetchRuns();
+    reconnectToRunningJob();
 
     // Subscribe to realtime updates for face_scrape_runs
     const channel = supabase
@@ -55,23 +56,26 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
           
           // Sync progress to pipeline_jobs if we have a tracked job
           if (payload.eventType === 'UPDATE' && pipelineJobIdRef.current) {
-            const run = payload.new as FaceScrapeRun;
+            const run = payload.new as FaceScrapeRun & { pipeline_job_id?: string };
             
-            // Update pipeline job progress
-            if (run.progress !== null && run.total !== null) {
-              await updateProgress(pipelineJobIdRef.current, {
-                done: run.progress,
-                message: `Scraping ${run.brand_name}: ${run.progress}/${run.total} products`,
-              });
-            }
-            
-            // Update pipeline job status on completion/failure
-            if (run.status === 'completed') {
-              await setStatus(pipelineJobIdRef.current, 'COMPLETED');
-              pipelineJobIdRef.current = null;
-            } else if (run.status === 'failed') {
-              await setStatus(pipelineJobIdRef.current, 'FAILED');
-              pipelineJobIdRef.current = null;
+            // Only sync if this is our tracked job
+            if (run.pipeline_job_id === pipelineJobIdRef.current || !run.pipeline_job_id) {
+              // Update pipeline job progress
+              if (run.progress !== null && run.total !== null) {
+                await updateProgress(pipelineJobIdRef.current, {
+                  done: run.progress,
+                  message: `Scraping ${run.brand_name}: ${run.progress}/${run.total} products`,
+                });
+              }
+              
+              // Update pipeline job status on completion/failure
+              if (run.status === 'completed') {
+                await setStatus(pipelineJobIdRef.current, 'COMPLETED');
+                pipelineJobIdRef.current = null;
+              } else if (run.status === 'failed') {
+                await setStatus(pipelineJobIdRef.current, 'FAILED');
+                pipelineJobIdRef.current = null;
+              }
             }
           }
         }
@@ -82,6 +86,24 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
       supabase.removeChannel(channel);
     };
   }, [updateProgress, setStatus]);
+
+  // Reconnect to any running scrape jobs on mount
+  const reconnectToRunningJob = async () => {
+    const { data: runningRuns } = await supabase
+      .from('face_scrape_runs')
+      .select('id, pipeline_job_id, brand_name')
+      .eq('status', 'running')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (runningRuns && runningRuns.length > 0) {
+      const run = runningRuns[0];
+      if (run.pipeline_job_id) {
+        console.log(`Reconnected to running scrape job: ${run.brand_name}`);
+        pipelineJobIdRef.current = run.pipeline_job_id;
+      }
+    }
+  };
 
   // Fetch images when a run is selected and clear selection
   useEffect(() => {
@@ -344,11 +366,10 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
       if (error) throw error;
 
       // Create a pipeline job to track in the global tracker
-      const estimatedTotal = resolvedMaxProducts * resolvedImagesPerProduct;
       const pipelineJobId = await createJob({
-        type: 'FACE_SCRAPE',
+        type: 'SCRAPE_FACES',
         title: `Face Scrape: ${resolvedBrandName}`,
-        total: estimatedTotal,
+        total: resolvedMaxProducts,
         origin_route: '/face-creator',
         origin_context: { 
           scrape_run_id: data?.runId,
@@ -357,9 +378,20 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
         },
         source_table: 'face_scrape_runs',
         source_job_id: data?.runId,
+        supports_pause: false,
+        supports_retry: true,
+        supports_restart: true,
       });
       
       pipelineJobIdRef.current = pipelineJobId;
+      
+      // Link pipeline job to scrape run for reconnection
+      if (data?.runId && pipelineJobId) {
+        await supabase
+          .from('face_scrape_runs')
+          .update({ pipeline_job_id: pipelineJobId })
+          .eq('id', data.runId);
+      }
 
       toast({ title: "Success", description: "Scrape job started" });
       setStartUrl("");
