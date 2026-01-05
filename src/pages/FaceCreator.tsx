@@ -8,6 +8,7 @@ import { ClassificationPanel } from "@/components/face-creator/ClassificationPan
 import { CropEditorPanel } from "@/components/face-creator/CropEditorPanel";
 import { ExportPanel } from "@/components/face-creator/ExportPanel";
 import { ImagePairingPanel } from "@/components/face-creator/ImagePairingPanel";
+import { HubHeader } from "@/components/layout/HubHeader";
 
 export default function FaceCreator() {
   const navigate = useNavigate();
@@ -16,23 +17,7 @@ export default function FaceCreator() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="flex justify-between items-center p-6 border-b border-border">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate('/')}
-          >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Button>
-          <h1 className="text-xl font-semibold">Talent Face Library</h1>
-          <span className="text-muted-foreground text-sm">Build reference face datasets</span>
-        </div>
-        <div className="w-10 h-10 rounded-full bg-lime-400 flex items-center justify-center text-sm font-medium">
-          BG
-        </div>
-      </header>
+      <HubHeader currentApp="Talent Face Library" />
 
       <main className="p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
