@@ -14,8 +14,8 @@ serve(async (req) => {
   }
 
   try {
-    const { outputId } = await req.json();
-    
+    const { outputId, model } = await req.json();
+    const selectedModel = model || 'google/gemini-2.5-flash-image-preview';
     if (!outputId) {
       return new Response(
         JSON.stringify({ error: 'Missing outputId' }),
@@ -23,7 +23,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[generate-repose-single] Processing output: ${outputId}`);
+    console.log(`[generate-repose-single] Processing output: ${outputId}, model: ${selectedModel}`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -92,7 +92,7 @@ The first image is the product photograph to repose. The second image is the gre
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash-image-preview',
+        model: selectedModel,
         messages: [
           {
             role: 'user',

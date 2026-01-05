@@ -7,6 +7,7 @@ export type PipelineJobType =
   | 'FACE_PAIRING'
   | 'CROP_GENERATION'
   | 'ORGANIZE_IMAGES'
+  | 'REPOSE_GENERATION'
   | 'OTHER';
 
 export type PipelineJobStatus =
@@ -79,6 +80,7 @@ export const JOB_TYPE_CONFIG: Record<PipelineJobType, { label: string; color: st
   FACE_PAIRING: { label: 'Pairing', color: 'bg-rose-500' },
   CROP_GENERATION: { label: 'Crop', color: 'bg-green-500' },
   ORGANIZE_IMAGES: { label: 'Organize', color: 'bg-indigo-500' },
+  REPOSE_GENERATION: { label: 'Repose', color: 'bg-teal-500' },
   OTHER: { label: 'Other', color: 'bg-gray-500' },
 };
 

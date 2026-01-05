@@ -1,11 +1,10 @@
-import { Activity, Loader2, AlertTriangle } from 'lucide-react';
+import { Activity, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Progress } from '@/components/ui/progress';
 import { JobTrackerDropdown } from './JobTrackerDropdown';
 import { useActiveJobs } from '@/hooks/useActiveJobs';
 
@@ -43,7 +42,12 @@ export function JobTrackerIndicator() {
             </>
           ) : hasActiveJobs ? (
             <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <div className="relative w-5 h-4 flex items-center justify-center">
+                <Activity className="h-3.5 w-3.5 relative z-10" />
+                <div className="absolute inset-0 flex items-center">
+                  <div className="job-tracker-pulse" />
+                </div>
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-medium">
                   {totalProgress.done}/{totalProgress.total}
