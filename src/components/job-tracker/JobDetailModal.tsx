@@ -13,6 +13,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { JobTypeBadge } from './JobTypeBadge';
 import { JOB_STATUS_CONFIG, type PipelineJob } from '@/types/pipeline-jobs';
 import { format, formatDistanceToNow } from 'date-fns';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import { useState } from 'react';
 
 interface EnhancedPipelineJob extends PipelineJob {
   isStalled?: boolean;
@@ -26,6 +29,7 @@ interface JobDetailModalProps {
 
 export function JobDetailModal({ job, onClose, onMarkStalled }: JobDetailModalProps) {
   const navigate = useNavigate();
+  const [isResuming, setIsResuming] = useState(false);
 
   if (!job) return null;
 
@@ -37,12 +41,38 @@ export function JobDetailModal({ job, onClose, onMarkStalled }: JobDetailModalPr
   const remaining = job.progress_total - job.progress_done - job.progress_failed;
   const timeAgo = formatDistanceToNow(new Date(job.updated_at), { addSuffix: true });
 
+  // Show resume for stalled OR paused jobs
+  const canResume = job.isStalled || job.status === 'PAUSED';
+
   const handleOpenOrigin = () => {
     navigate(job.origin_route);
     onClose();
   };
 
-  const handleResume = () => {
+  const handleResume = async () => {
+    // For SCRAPE_FACES jobs, call the edge function directly
+    if (job.type === 'SCRAPE_FACES') {
+      const scrapeRunId = (job.origin_context as Record<string, unknown>)?.scrape_run_id;
+      if (scrapeRunId) {
+        setIsResuming(true);
+        try {
+          const { error } = await supabase.functions.invoke('resume-face-scrape', {
+            body: { runId: scrapeRunId }
+          });
+          if (error) throw error;
+          toast.success('Resuming face scrape in background...');
+          onClose();
+        } catch (err) {
+          console.error('Failed to resume:', err);
+          toast.error('Failed to resume job');
+        } finally {
+          setIsResuming(false);
+        }
+        return;
+      }
+    }
+    
+    // For other job types, navigate to origin with resumeJobId
     const url = new URL(job.origin_route, window.location.origin);
     url.searchParams.set('resumeJobId', job.id);
     navigate(url.pathname + url.search);
@@ -153,15 +183,17 @@ export function JobDetailModal({ job, onClose, onMarkStalled }: JobDetailModalPr
 
           {/* Actions */}
           <div className="flex items-center gap-2 pt-2">
-            {job.isStalled ? (
+            {canResume ? (
               <>
-                <Button onClick={handleResume} className="flex-1">
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Resume Job
+                <Button onClick={handleResume} disabled={isResuming} className="flex-1">
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isResuming ? 'animate-spin' : ''}`} />
+                  {isResuming ? 'Resuming...' : 'Resume Job'}
                 </Button>
-                <Button variant="outline" onClick={handleMarkFailed}>
-                  Mark as Failed
-                </Button>
+                {job.isStalled && (
+                  <Button variant="outline" onClick={handleMarkFailed}>
+                    Mark as Failed
+                  </Button>
+                )}
               </>
             ) : (
               <>
