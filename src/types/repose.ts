@@ -1,3 +1,5 @@
+import type { OutputShotType, CropTarget } from './shot-types';
+
 export interface ReposeBatch {
   id: string;
   job_id: string;
@@ -9,11 +11,13 @@ export interface ReposeBatch {
 }
 
 export interface ReposeConfig {
-  randomPosesPerSlot?: number;
+  posesPerShotType?: number; // renamed from randomPosesPerSlot
   attemptsPerPose?: number;
-  pairingRules?: PairingRules;
+  cropTarget?: CropTarget; // for FRONT_CROPPED output
   seed?: number;
   model?: string;
+  // DEPRECATED: pairingRules is no longer user-configurable
+  // Camera-to-output mapping is now enforced by the system
 }
 
 export const REPOSE_MODEL_OPTIONS = [
@@ -23,6 +27,7 @@ export const REPOSE_MODEL_OPTIONS = [
 
 export const DEFAULT_REPOSE_MODEL = 'google/gemini-3-pro-image-preview';
 
+// DEPRECATED: Legacy pairing rules interface - kept for backward compatibility during migration
 export interface PairingRules {
   frontToSlotA?: boolean;
   frontToSlotB?: boolean;
@@ -46,13 +51,15 @@ export interface ReposeOutput {
   batch_id: string;
   batch_item_id: string;
   pose_id: string | null;
-  slot: string | null;
+  slot: string | null; // Legacy field
+  shot_type: OutputShotType | null; // New field
   attempt_index: number;
   result_url: string | null;
   status: 'queued' | 'running' | 'complete' | 'failed';
   created_at: string;
 }
 
+// DEPRECATED: Legacy pairing rules - kept for backward compatibility
 export const DEFAULT_PAIRING_RULES: PairingRules = {
   frontToSlotA: true,
   frontToSlotB: true,
@@ -62,7 +69,7 @@ export const DEFAULT_PAIRING_RULES: PairingRules = {
 };
 
 export const DEFAULT_REPOSE_CONFIG: ReposeConfig = {
-  randomPosesPerSlot: 2,
+  posesPerShotType: 2,
   attemptsPerPose: 1,
-  pairingRules: DEFAULT_PAIRING_RULES,
+  cropTarget: 'top',
 };

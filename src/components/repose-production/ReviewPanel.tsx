@@ -8,6 +8,7 @@ import { ClipboardList, Star, RefreshCw, AlertCircle, CheckCircle2, ChevronLeft,
 import { useReposeBatch, useReposeBatchItems, useReposeOutputs } from "@/hooks/useReposeBatches";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { cn } from "@/lib/utils";
+import { OUTPUT_SHOT_LABELS, slotToShotType, OutputShotType } from "@/types/shot-types";
 
 interface ReviewPanelProps {
   batchId: string | undefined;
@@ -16,7 +17,7 @@ interface ReviewPanelProps {
 interface LightboxImage {
   id: string;
   url: string;
-  slot: string;
+  shotType: OutputShotType;
   itemView: string;
 }
 
@@ -34,22 +35,23 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
   outputs?.forEach((output) => {
     if (output.status === 'complete' && output.result_url) {
       const item = batchItems?.find(i => i.id === output.batch_item_id);
+      const shotType = (output.shot_type || slotToShotType(output.slot || '') || 'FRONT_FULL') as OutputShotType;
       allCompletedImages.push({
         id: output.id,
         url: output.result_url,
-        slot: output.slot || 'unknown',
+        shotType,
         itemView: item?.view || 'Unknown View',
       });
     }
   });
 
-  // Group outputs by batch_item_id, then by slot
+  // Group outputs by batch_item_id, then by shot type
   const groupedOutputs = outputs?.reduce((acc, output) => {
     const itemId = output.batch_item_id;
-    if (!acc[itemId]) acc[itemId] = {};
-    const slot = output.slot || 'unknown';
-    if (!acc[itemId][slot]) acc[itemId][slot] = [];
-    acc[itemId][slot].push(output);
+    if (!acc[itemId]) acc[itemId] = {} as Record<string, typeof outputs>;
+    const shotType = (output.shot_type || slotToShotType(output.slot || '') || 'FRONT_FULL') as OutputShotType;
+    if (!acc[itemId][shotType]) acc[itemId][shotType] = [];
+    acc[itemId][shotType].push(output);
     return acc;
   }, {} as Record<string, Record<string, typeof outputs>>) || {};
 
@@ -127,7 +129,7 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
             <div className="flex items-center justify-between p-4 text-white">
               <div className="flex items-center gap-3">
                 <Badge variant="outline" className="border-white/30 text-white">
-                  {currentLightboxImage?.slot ? `Slot ${currentLightboxImage.slot}` : ''}
+                  {currentLightboxImage?.shotType ? OUTPUT_SHOT_LABELS[currentLightboxImage.shotType] : ''}
                 </Badge>
                 <span className="text-sm text-white/70">{currentLightboxImage?.itemView}</span>
               </div>
@@ -235,9 +237,9 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
         <div className="space-y-6">
           {batchItems?.map((item) => {
             const itemOutputs = groupedOutputs[item.id] || {};
-            const slots = Object.keys(itemOutputs);
+            const shotTypes = Object.keys(itemOutputs) as OutputShotType[];
 
-            if (slots.length === 0) return null;
+            if (shotTypes.length === 0) return null;
 
             return (
               <Card key={item.id}>
@@ -253,7 +255,7 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
                       </CardDescription>
                     </div>
                     <Badge variant="outline">
-                      {Object.values(itemOutputs).flat().filter(o => o?.status === 'complete').length} complete
+                      {Object.values(itemOutputs).flat().filter((o: any) => o?.status === 'complete').length} complete
                     </Badge>
                   </div>
                 </CardHeader>
@@ -276,12 +278,12 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
                     </div>
                   </div>
 
-                  {/* Outputs by Slot */}
-                  {slots.map((slot) => (
-                    <div key={slot} className="mb-4">
-                      <p className="text-sm font-medium mb-2">Slot {slot}</p>
+                  {/* Outputs by Shot Type */}
+                  {shotTypes.map((shotType) => (
+                    <div key={shotType} className="mb-4">
+                      <p className="text-sm font-medium mb-2">{OUTPUT_SHOT_LABELS[shotType]}</p>
                       <div className="flex flex-wrap gap-2">
-                        {itemOutputs[slot]?.map((output) => (
+                        {itemOutputs[shotType]?.map((output) => (
                           <div
                             key={output.id}
                             onClick={() => {

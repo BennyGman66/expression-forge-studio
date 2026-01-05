@@ -37,13 +37,13 @@ interface ClayPoseItem {
   brand_name: string;
 }
 
-// Display order: A (Full Front), B (Cropped Front), D (Detail), C (Full Back)
+// Display order: Front Full, Front Cropped, Detail, Back Full
 const SLOTS = ["A", "B", "D", "C"] as const;
 const SLOT_LABELS: Record<string, string> = {
-  A: "Full Front",
-  B: "Cropped Front",
+  A: "Front (Full)",
+  B: "Front (Cropped)",
   D: "Detail",
-  C: "Full Back",
+  C: "Back (Full)",
 };
 const GENDERS = ["women", "men"] as const;
 const PRODUCT_TYPES = ["tops", "trousers"] as const;

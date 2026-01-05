@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { useBrands, Brand } from "@/hooks/useBrands";
 import { useBrandLibraries } from "@/hooks/useBrandLibraries";
-import { useLibraryPoses, PoseFilters, LibraryPose, Slot, CurationStatus } from "@/hooks/useLibraryPoses";
+import { useLibraryPoses, PoseFilters, LibraryPose, OutputShotType, CurationStatus } from "@/hooks/useLibraryPoses";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { BrandSelector } from "@/components/shared/BrandSelector";
 import { LibraryHeader } from "./LibraryHeader";
@@ -38,14 +38,14 @@ export function ClayPoseLibraryReview() {
     loading: posesLoading,
     coverage,
     updatePoseStatus,
-    movePosesToSlot,
+    movePosesToShotType,
     deletePoses,
     filterPoses,
   } = useLibraryPoses(activeLibrary?.id || null);
 
   // UI State
   const [filters, setFilters] = useState<PoseFilters>({
-    slot: "all",
+    shotType: "all",
     gender: "all",
     status: "all",
   });
@@ -115,10 +115,10 @@ export function ClayPoseLibraryReview() {
     updatePoseStatus(Array.from(selectedIds), "excluded");
   }, [selectedIds, isLocked, updatePoseStatus]);
 
-  const handleBulkMove = useCallback((slot: Slot) => {
+  const handleBulkMove = useCallback((shotType: OutputShotType) => {
     if (selectedIds.size === 0 || isLocked) return;
-    movePosesToSlot(Array.from(selectedIds), slot);
-  }, [selectedIds, isLocked, movePosesToSlot]);
+    movePosesToShotType(Array.from(selectedIds), shotType);
+  }, [selectedIds, isLocked, movePosesToShotType]);
 
   const handleBulkDelete = useCallback(() => {
     if (selectedIds.size === 0 || isLocked) return;
@@ -144,11 +144,11 @@ export function ClayPoseLibraryReview() {
     setInspectedPose((prev) => prev ? { ...prev, curation_status: status } : null);
   }, [inspectedPose, isLocked, updatePoseStatus]);
 
-  const handleInspectorMoveSlot = useCallback((slot: Slot) => {
+  const handleInspectorMoveShotType = useCallback((shotType: OutputShotType) => {
     if (!inspectedPose || isLocked) return;
-    movePosesToSlot([inspectedPose.id], slot);
-    setInspectedPose((prev) => prev ? { ...prev, slot } : null);
-  }, [inspectedPose, isLocked, movePosesToSlot]);
+    movePosesToShotType([inspectedPose.id], shotType);
+    setInspectedPose((prev) => prev ? { ...prev, shotType } : null);
+  }, [inspectedPose, isLocked, movePosesToShotType]);
 
   // Library actions
   const handleCreateVersion = useCallback(async () => {
@@ -170,10 +170,10 @@ export function ClayPoseLibraryReview() {
   useKeyboardShortcuts({
     onInclude: handleBulkInclude,
     onExclude: handleBulkExclude,
-    onMoveToSlotA: () => handleBulkMove("A"),
-    onMoveToSlotB: () => handleBulkMove("B"),
-    onMoveToSlotC: () => handleBulkMove("C"),
-    onMoveToSlotD: () => handleBulkMove("D"),
+    onMoveToSlotA: () => handleBulkMove("FRONT_FULL"),
+    onMoveToSlotB: () => handleBulkMove("FRONT_CROPPED"),
+    onMoveToSlotC: () => handleBulkMove("BACK_FULL"),
+    onMoveToSlotD: () => handleBulkMove("DETAIL"),
     onClearSelection: clearSelection,
     onSelectAll: selectAllVisible,
     enabled: !isLocked && selectedIds.size > 0,
@@ -285,7 +285,7 @@ export function ClayPoseLibraryReview() {
           pose={inspectedPose}
           onClose={() => setInspectedPose(null)}
           onUpdateStatus={handleInspectorUpdateStatus}
-          onMoveToSlot={handleInspectorMoveSlot}
+          onMoveToShotType={handleInspectorMoveShotType}
           isLocked={isLocked}
         />
 

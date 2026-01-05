@@ -1,4 +1,4 @@
-import { LibraryPose, CurationStatus, Slot } from "@/hooks/useLibraryPoses";
+import { LibraryPose, CurationStatus, OutputShotType, ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS } from "@/hooks/useLibraryPoses";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -9,17 +9,23 @@ interface PoseInspectorProps {
   pose: LibraryPose | null;
   onClose: () => void;
   onUpdateStatus: (status: CurationStatus) => void;
-  onMoveToSlot: (slot: Slot) => void;
+  onMoveToShotType: (shotType: OutputShotType) => void;
   isLocked: boolean;
 }
 
-const SLOTS: Slot[] = ["A", "B", "C", "D"];
+// Short labels for buttons
+const SHORT_LABELS: Record<OutputShotType, string> = {
+  FRONT_FULL: 'Front',
+  FRONT_CROPPED: 'Crop',
+  DETAIL: 'Detail',
+  BACK_FULL: 'Back',
+};
 
 export function PoseInspector({
   pose,
   onClose,
   onUpdateStatus,
-  onMoveToSlot,
+  onMoveToShotType,
   isLocked,
 }: PoseInspectorProps) {
   if (!pose) {
@@ -54,8 +60,10 @@ export function PoseInspector({
       {/* Metadata */}
       <div className="px-3 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Slot</span>
-          <Badge variant="secondary">{pose.slot}</Badge>
+          <span className="text-sm text-muted-foreground">Shot Type</span>
+          <Badge variant="secondary" title={OUTPUT_SHOT_LABELS[pose.shotType]}>
+            {SHORT_LABELS[pose.shotType]}
+          </Badge>
         </div>
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">Gender</span>
@@ -111,18 +119,19 @@ export function PoseInspector({
           </div>
 
           <div>
-            <p className="text-sm font-medium mb-2">Move to Slot</p>
+            <p className="text-sm font-medium mb-2">Move to Shot Type</p>
             <div className="flex gap-1">
-              {SLOTS.map((slot) => (
+              {ALL_OUTPUT_SHOT_TYPES.map((shotType) => (
                 <Button
-                  key={slot}
+                  key={shotType}
                   size="sm"
-                  variant={pose.slot === slot ? "default" : "outline"}
-                  className="flex-1"
-                  onClick={() => onMoveToSlot(slot)}
-                  disabled={pose.slot === slot}
+                  variant={pose.shotType === shotType ? "default" : "outline"}
+                  className="flex-1 text-xs"
+                  onClick={() => onMoveToShotType(shotType)}
+                  disabled={pose.shotType === shotType}
+                  title={OUTPUT_SHOT_LABELS[shotType]}
                 >
-                  {slot}
+                  {SHORT_LABELS[shotType]}
                 </Button>
               ))}
             </div>

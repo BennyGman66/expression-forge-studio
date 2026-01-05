@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { CurationStatus, Slot } from "@/hooks/useLibraryPoses";
+import { CurationStatus, OutputShotType, ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS } from "@/hooks/useLibraryPoses";
 import { CheckCircle2, XCircle, Move, Trash2, X, RotateCcw } from "lucide-react";
 
 interface BulkActionBarProps {
@@ -9,12 +9,10 @@ interface BulkActionBarProps {
   onClearSelection: () => void;
   onBulkInclude: () => void;
   onBulkExclude: () => void;
-  onBulkMove: (slot: Slot) => void;
+  onBulkMove: (shotType: OutputShotType) => void;
   onBulkDelete: () => void;
   isLocked: boolean;
 }
-
-const SLOTS: Slot[] = ["A", "B", "C", "D"];
 
 export function BulkActionBar({
   selectedCount,
@@ -26,6 +24,14 @@ export function BulkActionBar({
   isLocked,
 }: BulkActionBarProps) {
   if (selectedCount === 0) return null;
+
+  // Short labels for buttons
+  const SHORT_LABELS: Record<OutputShotType, string> = {
+    FRONT_FULL: 'Front',
+    FRONT_CROPPED: 'Crop',
+    DETAIL: 'Detail',
+    BACK_FULL: 'Back',
+  };
 
   return (
     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
@@ -57,15 +63,16 @@ export function BulkActionBar({
 
             <div className="flex items-center gap-1">
               <span className="text-xs text-muted-foreground mr-1">Move:</span>
-              {SLOTS.map((slot) => (
+              {ALL_OUTPUT_SHOT_TYPES.map((shotType) => (
                 <Button
-                  key={slot}
+                  key={shotType}
                   size="sm"
                   variant="outline"
                   className="px-2"
-                  onClick={() => onBulkMove(slot)}
+                  onClick={() => onBulkMove(shotType)}
+                  title={OUTPUT_SHOT_LABELS[shotType]}
                 >
-                  {slot}
+                  {SHORT_LABELS[shotType]}
                 </Button>
               ))}
             </div>
