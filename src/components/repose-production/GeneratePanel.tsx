@@ -102,7 +102,13 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
   const handleModelChange = (model: string) => {
     if (!batchId) return;
     const newConfig = { ...config, model };
-    updateConfig.mutate({ batchId, config: newConfig });
+    updateConfig.mutate({ batchId, config: newConfig }, {
+      onSuccess: () => {
+        const modelLabel = REPOSE_MODEL_OPTIONS.find(o => o.value === model)?.label;
+        toast.success(`Model changed to ${modelLabel}`);
+        refetchBatch();
+      }
+    });
   };
 
   const handleStartGeneration = async () => {
@@ -335,7 +341,16 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
 
   const handleStopGeneration = () => {
     shouldStopRef.current = true;
-    toast.info("Stopping generation after current task...");
+    // Immediately update batch status
+    if (batchId) {
+      updateStatus.mutate({ batchId, status: 'DRAFT' });
+    }
+    // Update pipeline job status if we have one
+    if (pipelineJobIdRef.current) {
+      setStatus(pipelineJobIdRef.current, 'PAUSED');
+    }
+    setIsGenerating(false);
+    toast.info("Generation stopped");
   };
 
   if (batchLoading) {
