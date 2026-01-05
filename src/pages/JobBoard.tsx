@@ -22,11 +22,12 @@ import {
 import { useJobs } from "@/hooks/useJobs";
 import { useJobsReviewProgress } from "@/hooks/useReviewSystem";
 import { JobStatus, JobType } from "@/types/jobs";
-import { ArrowLeft, Plus, Search, Clock, User, Briefcase, Eye, MessageSquare, CheckCircle, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Plus, Search, Briefcase, Eye, CheckCircle, AlertTriangle } from "lucide-react";
 import { format } from "date-fns";
 import { JobDetailPanel } from "@/components/jobs/JobDetailPanel";
 import { CreateJobDialog } from "@/components/jobs/CreateJobDialog";
 import { JobReviewPanel } from "@/components/review";
+import { cn } from "@/lib/utils";
 
 const statusColors: Record<JobStatus, string> = {
   OPEN: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -49,9 +50,9 @@ const statusLabels: Record<JobStatus, string> = {
 };
 
 const typeLabels: Record<JobType, string> = {
-  PHOTOSHOP_FACE_APPLY: "Photoshop Face Apply",
+  PHOTOSHOP_FACE_APPLY: "Photoshop Apply",
   RETOUCH_FINAL: "Final Retouch",
-  FOUNDATION_FACE_REPLACE: "Foundation Face Replace",
+  FOUNDATION_FACE_REPLACE: "Face Replace",
 };
 
 // Statuses that can have a review panel opened
@@ -174,14 +175,14 @@ export default function JobBoard() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-32">Job ID</TableHead>
+                <TableHead className="w-24">Job ID</TableHead>
                 <TableHead>Title</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Assignee</TableHead>
-                <TableHead>Due Date</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="w-24"></TableHead>
+                <TableHead className="w-28">Type</TableHead>
+                <TableHead className="w-48">Status</TableHead>
+                <TableHead className="w-32">Assignee</TableHead>
+                <TableHead className="w-20">Due</TableHead>
+                <TableHead className="w-20">Created</TableHead>
+                <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -213,74 +214,57 @@ export default function JobBoard() {
                       onClick={() => setSelectedJobId(job.id)}
                     >
                       <TableCell className="font-mono text-xs">
-                        {job.id.slice(0, 8)}...
+                        {job.id.slice(0, 8)}
+                      </TableCell>
+                      <TableCell className="font-medium truncate max-w-[200px]">
+                        {job.title || "Untitled Job"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {typeLabels[job.type]}
                       </TableCell>
                       <TableCell>
-                        <span className="text-sm font-medium">
-                          {job.title || "Untitled Job"}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm text-muted-foreground">{typeLabels[job.type]}</span>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
                           <Badge
                             variant="outline"
-                            className={statusColors[job.status]}
+                            className={cn(statusColors[job.status], "text-[10px] px-1.5 py-0")}
                           >
                             {statusLabels[job.status]}
                           </Badge>
-                          {/* Review Progress Indicator */}
                           {reviewProgress?.[job.id] && (
-                            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1 text-[10px]">
                               {reviewProgress[job.id].approved > 0 && (
-                                <span className="flex items-center gap-0.5 text-green-500">
-                                  <CheckCircle className="h-3 w-3" />
+                                <span className="flex items-center text-green-500">
+                                  <CheckCircle className="h-2.5 w-2.5 mr-0.5" />
                                   {reviewProgress[job.id].approved}
                                 </span>
                               )}
                               {reviewProgress[job.id].changesRequested > 0 && (
-                                <span className="flex items-center gap-0.5 text-orange-500">
-                                  <AlertTriangle className="h-3 w-3" />
+                                <span className="flex items-center text-orange-500">
+                                  <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
                                   {reviewProgress[job.id].changesRequested}
                                 </span>
                               )}
                               {reviewProgress[job.id].pending > 0 && job.status !== "APPROVED" && (
                                 <span className="text-muted-foreground/60">
-                                  {reviewProgress[job.id].pending} pending
+                                  +{reviewProgress[job.id].pending}
                                 </span>
                               )}
                             </span>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-xs truncate max-w-[120px]">
                         {job.assigned_user ? (
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm">
-                              {job.assigned_user.display_name || job.assigned_user.email}
-                            </span>
-                          </div>
+                          job.assigned_user.display_name || job.assigned_user.email?.split('@')[0]
                         ) : (
-                          <span className="text-muted-foreground text-sm">Unassigned</span>
+                          <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        {job.due_date ? (
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm">
-                              {format(new Date(job.due_date), "MMM d, yyyy")}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">—</span>
-                        )}
+                      <TableCell className="text-xs text-muted-foreground">
+                        {job.due_date ? format(new Date(job.due_date), "M/d") : "—"}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {format(new Date(job.created_at), "MMM d, yyyy")}
+                      <TableCell className="text-xs text-muted-foreground">
+                        {format(new Date(job.created_at), "M/d")}
                       </TableCell>
                       <TableCell>
                         {canReview && (
