@@ -494,7 +494,6 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                 setSelectedAnnotationId(null);
               }}
               annotationCounts={annotationCounts}
-              submissionCreatedAt={selectedSubmission?.submitted_at}
             />
           </div>
 

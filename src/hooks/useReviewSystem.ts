@@ -184,10 +184,12 @@ export function useSubmissionAssets(submissionId: string | null) {
     queryKey: ['submission-assets', submissionId],
     queryFn: async () => {
       if (!submissionId) return [];
+      // Only fetch current (non-superseded) assets
       const { data, error } = await supabase
         .from('submission_assets')
         .select('*, review_status, reviewed_by_user_id, reviewed_at')
         .eq('submission_id', submissionId)
+        .is('superseded_by', null) // Asset-centric: only show current versions
         .order('sort_index');
       
       if (error) throw error;
@@ -604,6 +606,7 @@ export function useCreateNotification() {
 }
 
 // ============ RESUBMISSION WITH REPLACEMENTS ============
+// New asset-centric model: replaces assets in-place using superseded_by
 
 export function useCreateResubmission() {
   const queryClient = useQueryClient();
@@ -618,75 +621,54 @@ export function useCreateResubmission() {
       previousSubmissionId: string;
       replacements: Map<string, string>; // assetId -> new file URL
     }) => {
-      // Get current max version
-      const { data: existing } = await supabase
-        .from('job_submissions')
-        .select('version_number')
-        .eq('job_id', jobId)
-        .order('version_number', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      
-      const nextVersion = (existing?.version_number || 0) + 1;
-      
-      // Get current user
       const { data: { user } } = await supabase.auth.getUser();
       
-      // Get previous submission's assets
-      const { data: prevAssets, error: fetchError } = await supabase
-        .from('submission_assets')
-        .select('*')
-        .eq('submission_id', previousSubmissionId)
-        .order('sort_index');
-      
-      if (fetchError) throw fetchError;
-      
-      // Create new submission
-      const { data: submission, error: subError } = await supabase
-        .from('job_submissions')
-        .insert({
-          job_id: jobId,
-          submitted_by_user_id: user?.id,
-          version_number: nextVersion,
-          summary_note: `Resubmission (v${nextVersion}) with updated assets`,
-          status: 'SUBMITTED' as SubmissionStatus,
-        })
-        .select()
-        .single();
-      
-      if (subError) throw subError;
-      
-      // Create new assets - use replacement URLs where provided, otherwise copy from previous
-      // Carry over APPROVED status for unchanged assets
-      // Convert Map keys to strings for safe comparison
-      const replacementKeys = new Set(Array.from(replacements.keys()).map(k => String(k)));
-      
-      const newAssets = (prevAssets || []).map((asset, index) => {
-        const assetIdStr = String(asset.id);
-        const wasReplaced = replacementKeys.has(assetIdStr);
-        const wasApproved = asset.review_status === 'APPROVED';
-        
-        console.log(`[Resubmission] Asset ${asset.label}: replaced=${wasReplaced}, wasApproved=${wasApproved}`);
-        
-        return {
-          submission_id: submission.id,
-          file_url: replacements.get(asset.id) || asset.file_url,
-          label: asset.label,
-          sort_index: index,
-          // Keep APPROVED status if asset wasn't replaced and was previously approved
-          review_status: (!wasReplaced && wasApproved) ? 'APPROVED' as const : null,
-          reviewed_by_user_id: (!wasReplaced && wasApproved) ? asset.reviewed_by_user_id : null,
-          reviewed_at: (!wasReplaced && wasApproved) ? asset.reviewed_at : null,
-        };
-      });
-      
-      if (newAssets.length > 0) {
-        const { error: assetError } = await supabase
+      // For each replacement, create a new asset and mark the old one as superseded
+      for (const [oldAssetId, newFileUrl] of replacements) {
+        // Get the old asset details
+        const { data: oldAsset, error: fetchError } = await supabase
           .from('submission_assets')
-          .insert(newAssets);
+          .select('*')
+          .eq('id', oldAssetId)
+          .single();
         
-        if (assetError) throw assetError;
+        if (fetchError) throw fetchError;
+        
+        // Create new asset with incremented revision number
+        const { data: newAsset, error: insertError } = await supabase
+          .from('submission_assets')
+          .insert({
+            submission_id: previousSubmissionId, // Same submission - asset-centric, not version-centric
+            file_url: newFileUrl,
+            label: oldAsset.label,
+            sort_index: oldAsset.sort_index,
+            revision_number: (oldAsset.revision_number || 1) + 1,
+            review_status: null, // New asset needs review
+            reviewed_by_user_id: null,
+            reviewed_at: null,
+          })
+          .select()
+          .single();
+        
+        if (insertError) throw insertError;
+        
+        // Mark old asset as superseded
+        const { error: updateError } = await supabase
+          .from('submission_assets')
+          .update({ superseded_by: newAsset.id })
+          .eq('id', oldAssetId);
+        
+        if (updateError) throw updateError;
       }
+      
+      // Update submission status back to SUBMITTED
+      await supabase
+        .from('job_submissions')
+        .update({ 
+          status: 'SUBMITTED' as SubmissionStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', previousSubmissionId);
       
       // Update job status to SUBMITTED
       await supabase
@@ -694,13 +676,15 @@ export function useCreateResubmission() {
         .update({ status: 'SUBMITTED' })
         .eq('id', jobId);
       
-      return submission;
+      return { id: previousSubmissionId };
     },
-    onSuccess: (_, { jobId }) => {
+    onSuccess: (_, { jobId, previousSubmissionId }) => {
       queryClient.invalidateQueries({ queryKey: ['job-submissions', jobId] });
       queryClient.invalidateQueries({ queryKey: ['latest-submission', jobId] });
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
-      queryClient.invalidateQueries({ queryKey: ['job', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['submission-assets', previousSubmissionId] });
+      queryClient.invalidateQueries({ queryKey: ['unified-jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['unified-job', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['jobs-review-progress'] });
     },
   });
 }

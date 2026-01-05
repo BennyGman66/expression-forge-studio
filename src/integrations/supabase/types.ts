@@ -2723,8 +2723,10 @@ export type Database = {
           review_status: string | null
           reviewed_at: string | null
           reviewed_by_user_id: string | null
+          revision_number: number | null
           sort_index: number
           submission_id: string
+          superseded_by: string | null
         }
         Insert: {
           created_at?: string
@@ -2735,8 +2737,10 @@ export type Database = {
           review_status?: string | null
           reviewed_at?: string | null
           reviewed_by_user_id?: string | null
+          revision_number?: number | null
           sort_index?: number
           submission_id: string
+          superseded_by?: string | null
         }
         Update: {
           created_at?: string
@@ -2747,8 +2751,10 @@ export type Database = {
           review_status?: string | null
           reviewed_at?: string | null
           reviewed_by_user_id?: string | null
+          revision_number?: number | null
           sort_index?: number
           submission_id?: string
+          superseded_by?: string | null
         }
         Relationships: [
           {
@@ -2770,6 +2776,13 @@ export type Database = {
             columns: ["submission_id"]
             isOneToOne: false
             referencedRelation: "job_submissions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "submission_assets_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "submission_assets"
             referencedColumns: ["id"]
           },
         ]
