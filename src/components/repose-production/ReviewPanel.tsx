@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ClipboardList, Star, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { ClipboardList, Star, RefreshCw, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useReposeBatch, useReposeBatchItems, useReposeOutputs } from "@/hooks/useReposeBatches";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { cn } from "@/lib/utils";
@@ -12,12 +13,35 @@ interface ReviewPanelProps {
   batchId: string | undefined;
 }
 
+interface LightboxImage {
+  id: string;
+  url: string;
+  slot: string;
+  itemView: string;
+}
+
 export function ReviewPanel({ batchId }: ReviewPanelProps) {
   const { data: batch, isLoading: batchLoading } = useReposeBatch(batchId);
   const { data: batchItems } = useReposeBatchItems(batchId);
   const { data: outputs } = useReposeOutputs(batchId);
 
   const [selectedOutputs, setSelectedOutputs] = useState<Set<string>>(new Set());
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Build flat list of all completed images for the lightbox
+  const allCompletedImages: LightboxImage[] = [];
+  outputs?.forEach((output) => {
+    if (output.status === 'complete' && output.result_url) {
+      const item = batchItems?.find(i => i.id === output.batch_item_id);
+      allCompletedImages.push({
+        id: output.id,
+        url: output.result_url,
+        slot: output.slot || 'unknown',
+        itemView: item?.view || 'Unknown View',
+      });
+    }
+  });
 
   // Group outputs by batch_item_id, then by slot
   const groupedOutputs = outputs?.reduce((acc, output) => {
@@ -39,6 +63,40 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
     setSelectedOutputs(newSelected);
   };
 
+  const openLightbox = (outputId: string) => {
+    const index = allCompletedImages.findIndex(img => img.id === outputId);
+    if (index !== -1) {
+      setLightboxIndex(index);
+      setLightboxOpen(true);
+    }
+  };
+
+  const handlePrevious = useCallback(() => {
+    setLightboxIndex(prev => (prev > 0 ? prev - 1 : allCompletedImages.length - 1));
+  }, [allCompletedImages.length]);
+
+  const handleNext = useCallback(() => {
+    setLightboxIndex(prev => (prev < allCompletedImages.length - 1 ? prev + 1 : 0));
+  }, [allCompletedImages.length]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') handlePrevious();
+      else if (e.key === 'ArrowRight') handleNext();
+      else if (e.key === 'Escape') setLightboxOpen(false);
+      else if (e.key === ' ') {
+        e.preventDefault();
+        const currentImg = allCompletedImages[lightboxIndex];
+        if (currentImg) toggleSelection(currentImg.id);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxOpen, lightboxIndex, handlePrevious, handleNext, allCompletedImages]);
+
+  const currentLightboxImage = allCompletedImages[lightboxIndex];
   const completedCount = outputs?.filter(o => o.status === 'complete').length || 0;
   const failedCount = outputs?.filter(o => o.status === 'failed').length || 0;
 
@@ -50,7 +108,7 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
     );
   }
 
-  if (!batch || (batch.status !== 'RUNNING' && batch.status !== 'COMPLETE')) {
+  if (!outputs?.length) {
     return (
       <div className="text-center py-12 text-muted-foreground">
         <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -61,6 +119,89 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
 
   return (
     <div className="space-y-6">
+      {/* Lightbox Dialog */}
+      <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+        <DialogContent className="max-w-5xl h-[90vh] p-0 bg-black/95 border-none">
+          <div className="relative h-full flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 text-white">
+              <div className="flex items-center gap-3">
+                <Badge variant="outline" className="border-white/30 text-white">
+                  {currentLightboxImage?.slot ? `Slot ${currentLightboxImage.slot}` : ''}
+                </Badge>
+                <span className="text-sm text-white/70">{currentLightboxImage?.itemView}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-white/70">
+                  {lightboxIndex + 1} / {allCompletedImages.length}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-white hover:bg-white/10"
+                  onClick={() => setLightboxOpen(false)}
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Main image area */}
+            <div className="flex-1 flex items-center justify-center relative px-16">
+              {/* Previous button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute left-4 text-white hover:bg-white/10 w-12 h-12"
+                onClick={handlePrevious}
+              >
+                <ChevronLeft className="w-8 h-8" />
+              </Button>
+
+              {/* Image */}
+              {currentLightboxImage && (
+                <img
+                  src={currentLightboxImage.url}
+                  alt={`Output ${lightboxIndex + 1}`}
+                  className="max-h-full max-w-full object-contain"
+                />
+              )}
+
+              {/* Next button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute right-4 text-white hover:bg-white/10 w-12 h-12"
+                onClick={handleNext}
+              >
+                <ChevronRight className="w-8 h-8" />
+              </Button>
+            </div>
+
+            {/* Footer with selection */}
+            <div className="p-4 flex items-center justify-center gap-4">
+              <Button
+                variant={currentLightboxImage && selectedOutputs.has(currentLightboxImage.id) ? "default" : "outline"}
+                onClick={() => currentLightboxImage && toggleSelection(currentLightboxImage.id)}
+                className={cn(
+                  "gap-2",
+                  currentLightboxImage && selectedOutputs.has(currentLightboxImage.id)
+                    ? "bg-primary text-primary-foreground"
+                    : "border-white/30 text-white hover:bg-white/10"
+                )}
+              >
+                <Star className={cn(
+                  "w-4 h-4",
+                  currentLightboxImage && selectedOutputs.has(currentLightboxImage.id) && "fill-current"
+                )} />
+                {currentLightboxImage && selectedOutputs.has(currentLightboxImage.id) ? 'Selected' : 'Select'}
+              </Button>
+              <span className="text-xs text-white/50">Press Space to toggle selection</span>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Summary Bar */}
       <Card>
         <CardContent className="pt-6">
@@ -143,9 +284,13 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
                         {itemOutputs[slot]?.map((output) => (
                           <div
                             key={output.id}
-                            onClick={() => output.status === 'complete' && toggleSelection(output.id)}
+                            onClick={() => {
+                              if (output.status === 'complete' && output.result_url) {
+                                openLightbox(output.id);
+                              }
+                            }}
                             className={cn(
-                              "relative w-20 h-20 rounded-lg overflow-hidden cursor-pointer border-2 transition-all",
+                              "relative w-20 h-20 rounded-lg overflow-hidden cursor-pointer border-2 transition-all hover:scale-105",
                               output.status === 'complete' && selectedOutputs.has(output.id)
                                 ? "border-primary ring-2 ring-primary/20"
                                 : "border-transparent",
