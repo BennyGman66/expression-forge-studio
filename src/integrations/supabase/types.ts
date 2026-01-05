@@ -3135,6 +3135,7 @@ export type Database = {
         | "CROP_GENERATION"
         | "ORGANIZE_IMAGES"
         | "OTHER"
+        | "REPOSE_GENERATION"
       submission_status:
         | "SUBMITTED"
         | "IN_REVIEW"
@@ -3325,6 +3326,7 @@ export const Constants = {
         "CROP_GENERATION",
         "ORGANIZE_IMAGES",
         "OTHER",
+        "REPOSE_GENERATION",
       ],
       submission_status: [
         "SUBMITTED",
