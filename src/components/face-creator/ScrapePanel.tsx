@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, Play, RefreshCw, Trash2, CheckCircle, XCircle, Clock, ImageIcon, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { usePipelineJobs } from "@/hooks/usePipelineJobs";
 import type { FaceScrapeRun, FaceScrapeImage, FaceJob } from "@/types/face-creator";
 
 interface ScrapePanelProps {
@@ -19,6 +20,7 @@ interface ScrapePanelProps {
 
 export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
   const { toast } = useToast();
+  const { createJob, updateProgress, setStatus } = usePipelineJobs();
   const [runs, setRuns] = useState<FaceScrapeRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [startUrl, setStartUrl] = useState("");
@@ -35,24 +37,51 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
   // AVA Organise state
   const [organizeJob, setOrganizeJob] = useState<FaceJob | null>(null);
   const [isOrganizing, setIsOrganizing] = useState(false);
+  
+  // Pipeline job tracking
+  const pipelineJobIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     fetchRuns();
 
-    // Subscribe to realtime updates
+    // Subscribe to realtime updates for face_scrape_runs
     const channel = supabase
       .channel('face-scrape-runs')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'face_scrape_runs' },
-        () => fetchRuns()
+        async (payload) => {
+          fetchRuns();
+          
+          // Sync progress to pipeline_jobs if we have a tracked job
+          if (payload.eventType === 'UPDATE' && pipelineJobIdRef.current) {
+            const run = payload.new as FaceScrapeRun;
+            
+            // Update pipeline job progress
+            if (run.progress !== null && run.total !== null) {
+              await updateProgress(pipelineJobIdRef.current, {
+                done: run.progress,
+                message: `Scraping ${run.brand_name}: ${run.progress}/${run.total} products`,
+              });
+            }
+            
+            // Update pipeline job status on completion/failure
+            if (run.status === 'completed') {
+              await setStatus(pipelineJobIdRef.current, 'COMPLETED');
+              pipelineJobIdRef.current = null;
+            } else if (run.status === 'failed') {
+              await setStatus(pipelineJobIdRef.current, 'FAILED');
+              pipelineJobIdRef.current = null;
+            }
+          }
+        }
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [updateProgress, setStatus]);
 
   // Fetch images when a run is selected and clear selection
   useEffect(() => {
@@ -299,16 +328,38 @@ export function ScrapePanel({ selectedRunId, onSelectRun }: ScrapePanelProps) {
 
     setLoading(true);
     try {
+      const resolvedBrandName = brandName || new URL(startUrl).hostname.replace('www.', '');
+      const resolvedMaxProducts = parseInt(maxProducts) || 200;
+      const resolvedImagesPerProduct = parseInt(imagesPerProduct) || 4;
+      
       const { data, error } = await supabase.functions.invoke('scrape-faces', {
         body: {
           startUrl,
-          brandName: brandName || new URL(startUrl).hostname.replace('www.', ''),
-          maxProducts: parseInt(maxProducts) || 200,
-          imagesPerProduct: parseInt(imagesPerProduct) || 4,
+          brandName: resolvedBrandName,
+          maxProducts: resolvedMaxProducts,
+          imagesPerProduct: resolvedImagesPerProduct,
         },
       });
 
       if (error) throw error;
+
+      // Create a pipeline job to track in the global tracker
+      const estimatedTotal = resolvedMaxProducts * resolvedImagesPerProduct;
+      const pipelineJobId = await createJob({
+        type: 'FACE_SCRAPE',
+        title: `Face Scrape: ${resolvedBrandName}`,
+        total: estimatedTotal,
+        origin_route: '/face-creator',
+        origin_context: { 
+          scrape_run_id: data?.runId,
+          brand_name: resolvedBrandName,
+          start_url: startUrl,
+        },
+        source_table: 'face_scrape_runs',
+        source_job_id: data?.runId,
+      });
+      
+      pipelineJobIdRef.current = pipelineJobId;
 
       toast({ title: "Success", description: "Scrape job started" });
       setStartUrl("");

@@ -1,6 +1,7 @@
 export type PipelineJobType =
   | 'SCRAPE_BRAND'
   | 'SCRAPE_FACES'
+  | 'FACE_SCRAPE'
   | 'CLAY_GENERATION'
   | 'POSE_GENERATION'
   | 'FACE_GENERATION'
@@ -73,6 +74,7 @@ export interface UpdateProgressParams {
 export const JOB_TYPE_CONFIG: Record<PipelineJobType, { label: string; color: string }> = {
   SCRAPE_BRAND: { label: 'Scrape', color: 'bg-blue-500' },
   SCRAPE_FACES: { label: 'Faces', color: 'bg-cyan-500' },
+  FACE_SCRAPE: { label: 'Face Scrape', color: 'bg-teal-500' },
   CLAY_GENERATION: { label: 'Clay', color: 'bg-amber-500' },
   POSE_GENERATION: { label: 'Pose', color: 'bg-purple-500' },
   FACE_GENERATION: { label: 'Face', color: 'bg-pink-500' },
