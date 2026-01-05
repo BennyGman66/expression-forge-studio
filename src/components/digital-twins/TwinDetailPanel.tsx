@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Pencil, Trash2, Check, X, User, Image } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Pencil, Trash2, Check, X, User, Image, Star, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -18,6 +19,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { SavedPairingsSection } from "./SavedPairingsSection";
+import { usePairingTemplates } from "@/hooks/usePairingTemplates";
 
 interface TwinDetailPanelProps {
   twin: DigitalTwinWithBrand;
@@ -30,6 +33,8 @@ export function TwinDetailPanel({ twin, onUpdate, onDelete }: TwinDetailPanelPro
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(twin.name);
+  const [pairingsOpen, setPairingsOpen] = useState(true);
+  const { templates } = usePairingTemplates(twin.id);
 
   useEffect(() => {
     fetchImages();
@@ -159,6 +164,25 @@ export function TwinDetailPanel({ twin, onUpdate, onDelete }: TwinDetailPanelPro
             <span>{twin.usage_count} uses</span>
           )}
         </div>
+      </div>
+
+      {/* Saved Pairings Section */}
+      <div className="px-4 py-3 border-b">
+        <Collapsible open={pairingsOpen} onOpenChange={setPairingsOpen}>
+          <CollapsibleTrigger className="flex items-center justify-between w-full text-sm font-medium">
+            <div className="flex items-center gap-2">
+              <Star className="h-4 w-4 text-amber-500" />
+              Saved Pairings
+              {templates.length > 0 && (
+                <Badge variant="secondary" className="text-xs">{templates.length}</Badge>
+              )}
+            </div>
+            <ChevronDown className={`h-4 w-4 transition-transform ${pairingsOpen ? 'rotate-180' : ''}`} />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-3">
+            <SavedPairingsSection digitalTalentId={twin.id} />
+          </CollapsibleContent>
+        </Collapsible>
       </div>
 
       {/* Images Grid */}
