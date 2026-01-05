@@ -21,11 +21,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useJobs } from "@/hooks/useJobs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useJobs, useDeleteJob } from "@/hooks/useJobs";
 import { useJobsReviewProgress } from "@/hooks/useReviewSystem";
 import { useProductionProjects } from "@/hooks/useProductionProjects";
 import { JobStatus, JobType } from "@/types/jobs";
-import { ArrowLeft, Plus, Search, Briefcase, Eye, CheckCircle, AlertTriangle, FolderOpen } from "lucide-react";
+import { ArrowLeft, Plus, Search, Briefcase, Eye, CheckCircle, AlertTriangle, FolderOpen, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { JobDetailPanel } from "@/components/jobs/JobDetailPanel";
 import { CreateJobDialog } from "@/components/jobs/CreateJobDialog";
@@ -67,10 +77,12 @@ export default function JobBoard() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [reviewJobId, setReviewJobId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [jobToDelete, setJobToDelete] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<JobStatus | "all">("all");
   const [typeFilter, setTypeFilter] = useState<JobType | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [groupByProject, setGroupByProject] = useState(true);
+  const deleteJob = useDeleteJob();
 
   const { data: jobs, isLoading: jobsLoading } = useJobs({
     status: statusFilter !== "all" ? statusFilter : undefined,
@@ -263,7 +275,7 @@ export default function JobBoard() {
                   <TableHead className="w-32">Assignee</TableHead>
                   <TableHead className="w-20">Due</TableHead>
                   <TableHead className="w-20">Created</TableHead>
-                  <TableHead className="w-20"></TableHead>
+                  <TableHead className="w-28"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -348,29 +360,42 @@ export default function JobBoard() {
                           {format(new Date(job.created_at), "M/d")}
                         </TableCell>
                         <TableCell>
-                          {canReview && (
+                          <div className="flex items-center gap-1">
+                            {canReview && (
+                              <Button
+                                variant={needsReview ? "default" : "outline"}
+                                size="sm"
+                                className="gap-1"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setReviewJobId(job.id);
+                                }}
+                              >
+                                {wasReviewed ? (
+                                  <>
+                                    <CheckCircle className="h-3 w-3" />
+                                    View
+                                  </>
+                                ) : (
+                                  <>
+                                    <Eye className="h-3 w-3" />
+                                    Review
+                                  </>
+                                )}
+                              </Button>
+                            )}
                             <Button
-                              variant={needsReview ? "default" : "outline"}
-                              size="sm"
-                              className="gap-1"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setReviewJobId(job.id);
+                                setJobToDelete(job.id);
                               }}
                             >
-                              {wasReviewed ? (
-                                <>
-                                  <CheckCircle className="h-3 w-3" />
-                                  View
-                                </>
-                              ) : (
-                                <>
-                                  <Eye className="h-3 w-3" />
-                                  Review
-                                </>
-                              )}
+                              <Trash2 className="h-4 w-4" />
                             </Button>
-                          )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -402,6 +427,32 @@ export default function JobBoard() {
           onClose={() => setReviewJobId(null)}
         />
       )}
+
+      {/* Delete Job Confirmation Dialog */}
+      <AlertDialog open={!!jobToDelete} onOpenChange={(open) => !open && setJobToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Job</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this job and all associated outputs, notes, and submissions. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (jobToDelete) {
+                  await deleteJob.mutateAsync(jobToDelete);
+                  setJobToDelete(null);
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -57,6 +57,9 @@ export function useFaceApplicationProjects() {
   }, [fetchProjects]);
 
   const createProject = async (name: string, description?: string) => {
+    // Get user first for production_project
+    const { data: { user } } = await supabase.auth.getUser();
+
     // Create face_application_projects entry
     const { data, error } = await supabase
       .from("face_application_projects")
@@ -69,11 +72,11 @@ export function useFaceApplicationProjects() {
       return null;
     }
 
-    // Also create a production_project for job tracking/repose workflow
-    const { data: { user } } = await supabase.auth.getUser();
+    // Create production_project with THE SAME ID for consistent job grouping
     await supabase
       .from("production_projects")
       .insert({ 
+        id: data.id, // Use the same ID!
         name, 
         created_by_user_id: user?.id || null,
         status: 'ACTIVE'
