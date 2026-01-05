@@ -113,24 +113,34 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
         .eq('batch_id', batchId);
 
       if (!existingOutputs?.length) {
-        // Step 2: Fetch clay poses for the brand (direct from clay_images via product_images)
-        const { data: clayPoses, error: posesError } = await supabase
-          .from('clay_images')
+        // Step 2: Fetch clay poses for the brand via product_images join
+        console.log('Fetching clay poses for brand:', batch.brand_id);
+        const { data: productImages, error: posesError } = await supabase
+          .from('product_images')
           .select(`
             id,
-            stored_url,
-            product_images!inner(slot, products!inner(brand_id))
+            slot,
+            products!inner(brand_id),
+            clay_images(id, stored_url)
           `)
-          .eq('product_images.products.brand_id', batch.brand_id);
+          .eq('products.brand_id', batch.brand_id);
 
-        if (posesError) throw posesError;
+        if (posesError) {
+          console.error('Error fetching poses:', posesError);
+          throw posesError;
+        }
 
-        // Group poses by slot
+        // Flatten and group poses by slot
         const posesBySlot: Record<string, Array<{ id: string; url: string }>> = { A: [], B: [], C: [], D: [] };
-        clayPoses?.forEach((pose: { id: string; stored_url: string; product_images: { slot: string } }) => {
-          const slot = pose.product_images?.slot;
-          if (slot && posesBySlot[slot]) {
-            posesBySlot[slot].push({ id: pose.id, url: pose.stored_url });
+        productImages?.forEach((pi) => {
+          const slot = pi.slot;
+          if (slot && posesBySlot[slot] && pi.clay_images) {
+            const clayImages = Array.isArray(pi.clay_images) ? pi.clay_images : [pi.clay_images];
+            clayImages.forEach((ci: { id: string; stored_url: string }) => {
+              if (ci?.id && ci?.stored_url) {
+                posesBySlot[slot].push({ id: ci.id, url: ci.stored_url });
+              }
+            });
           }
         });
 
