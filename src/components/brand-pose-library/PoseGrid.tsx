@@ -1,5 +1,5 @@
 import { useCallback, useRef, useEffect } from "react";
-import { LibraryPose, CurationStatus, Slot } from "@/hooks/useLibraryPoses";
+import { LibraryPose, CurationStatus, OutputShotType, OUTPUT_SHOT_LABELS } from "@/hooks/useLibraryPoses";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,6 +22,14 @@ const STATUS_COLORS: Record<CurationStatus, string> = {
   included: "bg-green-500",
   excluded: "bg-red-500",
   failed: "bg-gray-500",
+};
+
+// Short labels for badges
+const SHORT_LABELS: Record<OutputShotType, string> = {
+  FRONT_FULL: 'Front',
+  FRONT_CROPPED: 'Crop',
+  DETAIL: 'Detail',
+  BACK_FULL: 'Back',
 };
 
 export function PoseGrid({
@@ -65,7 +73,7 @@ export function PoseGrid({
               {/* Image */}
               <img
                 src={pose.clay_image_url || "/placeholder.svg"}
-                alt={`Pose ${pose.slot}`}
+                alt={`Pose ${OUTPUT_SHOT_LABELS[pose.shotType]}`}
                 className="w-full h-full object-cover"
                 loading="lazy"
               />
@@ -90,12 +98,13 @@ export function PoseGrid({
                 title={pose.curation_status}
               />
 
-              {/* Slot badge */}
+              {/* Shot type badge */}
               <Badge
                 variant="secondary"
                 className="absolute bottom-1 left-1 text-xs px-1.5 py-0"
+                title={OUTPUT_SHOT_LABELS[pose.shotType]}
               >
-                {pose.slot}
+                {SHORT_LABELS[pose.shotType]}
               </Badge>
 
               {/* Gender badge */}

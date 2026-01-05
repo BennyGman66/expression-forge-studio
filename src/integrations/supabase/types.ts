@@ -1990,6 +1990,7 @@ export type Database = {
           library_id: string
           notes: string | null
           product_type: string | null
+          shot_type: string | null
           slot: string
           updated_at: string
         }
@@ -2002,6 +2003,7 @@ export type Database = {
           library_id: string
           notes?: string | null
           product_type?: string | null
+          shot_type?: string | null
           slot: string
           updated_at?: string
         }
@@ -2014,6 +2016,7 @@ export type Database = {
           library_id?: string
           notes?: string | null
           product_type?: string | null
+          shot_type?: string | null
           slot?: string
           updated_at?: string
         }
@@ -2308,6 +2311,7 @@ export type Database = {
           created_at: string
           id: string
           product_id: string
+          shot_type: string | null
           slot: string
           source_url: string
           stored_url: string | null
@@ -2316,6 +2320,7 @@ export type Database = {
           created_at?: string
           id?: string
           product_id: string
+          shot_type?: string | null
           slot: string
           source_url: string
           stored_url?: string | null
@@ -2324,6 +2329,7 @@ export type Database = {
           created_at?: string
           id?: string
           product_id?: string
+          shot_type?: string | null
           slot?: string
           source_url?: string
           stored_url?: string | null
@@ -2524,6 +2530,7 @@ export type Database = {
           pose_id: string | null
           pose_url: string | null
           result_url: string | null
+          shot_type: string | null
           slot: string | null
           status: string
         }
@@ -2536,6 +2543,7 @@ export type Database = {
           pose_id?: string | null
           pose_url?: string | null
           result_url?: string | null
+          shot_type?: string | null
           slot?: string | null
           status?: string
         }
@@ -2548,6 +2556,7 @@ export type Database = {
           pose_id?: string | null
           pose_url?: string | null
           result_url?: string | null
+          shot_type?: string | null
           slot?: string | null
           status?: string
         }

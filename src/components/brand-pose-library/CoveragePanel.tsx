@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { CoverageStats, Slot, Gender } from "@/hooks/useLibraryPoses";
+import { CoverageStats, Gender, OutputShotType, ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS } from "@/hooks/useLibraryPoses";
 import { LibraryStatus } from "@/hooks/useBrandLibraries";
 import { CheckCircle2, AlertTriangle, Lock, Send } from "lucide-react";
 
@@ -15,7 +15,6 @@ interface CoveragePanelProps {
   failedCount: number;
 }
 
-const SLOTS: Slot[] = ["A", "B", "C", "D"];
 const GENDERS: Gender[] = ["women", "men"];
 
 export function CoveragePanel({
@@ -30,8 +29,8 @@ export function CoveragePanel({
   const getTotalIncluded = () => {
     let total = 0;
     GENDERS.forEach((g) => {
-      SLOTS.forEach((s) => {
-        total += coverage[g][s].included;
+      ALL_OUTPUT_SHOT_TYPES.forEach((shotType) => {
+        total += coverage[g][shotType].included;
       });
     });
     return total;
@@ -39,8 +38,8 @@ export function CoveragePanel({
 
   const checkAllSlotsReady = () => {
     for (const gender of GENDERS) {
-      for (const slot of SLOTS) {
-        if (coverage[gender][slot].included < minPosesPerSlot) {
+      for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
+        if (coverage[gender][shotType].included < minPosesPerSlot) {
           return false;
         }
       }
@@ -75,7 +74,7 @@ export function CoveragePanel({
             ) : (
               <AlertTriangle className="w-4 h-4 text-amber-500" />
             )}
-            <span>Min {minPosesPerSlot} poses per slot/gender</span>
+            <span>Min {minPosesPerSlot} poses per shot type/gender</span>
           </div>
           <div className="flex items-center gap-2">
             {noPending ? (

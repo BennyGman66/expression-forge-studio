@@ -3,7 +3,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CoverageStats, PoseFilters, Slot, Gender, CurationStatus } from "@/hooks/useLibraryPoses";
+import { 
+  CoverageStats, 
+  PoseFilters, 
+  Gender, 
+  CurationStatus,
+  OutputShotType,
+  ALL_OUTPUT_SHOT_TYPES,
+  OUTPUT_SHOT_LABELS,
+} from "@/hooks/useLibraryPoses";
 import { CheckCircle2, XCircle, Clock, AlertTriangle } from "lucide-react";
 
 interface FiltersPanelProps {
@@ -14,7 +22,6 @@ interface FiltersPanelProps {
   totalPoses: number;
 }
 
-const SLOTS: Slot[] = ["A", "B", "C", "D"];
 const GENDERS: { value: Gender | "all"; label: string }[] = [
   { value: "all", label: "All" },
   { value: "women", label: "Women" },
@@ -28,6 +35,14 @@ const STATUSES: { value: CurationStatus | "all"; label: string; icon: React.Reac
   { value: "failed", label: "Failed", icon: <AlertTriangle className="w-3 h-3" /> },
 ];
 
+// Short labels for tab triggers
+const SHORT_LABELS: Record<OutputShotType, string> = {
+  FRONT_FULL: 'Front',
+  FRONT_CROPPED: 'Crop',
+  DETAIL: 'Detail',
+  BACK_FULL: 'Back',
+};
+
 export function FiltersPanel({
   filters,
   onFiltersChange,
@@ -35,16 +50,16 @@ export function FiltersPanel({
   minPosesPerSlot,
   totalPoses,
 }: FiltersPanelProps) {
-  const getSlotCount = (slot: Slot) => {
+  const getShotTypeCount = (shotType: OutputShotType) => {
     let count = 0;
     (["women", "men"] as Gender[]).forEach((g) => {
-      count += coverage[g][slot].included + coverage[g][slot].pending + coverage[g][slot].excluded + coverage[g][slot].failed;
+      count += coverage[g][shotType].included + coverage[g][shotType].pending + coverage[g][shotType].excluded + coverage[g][shotType].failed;
     });
     return count;
   };
 
-  const getIncludedCount = (gender: Gender, slot: Slot) => coverage[gender][slot].included;
-  const meetsMinimum = (gender: Gender, slot: Slot) => getIncludedCount(gender, slot) >= minPosesPerSlot;
+  const getIncludedCount = (gender: Gender, shotType: OutputShotType) => coverage[gender][shotType].included;
+  const meetsMinimum = (gender: Gender, shotType: OutputShotType) => getIncludedCount(gender, shotType) >= minPosesPerSlot;
 
   return (
     <div className="w-60 flex-shrink-0 border-r bg-muted/30 p-4 space-y-4 overflow-y-auto">
@@ -55,19 +70,19 @@ export function FiltersPanel({
 
       <Separator />
 
-      {/* Slot Filter */}
+      {/* Shot Type Filter */}
       <div>
-        <p className="text-sm font-medium mb-2">Slot</p>
+        <p className="text-sm font-medium mb-2">Shot Type</p>
         <Tabs
-          value={filters.slot}
-          onValueChange={(v) => onFiltersChange({ ...filters, slot: v as Slot | "all" })}
+          value={filters.shotType}
+          onValueChange={(v) => onFiltersChange({ ...filters, shotType: v as OutputShotType | "all" })}
         >
           <TabsList className="grid grid-cols-5 h-8">
-            <TabsTrigger value="all" className="text-xs px-2">All</TabsTrigger>
-            {SLOTS.map((slot) => (
-              <TabsTrigger key={slot} value={slot} className="text-xs px-2">
-                {slot}
-                <span className="ml-1 text-muted-foreground">({getSlotCount(slot)})</span>
+            <TabsTrigger value="all" className="text-xs px-1">All</TabsTrigger>
+            {ALL_OUTPUT_SHOT_TYPES.map((shotType) => (
+              <TabsTrigger key={shotType} value={shotType} className="text-xs px-1" title={OUTPUT_SHOT_LABELS[shotType]}>
+                {SHORT_LABELS[shotType]}
+                <span className="ml-0.5 text-muted-foreground text-[10px]">({getShotTypeCount(shotType)})</span>
               </TabsTrigger>
             ))}
           </TabsList>
@@ -123,17 +138,18 @@ export function FiltersPanel({
             <div key={gender}>
               <p className="text-xs font-medium mb-1 capitalize">{gender}</p>
               <div className="grid grid-cols-4 gap-1">
-                {SLOTS.map((slot) => {
-                  const count = getIncludedCount(gender, slot);
-                  const ok = meetsMinimum(gender, slot);
+                {ALL_OUTPUT_SHOT_TYPES.map((shotType) => {
+                  const count = getIncludedCount(gender, shotType);
+                  const ok = meetsMinimum(gender, shotType);
                   return (
                     <div
-                      key={slot}
+                      key={shotType}
                       className={`text-center p-1 rounded text-xs ${
                         ok ? "bg-green-500/20 text-green-700" : "bg-amber-500/20 text-amber-700"
                       }`}
+                      title={OUTPUT_SHOT_LABELS[shotType]}
                     >
-                      <div className="font-medium">{slot}</div>
+                      <div className="font-medium">{SHORT_LABELS[shotType]}</div>
                       <div>{count}/{minPosesPerSlot}</div>
                     </div>
                   );

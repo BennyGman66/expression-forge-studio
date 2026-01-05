@@ -10,8 +10,15 @@ import { usePipelineJobs } from "@/hooks/usePipelineJobs";
 import { supabase } from "@/integrations/supabase/client";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { toast } from "sonner";
-import type { ReposeConfig, PairingRules } from "@/types/repose";
+import type { ReposeConfig } from "@/types/repose";
 import { REPOSE_MODEL_OPTIONS, DEFAULT_REPOSE_MODEL } from "@/types/repose";
+import { 
+  OutputShotType, 
+  parseViewToInputType,
+  getAllowedOutputsForInput,
+  shotTypeToSlot,
+  OUTPUT_SHOT_LABELS,
+} from "@/types/shot-types";
 
 interface GeneratePanelProps {
   batchId: string | undefined;
@@ -73,32 +80,6 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
   const config = batch?.config_json as ReposeConfig | undefined;
   const selectedModel = config?.model || DEFAULT_REPOSE_MODEL;
 
-  // Helper to extract view type from "Front View - filename.jpg" format
-  const getViewType = (view: string): string => {
-    const v = view.toLowerCase();
-    if (v.startsWith('front')) return 'front';
-    if (v.startsWith('back')) return 'back';
-    if (v.startsWith('side')) return 'side';
-    if (v.startsWith('detail')) return 'detail';
-    return 'front';
-  };
-
-  // Get applicable slots based on view and pairing rules
-  const getSlotsForView = (viewType: string, rules: PairingRules): string[] => {
-    const slots: string[] = [];
-    if (viewType === 'front') {
-      if (rules.frontToSlotA) slots.push('A');
-      if (rules.frontToSlotB) slots.push('B');
-    } else if (viewType === 'back') {
-      if (rules.backToSlotC) slots.push('C');
-    } else if (viewType === 'side') {
-      if (rules.sideToSlotB) slots.push('B');
-    } else if (viewType === 'detail') {
-      if (rules.detailToSlotD) slots.push('D');
-    }
-    return slots;
-  };
-
   const handleModelChange = (model: string) => {
     if (!batchId) return;
     const newConfig = { ...config, model };
@@ -117,8 +98,7 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
     shouldStopRef.current = false;
     setIsGenerating(true);
 
-    const pairingRules = config?.pairingRules || {};
-    const randomPosesPerSlot = config?.randomPosesPerSlot || 2;
+    const posesPerShotType = config?.posesPerShotType || 2;
     const attemptsPerPose = config?.attemptsPerPose || 1;
     const model = config?.model || DEFAULT_REPOSE_MODEL;
 
@@ -142,6 +122,7 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
           .select(`
             id,
             slot,
+            shot_type,
             products!inner(brand_id),
             clay_images(id, stored_url)
           `)
@@ -152,42 +133,63 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
           throw posesError;
         }
 
-        // Flatten and group poses by slot
-        const posesBySlot: Record<string, Array<{ id: string; url: string }>> = { A: [], B: [], C: [], D: [] };
+        // Group poses by shot type (with fallback to slot mapping)
+        const posesByShotType: Record<OutputShotType, Array<{ id: string; url: string }>> = {
+          FRONT_FULL: [],
+          FRONT_CROPPED: [],
+          DETAIL: [],
+          BACK_FULL: [],
+        };
+
         productImages?.forEach((pi) => {
-          const slot = pi.slot;
-          if (slot && posesBySlot[slot] && pi.clay_images) {
+          // Prefer shot_type, fall back to slot mapping
+          let shotType: OutputShotType | null = pi.shot_type as OutputShotType;
+          if (!shotType && pi.slot) {
+            const slotMap: Record<string, OutputShotType> = {
+              'A': 'FRONT_FULL',
+              'B': 'FRONT_CROPPED',
+              'C': 'BACK_FULL',
+              'D': 'DETAIL',
+            };
+            shotType = slotMap[pi.slot];
+          }
+
+          if (shotType && posesByShotType[shotType] && pi.clay_images) {
             const clayImages = Array.isArray(pi.clay_images) ? pi.clay_images : [pi.clay_images];
             clayImages.forEach((ci: { id: string; stored_url: string }) => {
               if (ci?.id && ci?.stored_url) {
-                posesBySlot[slot].push({ id: ci.id, url: ci.stored_url });
+                posesByShotType[shotType!].push({ id: ci.id, url: ci.stored_url });
               }
             });
           }
         });
 
-        console.log('Poses by slot:', Object.entries(posesBySlot).map(([k, v]) => `${k}: ${v.length}`).join(', '));
+        console.log('Poses by shot type:', Object.entries(posesByShotType).map(([k, v]) => `${k}: ${v.length}`).join(', '));
 
-        // Step 3: Create repose_outputs for each batch_item + pose combination
+        // Step 3: Create repose_outputs for each batch_item based on enforced camera rules
         const outputsToCreate: Array<{
           batch_id: string;
           batch_item_id: string;
           pose_id: string | null;
           pose_url: string;
-          slot: string;
+          slot: string; // Legacy field
+          shot_type: OutputShotType;
           attempt_index: number;
           status: string;
         }> = [];
 
         for (const item of batchItems) {
-          const viewType = getViewType(item.view);
-          const slots = getSlotsForView(viewType, pairingRules);
+          const inputType = parseViewToInputType(item.view);
+          if (!inputType) continue;
 
-          for (const slot of slots) {
-            const posesInSlot = posesBySlot[slot] || [];
-            // Randomly select poses for this slot
-            const shuffled = [...posesInSlot].sort(() => Math.random() - 0.5);
-            const selectedPoses = shuffled.slice(0, randomPosesPerSlot);
+          // Get allowed output shot types for this input (enforced camera rules)
+          const allowedOutputs = getAllowedOutputsForInput(inputType);
+
+          for (const shotType of allowedOutputs) {
+            const posesInType = posesByShotType[shotType] || [];
+            // Randomly select poses for this shot type
+            const shuffled = [...posesInType].sort(() => Math.random() - 0.5);
+            const selectedPoses = shuffled.slice(0, posesPerShotType);
 
             for (const pose of selectedPoses) {
               for (let attempt = 0; attempt < attemptsPerPose; attempt++) {
@@ -196,7 +198,8 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
                   batch_item_id: item.id,
                   pose_id: pose.id,
                   pose_url: pose.url,
-                  slot,
+                  slot: shotTypeToSlot(shotType), // Legacy field
+                  shot_type: shotType,
                   attempt_index: attempt,
                   status: 'queued',
                 });
@@ -206,7 +209,7 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
         }
 
         if (outputsToCreate.length === 0) {
-          toast.error('No outputs to generate. Check pairing rules and available poses.');
+          toast.error('No outputs to generate. Check available inputs and poses.');
           updateStatus.mutate({ batchId, status: 'DRAFT' });
           setIsGenerating(false);
           return;
@@ -423,8 +426,8 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
               <p className="text-xl font-bold">{batchItems?.length || 0}</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Poses Per Slot</p>
-              <p className="text-xl font-bold">{config?.randomPosesPerSlot || 2}</p>
+              <p className="text-xs text-muted-foreground">Poses Per Shot</p>
+              <p className="text-xl font-bold">{config?.posesPerShotType || 2}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Attempts Per Pose</p>
