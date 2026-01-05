@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sparkles, Play, Square, AlertCircle, CheckCircle2, XCircle } from "lucide-react";
+import { Sparkles, Play, Square, AlertCircle, CheckCircle2, XCircle, Trash2 } from "lucide-react";
 import { useReposeBatch, useReposeBatchItems, useReposeOutputs, useUpdateReposeBatchStatus, useUpdateReposeBatchConfig } from "@/hooks/useReposeBatches";
 import { usePipelineJobs } from "@/hooks/usePipelineJobs";
 import { supabase } from "@/integrations/supabase/client";
@@ -353,6 +353,30 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
     toast.info("Generation stopped");
   };
 
+  const handleClearOutputs = async () => {
+    if (!batchId) return;
+    
+    const confirmed = window.confirm('Are you sure you want to delete all generated outputs? This cannot be undone.');
+    if (!confirmed) return;
+
+    try {
+      const { error } = await supabase
+        .from('repose_outputs')
+        .delete()
+        .eq('batch_id', batchId);
+
+      if (error) throw error;
+
+      // Reset batch status to DRAFT
+      updateStatus.mutate({ batchId, status: 'DRAFT' });
+      await refetchOutputs();
+      toast.success('All outputs cleared');
+    } catch (error) {
+      console.error('Failed to clear outputs:', error);
+      toast.error('Failed to clear outputs');
+    }
+  };
+
   if (batchLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -476,15 +500,28 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
 
           <div className="flex justify-center gap-4">
             {!isGenerating ? (
-              <Button 
-                onClick={handleStartGeneration}
-                size="lg"
-                className="gap-2"
-                disabled={batch.status === 'COMPLETE'}
-              >
-                <Play className="w-4 h-4" />
-                {batch.status === 'COMPLETE' ? 'Generation Complete' : 'Start Generation'}
-              </Button>
+              <>
+                <Button 
+                  onClick={handleStartGeneration}
+                  size="lg"
+                  className="gap-2"
+                  disabled={batch.status === 'COMPLETE'}
+                >
+                  <Play className="w-4 h-4" />
+                  {batch.status === 'COMPLETE' ? 'Generation Complete' : totalCount > 0 ? 'Resume Generation' : 'Start Generation'}
+                </Button>
+                {totalCount > 0 && (
+                  <Button 
+                    onClick={handleClearOutputs}
+                    size="lg"
+                    variant="outline"
+                    className="gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Clear Outputs
+                  </Button>
+                )}
+              </>
             ) : (
               <Button 
                 onClick={handleStopGeneration}

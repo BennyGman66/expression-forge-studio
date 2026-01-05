@@ -6,7 +6,7 @@ import { BatchSetupPanel } from "@/components/repose-production/BatchSetupPanel"
 import { GeneratePanel } from "@/components/repose-production/GeneratePanel";
 import { ReviewPanel } from "@/components/repose-production/ReviewPanel";
 import { ExportPanel } from "@/components/repose-production/ExportPanel";
-import { useReposeBatch } from "@/hooks/useReposeBatches";
+import { useReposeBatch, useReposeOutputs } from "@/hooks/useReposeBatches";
 import { Briefcase, Settings, Sparkles, ClipboardList, Download } from "lucide-react";
 
 const VALID_TABS = ["select", "setup", "generate", "review", "export"];
@@ -20,7 +20,8 @@ export default function ReposeProduction() {
   const defaultTab = batchId ? "setup" : "select";
   const activeTab = VALID_TABS.includes(tabFromUrl || "") ? tabFromUrl! : defaultTab;
 
-  const { data: batch, isLoading: batchLoading } = useReposeBatch(batchId);
+  const { data: batch } = useReposeBatch(batchId);
+  const { data: outputs } = useReposeOutputs(batchId);
 
   const handleTabChange = (tab: string) => {
     setSearchParams({ tab });
@@ -29,7 +30,8 @@ export default function ReposeProduction() {
   // Determine if tabs should be disabled based on batch state
   const hasBatch = !!batch || !!batchId;
   const canGenerate = hasBatch && batch?.brand_id;
-  const hasOutputs = batch?.status === 'COMPLETE' || batch?.status === 'RUNNING';
+  // Enable Review/Export if there are any completed outputs
+  const hasCompletedOutputs = (outputs?.filter(o => o.status === 'complete').length || 0) > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -58,11 +60,11 @@ export default function ReposeProduction() {
                 <Sparkles className="w-4 h-4" />
                 Generate
               </TabsTrigger>
-              <TabsTrigger value="review" className="gap-2" disabled={!hasOutputs}>
+              <TabsTrigger value="review" className="gap-2" disabled={!hasCompletedOutputs}>
                 <ClipboardList className="w-4 h-4" />
                 Review
               </TabsTrigger>
-              <TabsTrigger value="export" className="gap-2" disabled={!hasOutputs}>
+              <TabsTrigger value="export" className="gap-2" disabled={!hasCompletedOutputs}>
                 <Download className="w-4 h-4" />
                 Export
               </TabsTrigger>
