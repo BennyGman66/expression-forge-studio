@@ -7,6 +7,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ClipboardList, Star, RefreshCw, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useReposeBatch, useReposeBatchItems, useReposeOutputs, useUpdateReposeBatchStatus } from "@/hooks/useReposeBatches";
 import { usePipelineJobs } from "@/hooks/usePipelineJobs";
+import { useActiveJobs } from "@/hooks/useActiveJobs";
 import { supabase } from "@/integrations/supabase/client";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { toast } from "sonner";
@@ -49,6 +50,7 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
   const { data: outputs, refetch: refetchOutputs } = useReposeOutputs(batchId);
   const updateStatus = useUpdateReposeBatchStatus();
   const { createJob, updateProgress, setStatus } = usePipelineJobs();
+  const { refetch: refetchActiveJobs } = useActiveJobs();
 
   const [selectedOutputs, setSelectedOutputs] = useState<Set<string>>(new Set());
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -188,6 +190,7 @@ export function ReviewPanel({ batchId }: ReviewPanelProps) {
         supports_pause: true, supports_retry: false, supports_restart: false,
       });
       pipelineJobIdRef.current = pipelineJobId;
+      await refetchActiveJobs(); // Force job tracker to update immediately
       updateStatus.mutate({ batchId, status: 'RUNNING' });
 
       // Process queued outputs
