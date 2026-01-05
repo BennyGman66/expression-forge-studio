@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
-import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users, UserPlus, UserCheck, Clock, Sparkles, Download, Star } from "lucide-react";
+import { Play, Check, Loader2, User, Plus, X, ArrowRight, Trash2, ChevronDown, ChevronUp, Users, UserPlus, UserCheck, Clock, Sparkles, Download, Star, BookmarkPlus, BookMarked } from "lucide-react";
 
 // CroppedFacePreview component for displaying cropped faces using CSS transforms
 function CroppedFacePreview({ imageUrl, crop }: { imageUrl: string; crop: { crop_x: number; crop_y: number; crop_width: number; crop_height: number; aspect_ratio?: string } }) {
@@ -40,6 +40,9 @@ import { PromoteToTwinDialog } from "@/components/shared/PromoteToTwinDialog";
 import { OutputCarousel } from "./OutputCarousel";
 import { BulkActionsToolbar } from "./BulkActionsToolbar";
 import { CropOutputDialog } from "./CropOutputDialog";
+import { SavedPairingsDialog } from "./SavedPairingsDialog";
+import { usePairingTemplates } from "@/hooks/usePairingTemplates";
+import { PairingTemplateWithRelations } from "@/types/pairing-templates";
 
 interface ImagePairingPanelProps {
   runId: string | null;
@@ -113,6 +116,10 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
   const [cropDialogOpen, setCropDialogOpen] = useState(false);
   const [cropOutputId, setCropOutputId] = useState<string | null>(null);
   const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
+  
+  // Saved pairings
+  const [savedPairingsDialogOpen, setSavedPairingsDialogOpen] = useState(false);
+  const { createTemplate } = usePairingTemplates();
 
   const handlePromoteClick = (e: React.MouseEvent, identity: IdentityForPairing) => {
     e.stopPropagation();
@@ -397,6 +404,49 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
       }
       return next;
     });
+  };
+
+  const handleSavePairing = async (pairing: QueuedIdentityPairing) => {
+    const name = `${pairing.identity.name} → ${pairing.talent.name}`;
+    await createTemplate({
+      name,
+      digitalTalentId: pairing.talent.id,
+      faceIdentityId: pairing.identity.id,
+      scrapeRunId: runId,
+    });
+  };
+
+  const handleLoadSavedPairing = (template: PairingTemplateWithRelations) => {
+    // Find the identity in our loaded identities
+    const identity = identities.find(i => i.id === template.face_identity_id);
+    if (!identity) {
+      toast.error("Model identity not found in this scrape run");
+      return;
+    }
+
+    // Find the talent
+    const talent = digitalTalents.find(t => t.id === template.digital_talent_id);
+    if (!talent) {
+      toast.error("Digital talent not found");
+      return;
+    }
+
+    // Check if already in queue
+    const exists = pairingQueue.some(
+      p => p.identity.id === identity.id && p.talent.id === talent.id
+    );
+    if (exists) {
+      toast.info("This pairing is already in the queue");
+      return;
+    }
+
+    // Add to queue
+    setPairingQueue(prev => [...prev, {
+      id: `${identity.id}-${talent.id}-${Date.now()}`,
+      identity,
+      talent
+    }]);
+    toast.success("Loaded saved pairing");
   };
 
   // Calculate totals
@@ -824,12 +874,18 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                     <Badge>{pairingQueue.length} pairings • {totalImages} images</Badge>
                   )}
                 </div>
-                {pairingQueue.length > 0 && (
-                  <Button size="sm" variant="ghost" onClick={clearQueue}>
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Clear All
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setSavedPairingsDialogOpen(true)}>
+                    <BookMarked className="h-4 w-4 mr-1" />
+                    Load Saved
                   </Button>
-                )}
+                  {pairingQueue.length > 0 && (
+                    <Button size="sm" variant="ghost" onClick={clearQueue}>
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Clear All
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -905,6 +961,20 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
                                 )}
                               </Button>
                             </CollapsibleTrigger>
+
+                            {/* Save button */}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-muted-foreground hover:text-amber-500"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSavePairing(pairing);
+                              }}
+                              title="Save pairing for later"
+                            >
+                              <BookmarkPlus className="h-4 w-4" />
+                            </Button>
 
                             {/* Remove button */}
                             <Button
@@ -1040,6 +1110,13 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
         defaultGender={selectedIdentityForPromote?.gender || null}
         representativeImageUrl={selectedIdentityForPromote?.representativeImageUrl || null}
         onSuccess={handlePromoteSuccess}
+      />
+
+      {/* Saved Pairings Dialog */}
+      <SavedPairingsDialog
+        open={savedPairingsDialogOpen}
+        onOpenChange={setSavedPairingsDialogOpen}
+        onLoadPairing={handleLoadSavedPairing}
       />
     </div>
   );

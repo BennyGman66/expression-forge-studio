@@ -2893,6 +2893,71 @@ export type Database = {
           },
         ]
       }
+      talent_pairing_templates: {
+        Row: {
+          created_at: string
+          digital_talent_id: string
+          digital_twin_id: string | null
+          face_identity_id: string | null
+          id: string
+          last_used_at: string | null
+          name: string
+          scrape_run_id: string | null
+          usage_count: number
+        }
+        Insert: {
+          created_at?: string
+          digital_talent_id: string
+          digital_twin_id?: string | null
+          face_identity_id?: string | null
+          id?: string
+          last_used_at?: string | null
+          name: string
+          scrape_run_id?: string | null
+          usage_count?: number
+        }
+        Update: {
+          created_at?: string
+          digital_talent_id?: string
+          digital_twin_id?: string | null
+          face_identity_id?: string | null
+          id?: string
+          last_used_at?: string | null
+          name?: string
+          scrape_run_id?: string | null
+          usage_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "talent_pairing_templates_digital_talent_id_fkey"
+            columns: ["digital_talent_id"]
+            isOneToOne: false
+            referencedRelation: "digital_talents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_pairing_templates_digital_twin_id_fkey"
+            columns: ["digital_twin_id"]
+            isOneToOne: false
+            referencedRelation: "digital_twins"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_pairing_templates_face_identity_id_fkey"
+            columns: ["face_identity_id"]
+            isOneToOne: false
+            referencedRelation: "face_identities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_pairing_templates_scrape_run_id_fkey"
+            columns: ["scrape_run_id"]
+            isOneToOne: false
+            referencedRelation: "face_scrape_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       talents: {
         Row: {
           created_at: string
