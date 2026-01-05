@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -8,7 +8,7 @@ import { useReposeBatch, useReposeBatchItems, useReposeOutputs, useUpdateReposeB
 import { supabase } from "@/integrations/supabase/client";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { toast } from "sonner";
-import type { ReposeConfig } from "@/types/repose";
+import type { ReposeConfig, PairingRules } from "@/types/repose";
 
 interface GeneratePanelProps {
   batchId: string | undefined;
@@ -21,7 +21,7 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
   const updateStatus = useUpdateReposeBatchStatus();
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [shouldStop, setShouldStop] = useState(false);
+  const shouldStopRef = useRef(false);
 
   // Subscribe to realtime updates for outputs
   useEffect(() => {
@@ -65,38 +65,217 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
 
   const progressPercent = totalCount > 0 ? ((completedCount + failedCount) / totalCount) * 100 : 0;
 
-  const handleStartGeneration = async () => {
-    if (!batchId || !batch) return;
+  // Helper to extract view type from "Front View - filename.jpg" format
+  const getViewType = (view: string): string => {
+    const v = view.toLowerCase();
+    if (v.startsWith('front')) return 'front';
+    if (v.startsWith('back')) return 'back';
+    if (v.startsWith('side')) return 'side';
+    if (v.startsWith('detail')) return 'detail';
+    return 'front';
+  };
 
-    setShouldStop(false);
+  // Get applicable slots based on view and pairing rules
+  const getSlotsForView = (viewType: string, rules: PairingRules): string[] => {
+    const slots: string[] = [];
+    if (viewType === 'front') {
+      if (rules.frontToSlotA) slots.push('A');
+      if (rules.frontToSlotB) slots.push('B');
+    } else if (viewType === 'back') {
+      if (rules.backToSlotC) slots.push('C');
+    } else if (viewType === 'side') {
+      if (rules.sideToSlotB) slots.push('B');
+    } else if (viewType === 'detail') {
+      if (rules.detailToSlotD) slots.push('D');
+    }
+    return slots;
+  };
+
+  const handleStartGeneration = async () => {
+    if (!batchId || !batch || !batchItems?.length) return;
+
+    shouldStopRef.current = false;
     setIsGenerating(true);
 
-    // Update batch status to RUNNING
-    updateStatus.mutate({ batchId, status: 'RUNNING' });
+    const config = batch.config_json as ReposeConfig;
+    const pairingRules = config?.pairingRules || {};
+    const randomPosesPerSlot = config?.randomPosesPerSlot || 2;
+    const attemptsPerPose = config?.attemptsPerPose || 1;
 
-    // TODO: Implement actual generation logic
-    // This would involve:
-    // 1. Loading clay poses for the selected brand
-    // 2. Creating repose_outputs for each batch_item + pose combination
-    // 3. Calling an edge function for each output
-    // For now, just show a placeholder
-    
-    toast.info("Generation logic will be implemented in the next phase");
-    
-    // Simulate completion for now
-    setTimeout(() => {
-      updateStatus.mutate({ batchId, status: 'COMPLETE' });
+    try {
+      // Update batch status to RUNNING
+      updateStatus.mutate({ batchId, status: 'RUNNING' });
+
+      // Step 1: Check if outputs already exist (resume case)
+      const { data: existingOutputs } = await supabase
+        .from('repose_outputs')
+        .select('id, status')
+        .eq('batch_id', batchId);
+
+      if (!existingOutputs?.length) {
+        // Step 2: Fetch clay poses for the brand (direct from clay_images via product_images)
+        const { data: clayPoses, error: posesError } = await supabase
+          .from('clay_images')
+          .select(`
+            id,
+            stored_url,
+            product_images!inner(slot, products!inner(brand_id))
+          `)
+          .eq('product_images.products.brand_id', batch.brand_id);
+
+        if (posesError) throw posesError;
+
+        // Group poses by slot
+        const posesBySlot: Record<string, Array<{ id: string; url: string }>> = { A: [], B: [], C: [], D: [] };
+        clayPoses?.forEach((pose: { id: string; stored_url: string; product_images: { slot: string } }) => {
+          const slot = pose.product_images?.slot;
+          if (slot && posesBySlot[slot]) {
+            posesBySlot[slot].push({ id: pose.id, url: pose.stored_url });
+          }
+        });
+
+        console.log('Poses by slot:', Object.entries(posesBySlot).map(([k, v]) => `${k}: ${v.length}`).join(', '));
+
+        // Step 3: Create repose_outputs for each batch_item + pose combination
+        const outputsToCreate: Array<{
+          batch_id: string;
+          batch_item_id: string;
+          pose_id: string | null;
+          pose_url: string;
+          slot: string;
+          attempt_index: number;
+          status: string;
+        }> = [];
+
+        for (const item of batchItems) {
+          const viewType = getViewType(item.view);
+          const slots = getSlotsForView(viewType, pairingRules);
+
+          for (const slot of slots) {
+            const posesInSlot = posesBySlot[slot] || [];
+            // Randomly select poses for this slot
+            const shuffled = [...posesInSlot].sort(() => Math.random() - 0.5);
+            const selectedPoses = shuffled.slice(0, randomPosesPerSlot);
+
+            for (const pose of selectedPoses) {
+              for (let attempt = 0; attempt < attemptsPerPose; attempt++) {
+                outputsToCreate.push({
+                  batch_id: batchId,
+                  batch_item_id: item.id,
+                  pose_id: pose.id,
+                  pose_url: pose.url,
+                  slot,
+                  attempt_index: attempt,
+                  status: 'queued',
+                });
+              }
+            }
+          }
+        }
+
+        if (outputsToCreate.length === 0) {
+          toast.error('No outputs to generate. Check pairing rules and available poses.');
+          updateStatus.mutate({ batchId, status: 'DRAFT' });
+          setIsGenerating(false);
+          return;
+        }
+
+        console.log(`Creating ${outputsToCreate.length} output records`);
+        const { error: insertError } = await supabase
+          .from('repose_outputs')
+          .insert(outputsToCreate);
+
+        if (insertError) throw insertError;
+        toast.success(`Created ${outputsToCreate.length} output tasks`);
+        await refetchOutputs();
+      }
+
+      // Step 4: Process queued outputs
+      await processQueuedOutputs();
+
+    } catch (error) {
+      console.error('Generation error:', error);
+      toast.error(`Generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      updateStatus.mutate({ batchId, status: 'FAILED' });
       setIsGenerating(false);
-    }, 2000);
+    }
+  };
+
+  const processQueuedOutputs = async () => {
+    if (!batchId) return;
+
+    // Get all queued outputs
+    const { data: queuedOutputs } = await supabase
+      .from('repose_outputs')
+      .select('id')
+      .eq('batch_id', batchId)
+      .eq('status', 'queued')
+      .order('created_at', { ascending: true });
+
+    if (!queuedOutputs?.length) {
+      // Check if all done
+      const { data: remaining } = await supabase
+        .from('repose_outputs')
+        .select('id')
+        .eq('batch_id', batchId)
+        .in('status', ['queued', 'running']);
+
+      if (!remaining?.length) {
+        updateStatus.mutate({ batchId, status: 'COMPLETE' });
+        toast.success('Generation complete!');
+      }
+      setIsGenerating(false);
+      return;
+    }
+
+    console.log(`Processing ${queuedOutputs.length} queued outputs`);
+
+    for (const output of queuedOutputs) {
+      if (shouldStopRef.current) {
+        console.log('Generation stopped by user');
+        break;
+      }
+
+      try {
+        const { error } = await supabase.functions.invoke('generate-repose-single', {
+          body: { outputId: output.id },
+        });
+
+        if (error) {
+          console.error(`Failed to process output ${output.id}:`, error);
+          // Continue with next output
+        }
+
+        // Small delay between requests to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+      } catch (err) {
+        console.error(`Error processing output ${output.id}:`, err);
+      }
+    }
+
+    // Refresh and check completion
+    await refetchOutputs();
+    
+    if (!shouldStopRef.current) {
+      const { data: remaining } = await supabase
+        .from('repose_outputs')
+        .select('id')
+        .eq('batch_id', batchId)
+        .in('status', ['queued', 'running']);
+
+      if (!remaining?.length) {
+        updateStatus.mutate({ batchId, status: 'COMPLETE' });
+        toast.success('Generation complete!');
+      }
+    }
+    
+    setIsGenerating(false);
   };
 
   const handleStopGeneration = () => {
-    setShouldStop(true);
-    if (batchId) {
-      updateStatus.mutate({ batchId, status: 'FAILED' });
-    }
-    setIsGenerating(false);
-    toast.info("Generation stopped");
+    shouldStopRef.current = true;
+    toast.info("Stopping generation after current task...");
   };
 
   if (batchLoading) {
