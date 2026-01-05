@@ -10,6 +10,7 @@ interface AssetThumbnailsProps {
   onSelect: (asset: SubmissionAsset) => void;
   annotationCounts: Record<string, number>;
   orientation?: 'horizontal' | 'vertical';
+  submissionCreatedAt?: string; // For detecting "carried over" approvals
 }
 
 function getStatusIndicator(status: AssetReviewStatus) {
@@ -41,7 +42,13 @@ export function AssetThumbnails({
   onSelect,
   annotationCounts,
   orientation = 'vertical',
+  submissionCreatedAt,
 }: AssetThumbnailsProps) {
+  // Helper to detect "carried over" approvals
+  const isCarriedOver = (asset: SubmissionAsset) => {
+    if (asset.review_status !== 'APPROVED' || !asset.reviewed_at || !submissionCreatedAt) return false;
+    return new Date(asset.reviewed_at) < new Date(submissionCreatedAt);
+  };
   if (assets.length === 0) {
     return (
       <div className="p-4 text-center text-muted-foreground text-sm">
@@ -90,8 +97,13 @@ export function AssetThumbnails({
               )}
             </div>
 
-            {/* Status indicator */}
+            {/* Status indicator with carried-over badge */}
             {getStatusIndicator(asset.review_status)}
+            {isCarriedOver(asset) && (
+              <div className="absolute top-1 left-7 px-1 py-0.5 rounded bg-green-500/80 text-[8px] text-white font-medium shadow">
+                prev
+              </div>
+            )}
 
             {/* Label */}
             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-1">
