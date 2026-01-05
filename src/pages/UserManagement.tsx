@@ -193,8 +193,8 @@ export default function UserManagement() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {format(new Date(user.created_at), "MMM d, yyyy")}
+                    <TableCell className="text-xs text-muted-foreground">
+                      {format(new Date(user.created_at), "M/d/yy")}
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ArrowLeft, Search } from 'lucide-react';
 import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
 import type { JobStatus, JobType } from '@/types/jobs';
 
 export default function FreelancerJobList() {
@@ -118,59 +119,55 @@ export default function FreelancerJobList() {
         </div>
 
         {/* Jobs Table */}
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <div className="border rounded-lg">
           <Table>
             <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="text-muted-foreground">Job Title</TableHead>
-                <TableHead className="text-muted-foreground">Type</TableHead>
-                <TableHead className="text-muted-foreground">Priority</TableHead>
-                <TableHead className="text-muted-foreground">Status</TableHead>
-                <TableHead className="text-muted-foreground">Due Date</TableHead>
-                <TableHead className="text-muted-foreground">Created</TableHead>
+              <TableRow>
+                <TableHead className="w-48">Title</TableHead>
+                <TableHead className="w-28">Type</TableHead>
+                <TableHead className="w-20">Priority</TableHead>
+                <TableHead className="w-28">Status</TableHead>
+                <TableHead className="w-20">Due</TableHead>
+                <TableHead className="w-20">Created</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="text-center py-8">
                     Loading jobs...
                   </TableCell>
                 </TableRow>
               ) : filteredJobs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                    No jobs found
+                  <TableCell colSpan={6} className="text-center py-8">
+                    <p className="text-muted-foreground">No jobs found</p>
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredJobs.map(job => (
+                filteredJobs.map((job) => (
                   <TableRow
                     key={job.id}
-                    className={`border-border cursor-pointer hover:bg-muted/50 ${
-                      job.status === 'NEEDS_CHANGES' ? 'bg-orange-500/5' : ''
-                    }`}
+                    className="cursor-pointer hover:bg-muted/50"
                     onClick={() => navigate(`/freelancer/jobs/${job.id}`)}
                   >
-                    <TableCell className="font-medium text-foreground">
+                    <TableCell className="font-medium truncate max-w-[180px]">
                       {getJobTitle(job)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">
+                    <TableCell className="text-xs text-muted-foreground">
                       {job.type.replace(/_/g, ' ')}
                     </TableCell>
+                    <TableCell>{getPriorityBadge(job.priority)}</TableCell>
                     <TableCell>
-                      {getPriorityBadge(job.priority)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColor(job.status)}>
-                        {job.status === 'NEEDS_CHANGES' ? 'REVIEW' : job.status}
+                      <Badge variant="outline" className={cn(getStatusColor(job.status), "text-[10px] px-1.5 py-0")}>
+                        {job.status.replace(/_/g, ' ')}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {job.due_date ? format(new Date(job.due_date), 'MMM d, yyyy') : '-'}
+                    <TableCell className="text-xs text-muted-foreground">
+                      {job.due_date ? format(new Date(job.due_date), "M/d") : "—"}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {format(new Date(job.created_at!), 'MMM d, yyyy')}
+                    <TableCell className="text-xs text-muted-foreground">
+                      {format(new Date(job.created_at), "M/d")}
                     </TableCell>
                   </TableRow>
                 ))
