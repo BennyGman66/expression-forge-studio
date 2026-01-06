@@ -609,11 +609,85 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     );
   }
 
+  // Pre-filter handler
+  const handlePreFilter = async () => {
+    if (!runId) return;
+
+    try {
+      setIsRunningAI(true);
+      const { data, error } = await supabase.functions.invoke('organize-face-images', {
+        body: { scrapeRunId: runId },
+      });
+
+      if (error) throw error;
+      toast({ title: "Pre-filter started", description: "Removing kids, shoes, and junk images..." });
+    } catch (error) {
+      console.error('Error running pre-filter:', error);
+      toast({ title: "Failed to start pre-filter", variant: "destructive" });
+      setIsRunningAI(false);
+    }
+  };
+
+  // Reset classification handler
+  const handleResetClassification = async () => {
+    if (!runId) return;
+    if (!confirm('This will delete all model groupings and start fresh. Continue?')) return;
+
+    try {
+      setIsLoading(true);
+
+      // Delete identity images first (foreign key)
+      for (const identity of identities) {
+        await supabase
+          .from('face_identity_images')
+          .delete()
+          .eq('identity_id', identity.id);
+      }
+
+      // Delete identities
+      await supabase
+        .from('face_identities')
+        .delete()
+        .eq('scrape_run_id', runId);
+
+      setIdentities([]);
+      setSelectedIdentity(null);
+      toast({ title: "Classification reset complete" });
+    } catch (error) {
+      console.error('Error resetting classification:', error);
+      toast({ title: "Failed to reset classification", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
       {/* Left Sidebar */}
       <div className="space-y-4">
-        {/* Run All AI Button */}
+        {/* Workflow Guidance */}
+        <Card className="bg-muted/30 border-dashed">
+          <CardContent className="p-4 space-y-2">
+            <p className="text-sm font-medium">Workflow:</p>
+            <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+              <li>Pre-filter (removes kids, shoes, junk)</li>
+              <li>Classify Models (groups faces)</li>
+            </ol>
+          </CardContent>
+        </Card>
+
+        {/* Pre-filter Button */}
+        <Button
+          onClick={handlePreFilter}
+          disabled={isRunningAI}
+          variant="outline"
+          className="w-full"
+        >
+          <Trash2 className="h-4 w-4 mr-2" />
+          Pre-filter Junk Images
+        </Button>
+
+        {/* Classify Models Button */}
         <Button
           onClick={handleRunAllAI}
           disabled={isRunningAI}
@@ -628,10 +702,24 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           ) : (
             <>
               <Play className="h-4 w-4 mr-2" />
-              Run All AI Jobs
+              Classify Models
             </>
           )}
         </Button>
+
+        {/* Reset Button */}
+        {identities.length > 0 && (
+          <Button
+            onClick={handleResetClassification}
+            disabled={isLoading || isRunningAI}
+            variant="ghost"
+            size="sm"
+            className="w-full text-destructive hover:text-destructive"
+          >
+            <X className="h-4 w-4 mr-2" />
+            Reset Classification
+          </Button>
+        )}
 
         {jobProgress && (
           <Card className="bg-muted/50">
