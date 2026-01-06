@@ -9,13 +9,43 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Retry wrapper with exponential backoff for transient API errors
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 1000
+): Promise<T> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const errorMessage = error?.message || String(error);
+      const isRetryable = 
+        errorMessage.includes('502') ||
+        errorMessage.includes('503') ||
+        errorMessage.includes('429') ||
+        errorMessage.includes('timeout') ||
+        errorMessage.includes('ECONNRESET');
+      
+      if (!isRetryable || attempt === maxRetries - 1) {
+        throw error;
+      }
+      
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      console.log(`Retry ${attempt + 1}/${maxRetries} after ${delay}ms: ${errorMessage}`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { runId } = await req.json();
+    const { runId, pipelineJobId, resumeFromStep } = await req.json();
 
     if (!runId) {
       return new Response(
@@ -35,35 +65,52 @@ Deno.serve(async (req) => {
       .eq('id', runId)
       .single();
 
-    // Create a pipeline job to track progress
-    const { data: job, error: jobError } = await supabase
-      .from('pipeline_jobs')
-      .insert({
-        type: 'CLASSIFY_FACES',
-        title: `Classify Models: ${run?.brand_name || 'Unknown'}`,
-        status: 'RUNNING',
-        progress_total: 6, // 6 steps
-        progress_done: 0,
-        progress_failed: 0,
-        progress_message: 'Starting classification...',
-        origin_route: '/face-creator',
-        origin_context: { scrape_run_id: runId, current_step: 1 },
-        supports_pause: true,
-        supports_retry: true,
-        supports_restart: true,
-        source_table: 'face_scrape_runs',
-        source_job_id: runId,
-      })
-      .select()
-      .single();
+    let jobId = pipelineJobId;
+    
+    // If resuming, reuse existing job; otherwise create new
+    if (pipelineJobId) {
+      // Update existing job to RUNNING
+      await supabase
+        .from('pipeline_jobs')
+        .update({ 
+          status: 'RUNNING',
+          progress_message: `Resuming from step ${resumeFromStep || 1}...`,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', pipelineJobId);
+      console.log(`Resuming existing job ${pipelineJobId} from step ${resumeFromStep || 1}`);
+    } else {
+      // Create a new pipeline job to track progress
+      const { data: job, error: jobError } = await supabase
+        .from('pipeline_jobs')
+        .insert({
+          type: 'CLASSIFY_FACES',
+          title: `Classify Models: ${run?.brand_name || 'Unknown'}`,
+          status: 'RUNNING',
+          progress_total: 6, // 6 steps
+          progress_done: 0,
+          progress_failed: 0,
+          progress_message: 'Starting classification...',
+          origin_route: '/face-creator',
+          origin_context: { scrape_run_id: runId, current_step: 1 },
+          supports_pause: true,
+          supports_retry: true,
+          supports_restart: true,
+          source_table: 'face_scrape_runs',
+          source_job_id: runId,
+        })
+        .select()
+        .single();
 
-    if (jobError) throw jobError;
+      if (jobError) throw jobError;
+      jobId = job.id;
+    }
 
     // Start background processing
-    EdgeRuntime.waitUntil(runClassificationPipeline(runId, job.id, supabase));
+    EdgeRuntime.waitUntil(runClassificationPipeline(runId, jobId, supabase, resumeFromStep || 1));
 
     return new Response(
-      JSON.stringify({ success: true, jobId: job.id }),
+      JSON.stringify({ success: true, jobId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
@@ -103,7 +150,7 @@ async function updateJobStep(supabase: any, jobId: string, step: number, message
     .eq('id', jobId);
 }
 
-async function runClassificationPipeline(runId: string, jobId: string, supabase: any) {
+async function runClassificationPipeline(runId: string, jobId: string, supabase: any, resumeFromStep: number = 1) {
   const lovableKey = Deno.env.get('LOVABLE_API_KEY');
   
   try {
@@ -116,100 +163,140 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
     if (imagesError) throw imagesError;
 
     const total = images.length;
-    console.log(`Starting classification pipeline for ${total} images`);
+    console.log(`Starting classification pipeline for ${total} images (resuming from step ${resumeFromStep})`);
+
+    let initialModels: Array<{ id: string; name: string; images: any[]; productUrl: string }> = [];
 
     // ===== STEP 1: Group images by product_url (create initial identities) =====
-    if (await checkJobCanceled(supabase, jobId)) return;
-    await updateJobStep(supabase, jobId, 0, 'Step 1/6: Grouping by product...');
-    console.log('Step 1: Grouping images by product URL...');
-    
-    const initialModels = await createInitialIdentities(runId, images, supabase);
-    console.log(`Created ${initialModels.length} initial models from product URLs`);
+    if (resumeFromStep <= 1) {
+      if (await checkJobCanceled(supabase, jobId)) return;
+      await updateJobStep(supabase, jobId, 0, 'Step 1/6: Grouping by product...');
+      console.log('Step 1: Grouping images by product URL...');
+      
+      initialModels = await createInitialIdentities(runId, images, supabase);
+      console.log(`Created ${initialModels.length} initial models from product URLs`);
+    } else {
+      // Fetch existing identities for resume
+      const { data: existingIdentities } = await supabase
+        .from('face_identities')
+        .select('*, face_identity_images(*, scrape_image:face_scrape_images(*))')
+        .eq('scrape_run_id', runId);
+      
+      initialModels = (existingIdentities || []).map((identity: any) => ({
+        id: identity.id,
+        name: identity.name,
+        images: identity.face_identity_images?.map((ii: any) => ii.scrape_image).filter(Boolean) || [],
+        productUrl: identity.face_identity_images?.[0]?.scrape_image?.product_url || '',
+      }));
+      console.log(`Loaded ${initialModels.length} existing models for resume`);
+    }
 
     // ===== STEP 2: Find front-facing image for each model =====
-    if (await checkJobCanceled(supabase, jobId)) return;
-    await updateJobStep(supabase, jobId, 1, `Step 2/6: Finding fronts for ${initialModels.length} models...`);
-    console.log('Step 2: Finding front-facing images for each model...');
+    let modelsWithFronts: Array<{ 
+      id: string; name: string; images: any[]; productUrl: string;
+      frontImageUrl?: string; frontImageId?: string;
+    }> = [];
     
-    const modelsWithFronts = await findFrontFacingImages(initialModels, supabase, lovableKey, jobId);
-    console.log(`Found front images for ${modelsWithFronts.filter(m => m.frontImageUrl).length} models`);
+    if (resumeFromStep <= 2) {
+      if (await checkJobCanceled(supabase, jobId)) return;
+      await updateJobStep(supabase, jobId, 1, `Step 2/6: Finding fronts for ${initialModels.length} models...`);
+      console.log('Step 2: Finding front-facing images for each model...');
+      
+      modelsWithFronts = await findFrontFacingImages(initialModels, supabase, lovableKey, jobId);
+      console.log(`Found front images for ${modelsWithFronts.filter(m => m.frontImageUrl).length} models`);
+    } else {
+      // Build models with fronts from existing data for resume
+      modelsWithFronts = initialModels.map(m => ({
+        ...m,
+        frontImageUrl: m.images.find((img: any) => img.source_url)?.source_url,
+        frontImageId: m.images[0]?.id,
+      }));
+    }
 
     // ===== STEP 3: Compare faces and merge duplicate models =====
-    if (await checkJobCanceled(supabase, jobId)) return;
-    await updateJobStep(supabase, jobId, 2, 'Step 3/6: Matching faces across models...');
-    console.log('Step 3: Comparing faces across models...');
-    
-    await compareFacesAndMerge(modelsWithFronts, supabase, lovableKey, jobId);
+    if (resumeFromStep <= 3) {
+      if (await checkJobCanceled(supabase, jobId)) return;
+      await updateJobStep(supabase, jobId, 2, 'Step 3/6: Matching faces across models...');
+      console.log('Step 3: Comparing faces across models...');
+      
+      await compareFacesAndMerge(modelsWithFronts, supabase, lovableKey, jobId);
+    }
 
     // ===== STEP 4: Classify gender for each remaining model =====
-    if (await checkJobCanceled(supabase, jobId)) return;
-    const { data: remainingIdentities } = await supabase
-      .from('face_identities')
-      .select('*, face_identity_images(*, scrape_image:face_scrape_images(*))')
-      .eq('scrape_run_id', runId);
-
-    await updateJobStep(supabase, jobId, 3, `Step 4/6: Classifying gender for ${remainingIdentities?.length || 0} models...`);
-    console.log(`Step 4: Classifying gender for ${remainingIdentities?.length || 0} models...`);
-
-    for (const identity of (remainingIdentities || [])) {
+    if (resumeFromStep <= 4) {
       if (await checkJobCanceled(supabase, jobId)) return;
-      
-      const representativeImage = identity.face_identity_images?.find((ii: any) => ii.view === 'front')?.scrape_image 
-        || identity.face_identity_images?.[0]?.scrape_image;
-      
-      if (representativeImage?.source_url) {
-        const gender = await classifyGender(representativeImage.source_url, lovableKey);
-        await supabase
-          .from('face_identities')
-          .update({ gender })
-          .eq('id', identity.id);
-        console.log(`Model ${identity.name} classified as ${gender}`);
-      }
+      const { data: remainingIdentities } = await supabase
+        .from('face_identities')
+        .select('*, face_identity_images(*, scrape_image:face_scrape_images(*))')
+        .eq('scrape_run_id', runId);
+
+      await updateJobStep(supabase, jobId, 3, `Step 4/6: Classifying gender for ${remainingIdentities?.length || 0} models...`);
+      console.log(`Step 4: Classifying gender for ${remainingIdentities?.length || 0} models...`);
+
+      for (const identity of (remainingIdentities || [])) {
+        if (await checkJobCanceled(supabase, jobId)) return;
+        
+        // Skip if already classified
+        if (identity.gender !== 'unknown') continue;
+        
+        const representativeImage = identity.face_identity_images?.find((ii: any) => ii.view === 'front')?.scrape_image 
+          || identity.face_identity_images?.[0]?.scrape_image;
+        
+        if (representativeImage?.source_url) {
+          const gender = await classifyGender(representativeImage.source_url, lovableKey);
+          await supabase
+            .from('face_identities')
+            .update({ gender })
+            .eq('id', identity.id);
+          console.log(`Model ${identity.name} classified as ${gender}`);
+        }
     }
 
     // ===== STEP 5: Classify views for all identity images (only unclassified ones) =====
-    if (await checkJobCanceled(supabase, jobId)) return;
-    const { data: identityImages } = await supabase
-      .from('face_identity_images')
-      .select('*, scrape_image:face_scrape_images(*), identity:face_identities!inner(scrape_run_id)')
-      .eq('identity.scrape_run_id', runId)
-      .eq('is_ignored', false);
-
-    // Only process images with unknown views (optimization: skip already classified in step 2)
-    const unclassifiedImages = (identityImages || []).filter(
-      (img: any) => img.view === 'unknown' || img.view_source !== 'ai'
-    );
-
-    await updateJobStep(supabase, jobId, 4, `Step 5/6: Classifying views for ${unclassifiedImages.length} images...`);
-    console.log(`Step 5: Classifying views for ${unclassifiedImages.length} unclassified images...`);
-
-    // Process in batches for better performance
-    const BATCH_SIZE = 5;
-    for (let i = 0; i < unclassifiedImages.length; i += BATCH_SIZE) {
+    if (resumeFromStep <= 5) {
       if (await checkJobCanceled(supabase, jobId)) return;
+      const { data: identityImages } = await supabase
+        .from('face_identity_images')
+        .select('*, scrape_image:face_scrape_images(*), identity:face_identities!inner(scrape_run_id)')
+        .eq('identity.scrape_run_id', runId)
+        .eq('is_ignored', false);
 
-      const batch = unclassifiedImages.slice(i, i + BATCH_SIZE);
-      
-      await Promise.all(
-        batch.map(async (identityImage: any) => {
-          try {
-            const imageUrl = identityImage.scrape_image?.source_url;
-            if (imageUrl) {
-              const view = await classifyView(imageUrl, lovableKey);
-              await supabase
-                .from('face_identity_images')
-                .update({ view, view_source: 'ai' })
-                .eq('id', identityImage.id);
-            }
-          } catch (err) {
-            console.error('View classification error:', err);
-          }
-        })
+      // Only process images with unknown views (optimization: skip already classified in step 2)
+      const unclassifiedImages = (identityImages || []).filter(
+        (img: any) => img.view === 'unknown' || img.view_source !== 'ai'
       );
 
-      // Small delay between batches
-      if (i + BATCH_SIZE < unclassifiedImages.length) {
-        await new Promise(r => setTimeout(r, 100));
+      await updateJobStep(supabase, jobId, 4, `Step 5/6: Classifying views for ${unclassifiedImages.length} images...`);
+      console.log(`Step 5: Classifying views for ${unclassifiedImages.length} unclassified images...`);
+
+      // Process in batches for better performance
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < unclassifiedImages.length; i += BATCH_SIZE) {
+        if (await checkJobCanceled(supabase, jobId)) return;
+
+        const batch = unclassifiedImages.slice(i, i + BATCH_SIZE);
+        
+        await Promise.all(
+          batch.map(async (identityImage: any) => {
+            try {
+              const imageUrl = identityImage.scrape_image?.source_url;
+              if (imageUrl) {
+                const view = await classifyView(imageUrl, lovableKey);
+                await supabase
+                  .from('face_identity_images')
+                  .update({ view, view_source: 'ai' })
+                  .eq('id', identityImage.id);
+              }
+            } catch (err) {
+              console.error('View classification error:', err);
+            }
+          })
+        );
+
+        // Small delay between batches
+        if (i + BATCH_SIZE < unclassifiedImages.length) {
+          await new Promise(r => setTimeout(r, 100));
+        }
       }
     }
 
@@ -218,6 +305,12 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
     await updateJobStep(supabase, jobId, 5, 'Step 6/6: Finalizing model names...');
     await renumberModels(runId, supabase);
 
+    // Get final count for completion message
+    const { count: finalModelCount } = await supabase
+      .from('face_identities')
+      .select('*', { count: 'exact', head: true })
+      .eq('scrape_run_id', runId);
+
     // Mark job as completed
     await supabase
       .from('pipeline_jobs')
@@ -225,7 +318,7 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
         status: 'COMPLETED',
         completed_at: new Date().toISOString(),
         progress_done: 6,
-        progress_message: `Classified ${remainingIdentities?.length || 0} models`
+        progress_message: `Classified ${finalModelCount || 0} models`
       })
       .eq('id', jobId);
 
@@ -478,7 +571,8 @@ async function compareFaces(imageUrl1: string, imageUrl2: string, lovableKey?: s
     return false;
   }
 
-  try {
+  // Use retry wrapper for transient errors
+  return withRetry(async () => {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -516,6 +610,11 @@ Reply with just "yes" if they are definitely the same person, or "no" if they ar
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Face comparison API error:', response.status, errorText.substring(0, 200));
+      
+      // Throw for retryable errors
+      if (response.status === 502 || response.status === 503 || response.status === 429) {
+        throw new Error(`${response.status} - Retryable API error`);
+      }
       return false;
     }
 
@@ -524,10 +623,10 @@ Reply with just "yes" if they are definitely the same person, or "no" if they ar
     
     console.log(`Face comparison result: "${answer}"`);
     return answer.includes('yes');
-  } catch (error) {
-    console.error('Face comparison error:', error);
+  }, 3, 1000).catch((err) => {
+    console.error('Face comparison failed after retries:', err);
     return false;
-  }
+  });
 }
 
 // Merge two models: move all images from sourceId to targetId, then delete source
@@ -580,7 +679,8 @@ async function classifyGender(imageUrl: string, lovableKey?: string): Promise<st
     return 'unknown';
   }
 
-  try {
+  // Use retry wrapper for transient errors
+  return withRetry(async () => {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -611,6 +711,11 @@ async function classifyGender(imageUrl: string, lovableKey?: string): Promise<st
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Gender classification API error:', response.status, errorText.substring(0, 200));
+      
+      // Throw for retryable errors
+      if (response.status === 502 || response.status === 503 || response.status === 429) {
+        throw new Error(`${response.status} - Retryable API error`);
+      }
       return 'unknown';
     }
 
@@ -620,10 +725,10 @@ async function classifyGender(imageUrl: string, lovableKey?: string): Promise<st
     if (answer.includes('men') && !answer.includes('women')) return 'men';
     if (answer.includes('women') || answer.includes('woman')) return 'women';
     return 'unknown';
-  } catch (error) {
-    console.error('Gender classification error:', error);
+  }, 3, 1000).catch((err) => {
+    console.error('Gender classification failed after retries:', err);
     return 'unknown';
-  }
+  });
 }
 
 async function classifyView(imageUrl: string, lovableKey?: string): Promise<string> {
@@ -632,7 +737,8 @@ async function classifyView(imageUrl: string, lovableKey?: string): Promise<stri
     return 'unknown';
   }
 
-  try {
+  // Use retry wrapper for transient errors
+  return withRetry(async () => {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -663,6 +769,11 @@ async function classifyView(imageUrl: string, lovableKey?: string): Promise<stri
     if (!response.ok) {
       const errorText = await response.text();
       console.error('View classification API error:', response.status, errorText.substring(0, 200));
+      
+      // Throw for retryable errors
+      if (response.status === 502 || response.status === 503 || response.status === 429) {
+        throw new Error(`${response.status} - Retryable API error`);
+      }
       return 'unknown';
     }
 
@@ -673,8 +784,8 @@ async function classifyView(imageUrl: string, lovableKey?: string): Promise<stri
     if (answer.includes('side')) return 'side';
     if (answer.includes('back')) return 'back';
     return 'unknown';
-  } catch (error) {
-    console.error('View classification error:', error);
+  }, 3, 1000).catch((err) => {
+    console.error('View classification failed after retries:', err);
     return 'unknown';
-  }
+  });
 }

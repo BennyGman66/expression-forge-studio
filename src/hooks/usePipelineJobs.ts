@@ -142,6 +142,14 @@ export function usePipelineJobs() {
     return data as PipelineJob;
   }, []);
 
+  // Check if a job is stalled (running but no updates in 10+ minutes)
+  const isJobStalled = (job: PipelineJob): boolean => {
+    if (job.status !== 'RUNNING') return false;
+    const updatedAt = new Date(job.updated_at).getTime();
+    const stalledThreshold = 10 * 60 * 1000; // 10 minutes
+    return Date.now() - updatedAt > stalledThreshold;
+  };
+
   return {
     createJob,
     updateProgress,
@@ -150,5 +158,6 @@ export function usePipelineJobs() {
     resumeJob,
     logEvent,
     getJob,
+    isJobStalled,
   };
 }
