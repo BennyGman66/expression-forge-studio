@@ -29,6 +29,8 @@ const RESUME_HANDLERS: Record<string, ResumeHandler> = {
   CLAY_GENERATION: resumeClayGeneration,
   SCRAPE_FACES: resumeFaceScrape,
   REPOSE_GENERATION: resumeReposeGeneration,
+  ORGANIZE_FACES: resumeOrganizeFaces,
+  CLASSIFY_FACES: resumeClassifyFaces,
 };
 
 serve(async (req) => {
