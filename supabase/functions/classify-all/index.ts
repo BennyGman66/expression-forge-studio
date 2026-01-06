@@ -9,6 +9,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Time limit for each worker invocation (50 seconds - Deno kills tasks around 60-90s)
+const MAX_PROCESSING_TIME_MS = 50 * 1000;
+
 // Retry wrapper with exponential backoff for transient API errors
 async function withRetry<T>(
   fn: () => Promise<T>,
@@ -45,7 +48,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { runId, pipelineJobId, resumeFromStep } = await req.json();
+    const { runId, pipelineJobId, resumeFromStep, resumeContext } = await req.json();
 
     if (!runId) {
       return new Response(
@@ -106,8 +109,8 @@ Deno.serve(async (req) => {
       jobId = job.id;
     }
 
-    // Start background processing
-    EdgeRuntime.waitUntil(runClassificationPipeline(runId, jobId, supabase, resumeFromStep || 1));
+    // Start background processing with context for mid-step resumption
+    EdgeRuntime.waitUntil(runClassificationPipeline(runId, jobId, supabase, resumeFromStep || 1, resumeContext || {}));
 
     return new Response(
       JSON.stringify({ success: true, jobId }),
@@ -150,8 +153,41 @@ async function updateJobStep(supabase: any, jobId: string, step: number, message
     .eq('id', jobId);
 }
 
-async function runClassificationPipeline(runId: string, jobId: string, supabase: any, resumeFromStep: number = 1) {
+async function runClassificationPipeline(
+  runId: string, 
+  jobId: string, 
+  supabase: any, 
+  resumeFromStep: number = 1,
+  resumeContext: { step2Index?: number; step3Index?: number; step5Index?: number } = {}
+) {
   const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+  const startTime = Date.now();
+  
+  // Helper to check if we're approaching timeout
+  const isNearTimeout = () => (Date.now() - startTime) > MAX_PROCESSING_TIME_MS;
+  
+  // Helper to trigger self-continuation
+  const continueLater = async (step: number, context: Record<string, any>) => {
+    console.log(`Approaching timeout, scheduling continuation at step ${step}...`);
+    await supabase
+      .from('pipeline_jobs')
+      .update({ 
+        progress_message: `Continuing in new worker (step ${step})...`,
+        origin_context: { scrape_run_id: runId, current_step: step, ...context },
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+    
+    await supabase.functions.invoke('classify-all', {
+      body: { 
+        runId, 
+        pipelineJobId: jobId,
+        resumeFromStep: step,
+        resumeContext: context
+      }
+    });
+    console.log('Continuation scheduled, exiting current worker');
+  };
   
   try {
     // Get all images for this run
@@ -202,7 +238,18 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
       await updateJobStep(supabase, jobId, 1, `Step 2/6: Finding fronts for ${initialModels.length} models...`);
       console.log('Step 2: Finding front-facing images for each model...');
       
-      modelsWithFronts = await findFrontFacingImages(initialModels, supabase, lovableKey, jobId);
+      const step2Result = await findFrontFacingImages(
+        initialModels, supabase, lovableKey, jobId, 
+        resumeContext.step2Index || 0, isNearTimeout
+      );
+      
+      // Check if we need to continue later
+      if (step2Result.needsContinuation) {
+        await continueLater(2, { step2Index: step2Result.processedCount });
+        return;
+      }
+      
+      modelsWithFronts = step2Result.results;
       console.log(`Found front images for ${modelsWithFronts.filter(m => m.frontImageUrl).length} models`);
     } else {
       // Build models with fronts from existing data for resume
@@ -407,13 +454,26 @@ async function createInitialIdentities(runId: string, images: any[], supabase: a
   return models;
 }
 
-// Step 2: Find the front-facing image for each model (PARALLEL batched processing)
+// Step 2: Find the front-facing image for each model (PARALLEL batched processing with timeout support)
 async function findFrontFacingImages(
   models: Array<{ id: string; name: string; images: any[]; productUrl: string }>,
   supabase: any,
   lovableKey?: string,
-  jobId?: string
-) {
+  jobId?: string,
+  startFromIndex: number = 0,
+  isNearTimeout?: () => boolean
+): Promise<{
+  results: Array<{ 
+    id: string; 
+    name: string; 
+    images: any[]; 
+    productUrl: string;
+    frontImageUrl?: string;
+    frontImageId?: string;
+  }>;
+  needsContinuation: boolean;
+  processedCount: number;
+}> {
   const MODEL_BATCH_SIZE = 5; // Process 5 models in parallel (reduced for stability)
   const results: Array<{ 
     id: string; 
@@ -423,6 +483,27 @@ async function findFrontFacingImages(
     frontImageUrl?: string;
     frontImageId?: string;
   }> = [];
+
+  // For resumption, we skip already-processed models but still need their data
+  // Fetch existing models with views already set for the ones we're skipping
+  if (startFromIndex > 0) {
+    const skippedModels = models.slice(0, startFromIndex);
+    for (const model of skippedModels) {
+      // Fetch the model's images with views from DB
+      const { data: identityImages } = await supabase
+        .from('face_identity_images')
+        .select('view, scrape_image:face_scrape_images(id, source_url)')
+        .eq('identity_id', model.id);
+      
+      const frontImg = identityImages?.find((ii: any) => ii.view === 'front');
+      results.push({
+        ...model,
+        frontImageUrl: frontImg?.scrape_image?.source_url || model.images[0]?.source_url,
+        frontImageId: frontImg?.scrape_image?.id || model.images[0]?.id,
+      });
+    }
+    console.log(`Resuming step 2 from index ${startFromIndex}, loaded ${results.length} already-processed models`);
+  }
 
   // Process a single model - find its front image
   const processModel = async (model: typeof models[0]): Promise<typeof results[0]> => {
@@ -483,8 +564,14 @@ async function findFrontFacingImages(
     };
   };
 
-  // Process models in parallel batches
-  for (let i = 0; i < models.length; i += MODEL_BATCH_SIZE) {
+  // Process models in parallel batches, starting from startFromIndex
+  for (let i = startFromIndex; i < models.length; i += MODEL_BATCH_SIZE) {
+    // Check for timeout before each batch
+    if (isNearTimeout && isNearTimeout()) {
+      console.log(`Timeout approaching in step 2, processed ${results.length}/${models.length}`);
+      return { results, needsContinuation: true, processedCount: results.length };
+    }
+
     const batch = models.slice(i, i + MODEL_BATCH_SIZE);
     
     const batchResults = await Promise.all(batch.map(processModel));
@@ -508,7 +595,7 @@ async function findFrontFacingImages(
     await new Promise(r => setTimeout(r, 50));
   }
 
-  return results;
+  return { results, needsContinuation: false, processedCount: results.length };
 }
 
 // Step 3: Compare faces across models and merge duplicates (with Union-Find optimization)
