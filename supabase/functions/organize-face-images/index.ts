@@ -134,9 +134,10 @@ Deno.serve(async (req) => {
     // Get processed IDs from context (for resume)
     const processedIds = resumeFromContext?.processed_ids || [];
     const skipUrlPhase = resumeFromContext?.url_phase_done || false;
+    const originalTotal = resumeFromContext?.original_total || 0;
 
     // Start background processing
-    EdgeRuntime.waitUntil(processImages(jobId, scrapeRunId, supabase, processedIds, skipUrlPhase));
+    EdgeRuntime.waitUntil(processImages(jobId, scrapeRunId, supabase, processedIds, skipUrlPhase, originalTotal));
 
     return new Response(
       JSON.stringify({ success: true, jobId }),
@@ -166,7 +167,8 @@ async function processImages(
   scrapeRunId: string, 
   supabase: any,
   alreadyProcessedIds: string[] = [],
-  skipUrlPhase: boolean = false
+  skipUrlPhase: boolean = false,
+  originalTotal: number = 0
 ) {
   const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
   const processedSet = new Set(alreadyProcessedIds);
@@ -181,10 +183,14 @@ async function processImages(
 
     if (imagesError) throw imagesError;
 
+    // Use stored originalTotal if provided, otherwise set it from current count
+    // This ensures consistent progress tracking even as images are deleted
+    const totalToTrack = originalTotal > 0 ? originalTotal : (allImages.length + processedSet.size);
+
     // Filter out already processed images (for resume)
     const images = allImages.filter((img: any) => !processedSet.has(img.id));
 
-    console.log(`[organize-face-images] Processing ${images.length} images (${processedSet.size} already done, skipUrlPhase=${skipUrlPhase})`);
+    console.log(`[organize-face-images] Processing ${images.length} images (${processedSet.size} already done, totalToTrack=${totalToTrack}, skipUrlPhase=${skipUrlPhase})`);
 
     let urlFilteredIds: string[] = [];
     let remainingImages: any[] = images;
@@ -225,13 +231,14 @@ async function processImages(
       await supabase
         .from('pipeline_jobs')
         .update({ 
-          progress_total: allImages.length, 
+          progress_total: totalToTrack, 
           progress_done: processedSet.size,
           progress_message: `Removed ${urlFilteredIds.length} by URL, analyzing ${remainingImages.length} with AI...`,
           origin_context: { 
             scrape_run_id: scrapeRunId, 
             processed_ids: Array.from(processedSet),
-            url_phase_done: true
+            url_phase_done: true,
+            original_total: totalToTrack
           },
           updated_at: new Date().toISOString()
         })
@@ -260,11 +267,12 @@ async function processImages(
         await supabase
           .from('pipeline_jobs')
           .update({ 
-            progress_message: `Continuing in new worker (${processedSet.size}/${allImages.length})...`,
+            progress_message: `Continuing in new worker (${processedSet.size}/${totalToTrack})...`,
             origin_context: { 
               scrape_run_id: scrapeRunId, 
               processed_ids: Array.from(processedSet),
-              url_phase_done: true
+              url_phase_done: true,
+              original_total: totalToTrack
             },
             updated_at: new Date().toISOString()
           })
@@ -277,7 +285,8 @@ async function processImages(
             resumeJobId: jobId,
             resumeFromContext: { 
               processed_ids: Array.from(processedSet),
-              url_phase_done: true
+              url_phase_done: true,
+              original_total: totalToTrack
             }
           }
         });
@@ -330,11 +339,12 @@ async function processImages(
         .update({ 
           progress_done: processedSet.size,
           progress_failed: failed,
-          progress_message: `Analyzed ${processedSet.size}/${allImages.length} images, ${urlFilteredIds.length + imagesToDelete.length} to remove`,
+          progress_message: `Analyzed ${processedSet.size}/${totalToTrack} images, ${urlFilteredIds.length + imagesToDelete.length} to remove`,
           origin_context: { 
             scrape_run_id: scrapeRunId, 
             processed_ids: Array.from(processedSet),
-            url_phase_done: true
+            url_phase_done: true,
+            original_total: totalToTrack
           },
           updated_at: new Date().toISOString()
         })
@@ -368,13 +378,13 @@ async function processImages(
       .update({ 
         status: 'COMPLETED',
         completed_at: new Date().toISOString(),
-        progress_done: allImages.length,
+        progress_done: totalToTrack,
         progress_failed: failed,
-        progress_message: `Removed ${totalDeleted} of ${allImages.length} images (${urlFilteredIds.length} by URL, ${imagesToDelete.length} by AI)`
+        progress_message: `Removed ${totalDeleted} of ${totalToTrack} images (${urlFilteredIds.length} by URL, ${imagesToDelete.length} by AI)`
       })
       .eq('id', jobId);
 
-    console.log(`Organization complete: removed ${totalDeleted} of ${allImages.length} images`);
+    console.log(`Organization complete: removed ${totalDeleted} of ${totalToTrack} images`);
   } catch (error) {
     console.error('Organization job failed:', error);
     await supabase
