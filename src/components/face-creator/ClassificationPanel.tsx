@@ -102,7 +102,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   const [identityImages, setIdentityImages] = useState<IdentityImage[]>([]);
   const [viewFilter, setViewFilter] = useState<ViewType | 'all'>('all');
   const [isLoading, setIsLoading] = useState(false);
-  const [jobProgress, setJobProgress] = useState<{ progress: number; total: number; status: string } | null>(null);
+  const [jobProgress, setJobProgress] = useState<{ progress: number; total: number; status: string; isPaused?: boolean } | null>(null);
   
   // Unclassified state
   const [unclassifiedImages, setUnclassifiedImages] = useState<UnclassifiedImage[]>([]);
@@ -307,7 +307,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
         .from('pipeline_jobs')
         .select('id, status, progress_done, progress_total, type')
         .or(`origin_context->scrape_run_id.eq.${runId},origin_context->>scrape_run_id.eq.${runId}`)
-        .in('status', ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELED'])
+        .in('status', ['RUNNING', 'PAUSED', 'COMPLETED', 'FAILED', 'CANCELED'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -319,6 +319,14 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
             total: data.progress_total || 0,
             status: data.type,
           });
+        } else if (data.status === 'PAUSED') {
+          setJobProgress({
+            progress: data.progress_done || 0,
+            total: data.progress_total || 0,
+            status: data.type,
+            isPaused: true,
+          });
+          setIsRunningAI(false);
         } else if (data.status === 'COMPLETED' || data.status === 'FAILED' || data.status === 'CANCELED') {
           setJobProgress(null);
           setIsRunningAI(false);
@@ -351,6 +359,14 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
               total: job.progress_total || 0,
               status: job.type,
             });
+          } else if (job.status === 'PAUSED') {
+            setJobProgress({
+              progress: job.progress_done || 0,
+              total: job.progress_total || 0,
+              status: job.type,
+              isPaused: true,
+            });
+            setIsRunningAI(false);
           } else if (job.status === 'COMPLETED' || job.status === 'FAILED' || job.status === 'CANCELED') {
             setJobProgress(null);
             setIsRunningAI(false);
@@ -757,6 +773,11 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
             <>
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               Running AI...
+            </>
+          ) : jobProgress?.isPaused ? (
+            <>
+              <Play className="h-4 w-4 mr-2" />
+              Paused ({jobProgress.progress}/{jobProgress.total})
             </>
           ) : (
             <>
