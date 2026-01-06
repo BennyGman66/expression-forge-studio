@@ -36,8 +36,8 @@ const SHOE_URL_PATTERNS = [
   /\/footwear\//i,
 ];
 
-// Time limit for each worker invocation (2 minutes)
-const MAX_PROCESSING_TIME_MS = 2 * 60 * 1000;
+// Time limit for each worker invocation (60 seconds - Deno kills tasks around 70-90s)
+const MAX_PROCESSING_TIME_MS = 60 * 1000;
 const BATCH_SIZE = 3;
 
 // Retry wrapper for transient API failures
