@@ -110,3 +110,6 @@ verify_jwt = false
 
 [functions.generate-repose-single]
 verify_jwt = false
+
+[functions.resume-repose-job]
+verify_jwt = false

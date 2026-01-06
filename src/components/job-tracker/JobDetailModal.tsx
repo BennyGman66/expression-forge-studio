@@ -71,6 +71,25 @@ export function JobDetailModal({ job, onClose, onMarkStalled }: JobDetailModalPr
         return;
       }
     }
+
+    // For REPOSE_GENERATION jobs, call the edge function directly
+    if (job.type === 'REPOSE_GENERATION') {
+      setIsResuming(true);
+      try {
+        const { error } = await supabase.functions.invoke('resume-repose-job', {
+          body: { jobId: job.id }
+        });
+        if (error) throw error;
+        toast.success('Resuming repose generation in background...');
+        onClose();
+      } catch (err) {
+        console.error('Failed to resume:', err);
+        toast.error('Failed to resume job');
+      } finally {
+        setIsResuming(false);
+      }
+      return;
+    }
     
     // For other job types, navigate to origin with resumeJobId
     const url = new URL(job.origin_route, window.location.origin);

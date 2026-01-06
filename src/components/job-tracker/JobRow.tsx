@@ -116,6 +116,30 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
       }
       return;
     }
+
+    // For REPOSE_GENERATION jobs, use server-side resume
+    if (job.type === 'REPOSE_GENERATION') {
+      setIsResuming(true);
+      try {
+        const { error } = await supabase.functions.invoke('resume-repose-job', {
+          body: { jobId: job.id }
+        });
+        
+        if (error) {
+          console.error('Resume error:', error);
+          toast.error('Failed to resume repose generation');
+        } else {
+          toast.success('Repose generation resumed in background');
+        }
+      } catch (err) {
+        console.error('Resume exception:', err);
+        toast.error('Failed to resume repose generation');
+      } finally {
+        setIsResuming(false);
+        onClose?.();
+      }
+      return;
+    }
     
     // For other job types, fall back to existing behavior
     if (onResume) {
