@@ -125,7 +125,7 @@ async function processQueuedOutputs(
     // Get all queued outputs for this batch
     const { data: queuedOutputs, error: queryError } = await supabase
       .from("repose_outputs")
-      .select("id, shot_type, source_url, pose_url")
+      .select("id")
       .eq("batch_id", batchId)
       .eq("status", "queued");
 
