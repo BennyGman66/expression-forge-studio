@@ -610,85 +610,42 @@ async function resumeReposeGeneration(supabase: any, job: PipelineJob) {
 async function resumeOrganizeFaces(supabase: any, job: PipelineJob) {
   const context = job.origin_context || {};
   const scrapeRunId = context.scrape_run_id as string;
+  const processedIds = (context.processed_ids as string[]) || [];
 
   if (!scrapeRunId) {
     throw new Error("Job context missing scrape_run_id");
   }
 
-  console.log(`[resume-pipeline-job/organize] Resuming organize for scrape run ${scrapeRunId}`);
+  console.log(`[resume-pipeline-job/organize] Resuming organize for scrape run ${scrapeRunId}, ${processedIds.length} already processed`);
 
-  // Get images that haven't been processed yet (no face_detections record)
-  const { data: images, error: queryError } = await supabase
-    .from("face_scrape_images")
-    .select("id, source_url")
-    .eq("scrape_run_id", scrapeRunId);
+  // Invoke organize-face-images with the existing job ID and processed context
+  // This allows it to resume from where it left off instead of creating a new job
+  try {
+    const response = await supabase.functions.invoke("organize-face-images", {
+      body: { 
+        scrapeRunId, 
+        resumeJobId: job.id,
+        resumeFromContext: { processed_ids: processedIds }
+      }
+    });
 
-  if (queryError) {
-    throw new Error("Failed to query images: " + queryError.message);
-  }
+    if (response.error) {
+      throw new Error(response.error.message || "organize-face-images failed");
+    }
 
-  // Get existing detections to find unprocessed images
-  const imageIds = images?.map((img: any) => img.id) || [];
-  const { data: existingDetections } = await supabase
-    .from("face_detections")
-    .select("scrape_image_id")
-    .in("scrape_image_id", imageIds);
-
-  const processedSet = new Set((existingDetections || []).map((d: any) => d.scrape_image_id));
-  const unprocessed = images?.filter((img: any) => !processedSet.has(img.id)) || [];
-
-  console.log(`[resume-pipeline-job/organize] Found ${unprocessed.length} unprocessed images`);
-
-  if (unprocessed.length === 0) {
+    // The organize-face-images function will update the job status when complete
+    console.log(`[resume-pipeline-job/organize] Organization resumed for job ${job.id}`);
+  } catch (err) {
+    console.error(`[resume-pipeline-job/organize] Error:`, err);
     await supabase
       .from("pipeline_jobs")
       .update({
-        status: "COMPLETED",
+        status: "FAILED",
         completed_at: new Date().toISOString(),
-        progress_message: "All images already organized"
+        progress_message: err instanceof Error ? err.message : "Unknown error"
       })
       .eq("id", job.id);
-    return;
   }
-
-  const alreadyDone = processedSet.size;
-  let successCount = 0;
-  let failCount = 0;
-
-  await supabase
-    .from("pipeline_jobs")
-    .update({
-      progress_done: alreadyDone,
-      progress_total: images?.length || 0,
-      progress_message: `Resuming from ${alreadyDone}/${images?.length || 0}`
-    })
-    .eq("id", job.id);
-
-  // Process remaining images - invoke organize-face-images to continue
-  try {
-    await supabase.functions.invoke("organize-face-images", {
-      body: { scrapeRunId, pipelineJobId: job.id }
-    });
-    successCount = unprocessed.length;
-  } catch (err) {
-    console.error(`[resume-pipeline-job/organize] Error:`, err);
-    failCount = unprocessed.length;
-  }
-
-  await supabase
-    .from("pipeline_jobs")
-    .update({
-      status: failCount > 0 && successCount === 0 ? "FAILED" : "COMPLETED",
-      completed_at: new Date().toISOString(),
-      progress_done: alreadyDone + successCount,
-      progress_failed: failCount,
-      progress_message: failCount > 0
-        ? `Completed with ${failCount} failures`
-        : "Completed successfully"
-    })
-    .eq("id", job.id);
-
-  console.log(`[resume-pipeline-job/organize] Finished job ${job.id}`);
 }
 
 // ============== CLASSIFY_FACES HANDLER ==============

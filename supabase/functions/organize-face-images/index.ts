@@ -36,13 +36,38 @@ const SHOE_URL_PATTERNS = [
   /\/footwear\//i,
 ];
 
+// Retry wrapper for transient API failures
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 1000
+): Promise<T> {
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const msg = lastError.message.toLowerCase();
+      const isTransient = msg.includes('502') || msg.includes('503') || 
+                          msg.includes('429') || msg.includes('timeout') ||
+                          msg.includes('rate limit');
+      if (!isTransient || attempt === maxRetries - 1) throw lastError;
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      console.log(`[withRetry] Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { scrapeRunId } = await req.json();
+    const { scrapeRunId, resumeJobId, resumeFromContext } = await req.json();
 
     if (!scrapeRunId) {
       return new Response(
@@ -55,42 +80,61 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get brand name from scrape run for title
-    const { data: run } = await supabase
-      .from('face_scrape_runs')
-      .select('brand_name')
-      .eq('id', scrapeRunId)
-      .single();
+    let jobId = resumeJobId;
 
-    // Create a pipeline job to track progress
-    const { data: job, error: jobError } = await supabase
-      .from('pipeline_jobs')
-      .insert({
-        type: 'ORGANIZE_FACES',
-        title: `Pre-filter: ${run?.brand_name || 'Unknown'}`,
-        status: 'RUNNING',
-        progress_total: 0,
-        progress_done: 0,
-        progress_failed: 0,
-        progress_message: 'Starting pre-filter...',
-        origin_route: '/face-creator',
-        origin_context: { scrape_run_id: scrapeRunId },
-        supports_pause: true,
-        supports_retry: true,
-        supports_restart: false,
-        source_table: 'face_scrape_runs',
-        source_job_id: scrapeRunId,
-      })
-      .select()
-      .single();
+    if (resumeJobId) {
+      // Resuming existing job - update status
+      console.log(`[organize-face-images] Resuming existing job ${resumeJobId}`);
+      await supabase
+        .from('pipeline_jobs')
+        .update({ 
+          status: 'RUNNING', 
+          progress_message: 'Resuming pre-filter...',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', resumeJobId);
+    } else {
+      // Get brand name from scrape run for title
+      const { data: run } = await supabase
+        .from('face_scrape_runs')
+        .select('brand_name')
+        .eq('id', scrapeRunId)
+        .single();
 
-    if (jobError) throw jobError;
+      // Create a new pipeline job to track progress
+      const { data: job, error: jobError } = await supabase
+        .from('pipeline_jobs')
+        .insert({
+          type: 'ORGANIZE_FACES',
+          title: `Pre-filter: ${run?.brand_name || 'Unknown'}`,
+          status: 'RUNNING',
+          progress_total: 0,
+          progress_done: 0,
+          progress_failed: 0,
+          progress_message: 'Starting pre-filter...',
+          origin_route: '/face-creator',
+          origin_context: { scrape_run_id: scrapeRunId, processed_ids: [] },
+          supports_pause: true,
+          supports_retry: true,
+          supports_restart: false,
+          source_table: 'face_scrape_runs',
+          source_job_id: scrapeRunId,
+        })
+        .select()
+        .single();
+
+      if (jobError) throw jobError;
+      jobId = job.id;
+    }
+
+    // Get processed IDs from context (for resume)
+    const processedIds = resumeFromContext?.processed_ids || [];
 
     // Start background processing
-    EdgeRuntime.waitUntil(processImages(job.id, scrapeRunId, supabase));
+    EdgeRuntime.waitUntil(processImages(jobId, scrapeRunId, supabase, processedIds));
 
     return new Response(
-      JSON.stringify({ success: true, jobId: job.id }),
+      JSON.stringify({ success: true, jobId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
@@ -112,19 +156,28 @@ async function checkJobCanceled(supabase: any, jobId: string): Promise<boolean> 
   return job?.status === 'CANCELED' || job?.status === 'PAUSED';
 }
 
-async function processImages(jobId: string, scrapeRunId: string, supabase: any) {
+async function processImages(
+  jobId: string, 
+  scrapeRunId: string, 
+  supabase: any,
+  alreadyProcessedIds: string[] = []
+) {
   const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+  const processedSet = new Set(alreadyProcessedIds);
   
   try {
     // Get all images for this scrape run
-    const { data: images, error: imagesError } = await supabase
+    const { data: allImages, error: imagesError } = await supabase
       .from('face_scrape_images')
       .select('id, source_url, product_url')
       .eq('scrape_run_id', scrapeRunId);
 
     if (imagesError) throw imagesError;
 
-    console.log(`Processing ${images.length} images for organization`);
+    // Filter out already processed images (for resume)
+    const images = allImages.filter((img: any) => !processedSet.has(img.id));
+
+    console.log(`[organize-face-images] Processing ${images.length} images (${processedSet.size} already done)`);
 
     // === PHASE 1: URL-based pre-filtering (fast, no AI calls) ===
     const urlFilteredIds: string[] = [];
@@ -137,6 +190,7 @@ async function processImages(jobId: string, scrapeRunId: string, supabase: any) 
       
       if (isKids || isShoes) {
         urlFilteredIds.push(image.id);
+        processedSet.add(image.id);
         console.log(`URL pre-filter: ${image.id} - ${isKids ? 'kids' : 'shoes'} product`);
       } else {
         remainingImages.push(image);
@@ -157,22 +211,27 @@ async function processImages(jobId: string, scrapeRunId: string, supabase: any) 
       }
     }
 
+    // Update job with initial progress
     await supabase
       .from('pipeline_jobs')
       .update({ 
-        progress_total: images.length, 
-        progress_done: urlFilteredIds.length,
-        progress_message: `Removed ${urlFilteredIds.length} by URL, analyzing ${remainingImages.length} with AI...`
+        progress_total: allImages.length, 
+        progress_done: processedSet.size,
+        progress_message: `Removed ${urlFilteredIds.length} by URL, analyzing ${remainingImages.length} with AI...`,
+        origin_context: { 
+          scrape_run_id: scrapeRunId, 
+          processed_ids: Array.from(processedSet) 
+        },
+        updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
 
     // === PHASE 2: AI-based classification for remaining images ===
     const imagesToDelete: string[] = [];
-    let processed = urlFilteredIds.length;
     let failed = 0;
 
-    // Process in batches for better performance
-    const BATCH_SIZE = 5;
+    // Process in small batches for better performance and timeout resilience
+    const BATCH_SIZE = 3; // Small batch for reliability
     for (let i = 0; i < remainingImages.length; i += BATCH_SIZE) {
       // Check for cancellation
       if (await checkJobCanceled(supabase, jobId)) {
@@ -184,15 +243,22 @@ async function processImages(jobId: string, scrapeRunId: string, supabase: any) 
       
       const batchResults = await Promise.allSettled(
         batch.map(async (image: any) => {
-          const classification = await classifyImage(image.source_url, lovableApiKey);
+          const classification = await withRetry(() => 
+            classifyImage(image.source_url, lovableApiKey)
+          );
           console.log(`Image ${image.id}: ${JSON.stringify(classification)}`);
           return { image, classification };
         })
       );
 
+      const batchProcessedIds: string[] = [];
+
       for (const result of batchResults) {
         if (result.status === 'fulfilled') {
           const { image, classification } = result.value;
+          processedSet.add(image.id);
+          batchProcessedIds.push(image.id);
+          
           // Delete if it matches any exclusion criteria
           if (classification.isProductShot || 
               classification.isChild || 
@@ -206,22 +272,26 @@ async function processImages(jobId: string, scrapeRunId: string, supabase: any) 
           console.error(`Batch item failed:`, result.reason);
           failed++;
         }
-        processed++;
       }
         
-      // Update progress after each batch
+      // Update progress after each batch (critical for resume capability)
       await supabase
         .from('pipeline_jobs')
         .update({ 
-          progress_done: processed,
+          progress_done: processedSet.size,
           progress_failed: failed,
-          progress_message: `Analyzed ${processed}/${images.length} images, ${urlFilteredIds.length + imagesToDelete.length} to remove`
+          progress_message: `Analyzed ${processedSet.size}/${allImages.length} images, ${urlFilteredIds.length + imagesToDelete.length} to remove`,
+          origin_context: { 
+            scrape_run_id: scrapeRunId, 
+            processed_ids: Array.from(processedSet) 
+          },
+          updated_at: new Date().toISOString()
         })
         .eq('id', jobId);
 
       // Small delay between batches to avoid rate limits
       if (i + BATCH_SIZE < remainingImages.length) {
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 200));
       }
     }
 
@@ -247,13 +317,13 @@ async function processImages(jobId: string, scrapeRunId: string, supabase: any) 
       .update({ 
         status: 'COMPLETED',
         completed_at: new Date().toISOString(),
-        progress_done: images.length,
+        progress_done: allImages.length,
         progress_failed: failed,
-        progress_message: `Removed ${totalDeleted} of ${images.length} images (${urlFilteredIds.length} by URL, ${imagesToDelete.length} by AI)`
+        progress_message: `Removed ${totalDeleted} of ${allImages.length} images (${urlFilteredIds.length} by URL, ${imagesToDelete.length} by AI)`
       })
       .eq('id', jobId);
 
-    console.log(`Organization complete: removed ${totalDeleted} of ${images.length} images`);
+    console.log(`Organization complete: removed ${totalDeleted} of ${allImages.length} images`);
   } catch (error) {
     console.error('Organization job failed:', error);
     await supabase
@@ -338,10 +408,13 @@ Respond in JSON only:
     console.error('AI API error:', response.status, text);
     
     if (response.status === 429) {
-      throw new Error('Rate limit exceeded');
+      throw new Error('Rate limit exceeded (429)');
     }
     if (response.status === 402) {
       throw new Error('Payment required');
+    }
+    if (response.status === 502 || response.status === 503) {
+      throw new Error(`Server error (${response.status})`);
     }
     throw new Error(`AI API error: ${response.status}`);
   }
