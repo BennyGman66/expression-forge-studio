@@ -407,13 +407,14 @@ async function createInitialIdentities(runId: string, images: any[], supabase: a
   return models;
 }
 
-// Step 2: Find the front-facing image for each model (with batching)
+// Step 2: Find the front-facing image for each model (PARALLEL batched processing)
 async function findFrontFacingImages(
   models: Array<{ id: string; name: string; images: any[]; productUrl: string }>,
   supabase: any,
   lovableKey?: string,
   jobId?: string
 ) {
+  const MODEL_BATCH_SIZE = 10; // Process 10 models in parallel
   const results: Array<{ 
     id: string; 
     name: string; 
@@ -423,53 +424,85 @@ async function findFrontFacingImages(
     frontImageId?: string;
   }> = [];
 
-  for (const model of models) {
-    let frontImage = null;
-    
-    // Process images in parallel batches for this model
-    const BATCH_SIZE = 3;
-    for (let i = 0; i < model.images.length && !frontImage; i += BATCH_SIZE) {
-      const batch = model.images.slice(i, i + BATCH_SIZE);
+  // Process a single model - find its front image
+  const processModel = async (model: typeof models[0]): Promise<typeof results[0]> => {
+    // Only check the first image for front detection - early exit optimization
+    const firstImage = model.images[0];
+    if (!firstImage) {
+      return { ...model, frontImageUrl: undefined, frontImageId: undefined };
+    }
+
+    // Check first image
+    const firstView = await classifyView(firstImage.source_url, lovableKey);
+    await supabase
+      .from('face_identity_images')
+      .update({ view: firstView, view_source: 'ai' })
+      .eq('scrape_image_id', firstImage.id)
+      .eq('identity_id', model.id);
+
+    if (firstView === 'front') {
+      return {
+        ...model,
+        frontImageUrl: firstImage.source_url,
+        frontImageId: firstImage.id,
+      };
+    }
+
+    // Check remaining images if first wasn't front (batch of 2)
+    for (let i = 1; i < model.images.length; i += 2) {
+      const batch = model.images.slice(i, Math.min(i + 2, model.images.length));
       
       const viewResults = await Promise.all(
         batch.map(async (image: any) => {
           const view = await classifyView(image.source_url, lovableKey);
-          
-          // Update the identity image with the view
           await supabase
             .from('face_identity_images')
             .update({ view, view_source: 'ai' })
             .eq('scrape_image_id', image.id)
             .eq('identity_id', model.id);
-          
           return { image, view };
         })
       );
 
-      // Find front image in this batch
       const front = viewResults.find(r => r.view === 'front');
       if (front) {
-        frontImage = front.image;
-      }
-
-      // Small delay between batches
-      if (!frontImage && i + BATCH_SIZE < model.images.length) {
-        await new Promise(r => setTimeout(r, 100));
+        return {
+          ...model,
+          frontImageUrl: front.image.source_url,
+          frontImageId: front.image.id,
+        };
       }
     }
 
-    // Fallback: if no front found, use the first image as representative
-    const fallbackImage = model.images[0];
-    
-    results.push({
+    // No front found - use first as fallback
+    console.log(`No front found for ${model.name}, using first image as fallback`);
+    return {
       ...model,
-      frontImageUrl: frontImage?.source_url || fallbackImage?.source_url,
-      frontImageId: frontImage?.id || fallbackImage?.id,
-    });
+      frontImageUrl: firstImage.source_url,
+      frontImageId: firstImage.id,
+    };
+  };
 
-    if (!frontImage && fallbackImage) {
-      console.log(`No front found for ${model.name}, using first image as fallback`);
+  // Process models in parallel batches
+  for (let i = 0; i < models.length; i += MODEL_BATCH_SIZE) {
+    const batch = models.slice(i, i + MODEL_BATCH_SIZE);
+    
+    const batchResults = await Promise.all(batch.map(processModel));
+    results.push(...batchResults);
+
+    // Update progress after each batch
+    if (jobId) {
+      const percent = Math.round((results.length / models.length) * 100);
+      await supabase
+        .from('pipeline_jobs')
+        .update({ 
+          progress_message: `Step 2/6: Finding fronts... ${results.length}/${models.length} (${percent}%)`,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
     }
+
+    console.log(`Step 2 progress: ${results.length}/${models.length} models processed`);
   }
 
   return results;
