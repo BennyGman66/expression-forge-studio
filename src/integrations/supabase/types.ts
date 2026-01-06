@@ -3310,6 +3310,8 @@ export type Database = {
         | "ORGANIZE_IMAGES"
         | "OTHER"
         | "REPOSE_GENERATION"
+        | "ORGANIZE_FACES"
+        | "CLASSIFY_FACES"
       submission_status:
         | "SUBMITTED"
         | "IN_REVIEW"
@@ -3501,6 +3503,8 @@ export const Constants = {
         "ORGANIZE_IMAGES",
         "OTHER",
         "REPOSE_GENERATION",
+        "ORGANIZE_FACES",
+        "CLASSIFY_FACES",
       ],
       submission_status: [
         "SUBMITTED",

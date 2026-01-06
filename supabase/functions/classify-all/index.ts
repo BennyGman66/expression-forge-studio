@@ -1,5 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+declare const EdgeRuntime: {
+  waitUntil(promise: Promise<unknown>): void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -24,13 +28,31 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Create a job record
+    // Get brand name from scrape run for title
+    const { data: run } = await supabase
+      .from('face_scrape_runs')
+      .select('brand_name')
+      .eq('id', runId)
+      .single();
+
+    // Create a pipeline job to track progress
     const { data: job, error: jobError } = await supabase
-      .from('face_jobs')
+      .from('pipeline_jobs')
       .insert({
-        scrape_run_id: runId,
-        type: 'classify_all',
-        status: 'running',
+        type: 'CLASSIFY_FACES',
+        title: `Classify Models: ${run?.brand_name || 'Unknown'}`,
+        status: 'RUNNING',
+        progress_total: 6, // 6 steps
+        progress_done: 0,
+        progress_failed: 0,
+        progress_message: 'Starting classification...',
+        origin_route: '/face-creator',
+        origin_context: { scrape_run_id: runId, current_step: 1 },
+        supports_pause: true,
+        supports_retry: true,
+        supports_restart: true,
+        source_table: 'face_scrape_runs',
+        source_job_id: runId,
       })
       .select()
       .single();
@@ -38,8 +60,7 @@ Deno.serve(async (req) => {
     if (jobError) throw jobError;
 
     // Start background processing
-    const backgroundPromise = runClassificationPipeline(runId, job.id, supabase);
-    (globalThis as any).EdgeRuntime?.waitUntil?.(backgroundPromise);
+    EdgeRuntime.waitUntil(runClassificationPipeline(runId, job.id, supabase));
 
     return new Response(
       JSON.stringify({ success: true, jobId: job.id }),
@@ -54,6 +75,33 @@ Deno.serve(async (req) => {
     );
   }
 });
+
+async function checkJobCanceled(supabase: any, jobId: string): Promise<boolean> {
+  const { data: job } = await supabase
+    .from('pipeline_jobs')
+    .select('status')
+    .eq('id', jobId)
+    .single();
+  return job?.status === 'CANCELED' || job?.status === 'PAUSED';
+}
+
+async function updateJobStep(supabase: any, jobId: string, step: number, message: string, context: Record<string, any> = {}) {
+  const { data: job } = await supabase
+    .from('pipeline_jobs')
+    .select('origin_context')
+    .eq('id', jobId)
+    .single();
+
+  await supabase
+    .from('pipeline_jobs')
+    .update({ 
+      progress_done: step,
+      progress_message: message,
+      origin_context: { ...job?.origin_context, current_step: step, ...context },
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', jobId);
+}
 
 async function runClassificationPipeline(runId: string, jobId: string, supabase: any) {
   const lovableKey = Deno.env.get('LOVABLE_API_KEY');
@@ -71,37 +119,41 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
     console.log(`Starting classification pipeline for ${total} images`);
 
     // ===== STEP 1: Group images by product_url (create initial identities) =====
-    await updateJob(supabase, jobId, 'product_grouping', 0, total);
+    if (await checkJobCanceled(supabase, jobId)) return;
+    await updateJobStep(supabase, jobId, 0, 'Step 1/6: Grouping by product...');
     console.log('Step 1: Grouping images by product URL...');
     
     const initialModels = await createInitialIdentities(runId, images, supabase);
     console.log(`Created ${initialModels.length} initial models from product URLs`);
 
     // ===== STEP 2: Find front-facing image for each model =====
-    await updateJob(supabase, jobId, 'finding_fronts', 0, initialModels.length);
+    if (await checkJobCanceled(supabase, jobId)) return;
+    await updateJobStep(supabase, jobId, 1, `Step 2/6: Finding fronts for ${initialModels.length} models...`);
     console.log('Step 2: Finding front-facing images for each model...');
     
-    const modelsWithFronts = await findFrontFacingImages(initialModels, supabase, lovableKey);
+    const modelsWithFronts = await findFrontFacingImages(initialModels, supabase, lovableKey, jobId);
     console.log(`Found front images for ${modelsWithFronts.filter(m => m.frontImageUrl).length} models`);
 
     // ===== STEP 3: Compare faces and merge duplicate models =====
-    await updateJob(supabase, jobId, 'face_matching', 0, modelsWithFronts.length);
+    if (await checkJobCanceled(supabase, jobId)) return;
+    await updateJobStep(supabase, jobId, 2, 'Step 3/6: Matching faces across models...');
     console.log('Step 3: Comparing faces across models...');
     
-    await compareFacesAndMerge(modelsWithFronts, supabase, lovableKey);
+    await compareFacesAndMerge(modelsWithFronts, supabase, lovableKey, jobId);
 
     // ===== STEP 4: Classify gender for each remaining model =====
-    // Refresh the identities after merging
+    if (await checkJobCanceled(supabase, jobId)) return;
     const { data: remainingIdentities } = await supabase
       .from('face_identities')
       .select('*, face_identity_images(*, scrape_image:face_scrape_images(*))')
       .eq('scrape_run_id', runId);
 
-    await updateJob(supabase, jobId, 'gender_classification', 0, remainingIdentities?.length || 0);
+    await updateJobStep(supabase, jobId, 3, `Step 4/6: Classifying gender for ${remainingIdentities?.length || 0} models...`);
     console.log(`Step 4: Classifying gender for ${remainingIdentities?.length || 0} models...`);
 
     for (const identity of (remainingIdentities || [])) {
-      // Use the first front-facing image or any image to classify gender
+      if (await checkJobCanceled(supabase, jobId)) return;
+      
       const representativeImage = identity.face_identity_images?.find((ii: any) => ii.view === 'front')?.scrape_image 
         || identity.face_identity_images?.[0]?.scrape_image;
       
@@ -113,74 +165,82 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
           .eq('id', identity.id);
         console.log(`Model ${identity.name} classified as ${gender}`);
       }
-      
-      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
-    // ===== STEP 5: Classify views for all identity images =====
+    // ===== STEP 5: Classify views for all identity images (only unclassified ones) =====
+    if (await checkJobCanceled(supabase, jobId)) return;
     const { data: identityImages } = await supabase
       .from('face_identity_images')
       .select('*, scrape_image:face_scrape_images(*), identity:face_identities!inner(scrape_run_id)')
       .eq('identity.scrape_run_id', runId)
       .eq('is_ignored', false);
 
-    await updateJob(supabase, jobId, 'view_classification', 0, identityImages?.length || 0);
-    console.log(`Step 5: Classifying views for ${identityImages?.length || 0} images...`);
+    // Only process images with unknown views (optimization: skip already classified in step 2)
+    const unclassifiedImages = (identityImages || []).filter(
+      (img: any) => img.view === 'unknown' || img.view_source !== 'ai'
+    );
 
-    let viewProgress = 0;
-    for (const identityImage of (identityImages || [])) {
-      // Skip if already classified in step 2
-      if (identityImage.view !== 'unknown' && identityImage.view_source === 'ai') {
-        viewProgress++;
-        continue;
-      }
+    await updateJobStep(supabase, jobId, 4, `Step 5/6: Classifying views for ${unclassifiedImages.length} images...`);
+    console.log(`Step 5: Classifying views for ${unclassifiedImages.length} unclassified images...`);
+
+    // Process in batches for better performance
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < unclassifiedImages.length; i += BATCH_SIZE) {
+      if (await checkJobCanceled(supabase, jobId)) return;
+
+      const batch = unclassifiedImages.slice(i, i + BATCH_SIZE);
       
-      try {
-        const imageUrl = identityImage.scrape_image?.source_url;
-        if (imageUrl) {
-          const view = await classifyView(imageUrl, lovableKey);
-          await supabase
-            .from('face_identity_images')
-            .update({ view, view_source: 'ai' })
-            .eq('id', identityImage.id);
-          console.log(`View for image ${identityImage.id}: ${view}`);
-        }
-      } catch (err) {
-        console.error('View classification error:', err);
+      await Promise.all(
+        batch.map(async (identityImage: any) => {
+          try {
+            const imageUrl = identityImage.scrape_image?.source_url;
+            if (imageUrl) {
+              const view = await classifyView(imageUrl, lovableKey);
+              await supabase
+                .from('face_identity_images')
+                .update({ view, view_source: 'ai' })
+                .eq('id', identityImage.id);
+            }
+          } catch (err) {
+            console.error('View classification error:', err);
+          }
+        })
+      );
+
+      // Small delay between batches
+      if (i + BATCH_SIZE < unclassifiedImages.length) {
+        await new Promise(r => setTimeout(r, 100));
       }
-      
-      viewProgress++;
-      if (viewProgress % 5 === 0) {
-        await updateJob(supabase, jobId, 'view_classification', viewProgress, identityImages?.length || 0);
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 200));
     }
 
     // ===== STEP 6: Renumber models sequentially =====
+    if (await checkJobCanceled(supabase, jobId)) return;
+    await updateJobStep(supabase, jobId, 5, 'Step 6/6: Finalizing model names...');
     await renumberModels(runId, supabase);
 
     // Mark job as completed
     await supabase
-      .from('face_jobs')
-      .update({ status: 'completed', progress: total, total })
+      .from('pipeline_jobs')
+      .update({ 
+        status: 'COMPLETED',
+        completed_at: new Date().toISOString(),
+        progress_done: 6,
+        progress_message: `Classified ${remainingIdentities?.length || 0} models`
+      })
       .eq('id', jobId);
 
     console.log('Classification pipeline completed for run:', runId);
   } catch (error) {
     console.error('Classification pipeline failed:', error);
     await supabase
-      .from('face_jobs')
-      .update({ status: 'failed' })
+      .from('pipeline_jobs')
+      .update({ 
+        status: 'FAILED',
+        completed_at: new Date().toISOString(),
+        progress_message: error instanceof Error ? error.message : 'Unknown error'
+      })
       .eq('id', jobId);
   }
-}
-
-async function updateJob(supabase: any, jobId: string, type: string, progress: number, total: number) {
-  await supabase
-    .from('face_jobs')
-    .update({ type, progress, total })
-    .eq('id', jobId);
 }
 
 // Step 1: Group all images by product_url and create identities
@@ -212,7 +272,6 @@ async function createInitialIdentities(runId: string, images: any[], supabase: a
   let modelIndex = 1;
 
   for (const [productUrl, groupImages] of productGroups) {
-    // Create identity with placeholder gender (will be classified later)
     const { data: identity, error: identityError } = await supabase
       .from('face_identities')
       .insert({
@@ -230,7 +289,6 @@ async function createInitialIdentities(runId: string, images: any[], supabase: a
       continue;
     }
 
-    // Link images to identity
     for (const image of groupImages) {
       await supabase
         .from('face_identity_images')
@@ -255,11 +313,12 @@ async function createInitialIdentities(runId: string, images: any[], supabase: a
   return models;
 }
 
-// Step 2: Find the front-facing image for each model
+// Step 2: Find the front-facing image for each model (with batching)
 async function findFrontFacingImages(
   models: Array<{ id: string; name: string; images: any[]; productUrl: string }>,
   supabase: any,
-  lovableKey?: string
+  lovableKey?: string,
+  jobId?: string
 ) {
   const results: Array<{ 
     id: string; 
@@ -273,22 +332,36 @@ async function findFrontFacingImages(
   for (const model of models) {
     let frontImage = null;
     
-    // Try to find the front-facing image
-    for (const image of model.images) {
-      const view = await classifyView(image.source_url, lovableKey);
+    // Process images in parallel batches for this model
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < model.images.length && !frontImage; i += BATCH_SIZE) {
+      const batch = model.images.slice(i, i + BATCH_SIZE);
       
-      // Update the identity image with the view
-      await supabase
-        .from('face_identity_images')
-        .update({ view, view_source: 'ai' })
-        .eq('scrape_image_id', image.id)
-        .eq('identity_id', model.id);
-      
-      if (view === 'front' && !frontImage) {
-        frontImage = image;
+      const viewResults = await Promise.all(
+        batch.map(async (image: any) => {
+          const view = await classifyView(image.source_url, lovableKey);
+          
+          // Update the identity image with the view
+          await supabase
+            .from('face_identity_images')
+            .update({ view, view_source: 'ai' })
+            .eq('scrape_image_id', image.id)
+            .eq('identity_id', model.id);
+          
+          return { image, view };
+        })
+      );
+
+      // Find front image in this batch
+      const front = viewResults.find(r => r.view === 'front');
+      if (front) {
+        frontImage = front.image;
       }
-      
-      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Small delay between batches
+      if (!frontImage && i + BATCH_SIZE < model.images.length) {
+        await new Promise(r => setTimeout(r, 100));
+      }
     }
 
     results.push({
@@ -301,7 +374,7 @@ async function findFrontFacingImages(
   return results;
 }
 
-// Step 3: Compare faces across models and merge duplicates
+// Step 3: Compare faces across models and merge duplicates (with Union-Find optimization)
 async function compareFacesAndMerge(
   models: Array<{ 
     id: string; 
@@ -312,29 +385,46 @@ async function compareFacesAndMerge(
     frontImageId?: string;
   }>,
   supabase: any,
-  lovableKey?: string
+  lovableKey?: string,
+  jobId?: string
 ) {
   // Only compare models that have front-facing images
   const modelsWithFronts = models.filter(m => m.frontImageUrl);
   console.log(`Comparing ${modelsWithFronts.length} models with front-facing images`);
 
-  // Track which models have been merged (by their ID)
-  const mergedInto = new Map<string, string>(); // modelId -> targetModelId
+  // Sort by image count - compare larger groups first (Union-Find optimization)
+  modelsWithFronts.sort((a, b) => b.images.length - a.images.length);
+
+  // Union-Find data structure for efficient merging
+  const parent = new Map<string, string>();
+  const getRoot = (id: string): string => {
+    if (!parent.has(id)) parent.set(id, id);
+    if (parent.get(id) !== id) {
+      parent.set(id, getRoot(parent.get(id)!));
+    }
+    return parent.get(id)!;
+  };
+  const union = (a: string, b: string) => {
+    const rootA = getRoot(a);
+    const rootB = getRoot(b);
+    if (rootA !== rootB) {
+      parent.set(rootB, rootA);
+    }
+  };
 
   // Compare each pair of models
   for (let i = 0; i < modelsWithFronts.length; i++) {
     const modelA = modelsWithFronts[i];
     
-    // Skip if this model was already merged into another
-    if (mergedInto.has(modelA.id)) continue;
+    // Skip if already merged into another
+    if (getRoot(modelA.id) !== modelA.id) continue;
 
     for (let j = i + 1; j < modelsWithFronts.length; j++) {
       const modelB = modelsWithFronts[j];
       
-      // Skip if this model was already merged into another
-      if (mergedInto.has(modelB.id)) continue;
+      // Skip if already merged
+      if (getRoot(modelB.id) !== modelB.id) continue;
 
-      // Compare the two faces
       const isSamePerson = await compareFaces(
         modelA.frontImageUrl!,
         modelB.frontImageUrl!,
@@ -342,20 +432,36 @@ async function compareFacesAndMerge(
       );
 
       if (isSamePerson) {
-        console.log(`MATCH: ${modelA.name} and ${modelB.name} are the same person - merging`);
-        
-        // Merge modelB into modelA
-        await mergeModels(modelA.id, modelB.id, supabase);
-        mergedInto.set(modelB.id, modelA.id);
-      } else {
-        console.log(`Different: ${modelA.name} and ${modelB.name}`);
+        console.log(`MATCH: ${modelA.name} and ${modelB.name} are the same person`);
+        union(modelA.id, modelB.id);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Small delay between comparisons
+      await new Promise(r => setTimeout(r, 100));
     }
   }
 
-  console.log(`Merged ${mergedInto.size} duplicate models`);
+  // Batch merge using Union-Find results
+  const mergeGroups = new Map<string, string[]>();
+  for (const model of modelsWithFronts) {
+    const root = getRoot(model.id);
+    if (!mergeGroups.has(root)) {
+      mergeGroups.set(root, []);
+    }
+    if (model.id !== root) {
+      mergeGroups.get(root)!.push(model.id);
+    }
+  }
+
+  let mergeCount = 0;
+  for (const [targetId, sourceIds] of mergeGroups) {
+    for (const sourceId of sourceIds) {
+      await mergeModels(targetId, sourceId, supabase);
+      mergeCount++;
+    }
+  }
+
+  console.log(`Merged ${mergeCount} duplicate models`);
 }
 
 // Compare two face images using AI
