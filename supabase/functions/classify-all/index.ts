@@ -414,7 +414,7 @@ async function findFrontFacingImages(
   lovableKey?: string,
   jobId?: string
 ) {
-  const MODEL_BATCH_SIZE = 10; // Process 10 models in parallel
+  const MODEL_BATCH_SIZE = 5; // Process 5 models in parallel (reduced for stability)
   const results: Array<{ 
     id: string; 
     name: string; 
@@ -503,6 +503,9 @@ async function findFrontFacingImages(
     }
 
     console.log(`Step 2 progress: ${results.length}/${models.length} models processed`);
+    
+    // Small breathing room between batches to prevent timeout
+    await new Promise(r => setTimeout(r, 50));
   }
 
   return results;
