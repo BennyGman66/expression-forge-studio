@@ -267,6 +267,8 @@ async function processImages(
         await supabase
           .from('pipeline_jobs')
           .update({ 
+            progress_total: totalToTrack,
+            progress_done: processedSet.size,
             progress_message: `Continuing in new worker (${processedSet.size}/${totalToTrack})...`,
             origin_context: { 
               scrape_run_id: scrapeRunId, 
@@ -337,6 +339,7 @@ async function processImages(
       await supabase
         .from('pipeline_jobs')
         .update({ 
+          progress_total: totalToTrack,
           progress_done: processedSet.size,
           progress_failed: failed,
           progress_message: `Analyzed ${processedSet.size}/${totalToTrack} images, ${urlFilteredIds.length + imagesToDelete.length} to remove`,
