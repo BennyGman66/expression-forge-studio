@@ -22,7 +22,8 @@ import {
   Unlink,
   Trash2,
   Plus,
-  Maximize2
+  Maximize2,
+  Square
 } from "lucide-react";
 import {
   Select,
@@ -285,16 +286,28 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
         .from('pipeline_jobs')
         .select('id, status, progress_done, progress_total, type')
         .or(`origin_context->scrape_run_id.eq.${runId},origin_context->>scrape_run_id.eq.${runId}`)
-        .eq('status', 'RUNNING')
+        .in('status', ['RUNNING', 'PAUSED'])
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
       
       if (data) {
-        setIsRunningAI(true);
-        setJobProgress({
-          progress: data.progress_done || 0,
-          total: data.progress_total || 0,
-          status: data.type,
-        });
+        if (data.status === 'RUNNING') {
+          setIsRunningAI(true);
+          setJobProgress({
+            progress: data.progress_done || 0,
+            total: data.progress_total || 0,
+            status: data.type,
+          });
+        } else if (data.status === 'PAUSED') {
+          setIsRunningAI(false);
+          setJobProgress({
+            progress: data.progress_done || 0,
+            total: data.progress_total || 0,
+            status: data.type,
+            isPaused: true,
+          });
+        }
       }
     };
     checkActiveJobs();
@@ -392,6 +405,36 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     if (!runId) {
       toast({ title: "No scrape run selected", variant: "destructive" });
       return;
+    }
+  };
+
+  const handleCancelJob = async () => {
+    if (!runId) return;
+    
+    try {
+      // Find the active job for this run
+      const { data: job } = await supabase
+        .from('pipeline_jobs')
+        .select('id')
+        .or(`origin_context->scrape_run_id.eq.${runId},origin_context->>scrape_run_id.eq.${runId}`)
+        .in('status', ['RUNNING', 'PAUSED'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (job) {
+        await supabase
+          .from('pipeline_jobs')
+          .update({ status: 'CANCELED' })
+          .eq('id', job.id);
+        
+        setIsRunningAI(false);
+        setJobProgress(null);
+        toast({ title: "Job canceled" });
+      }
+    } catch (error) {
+      console.error('Error canceling job:', error);
+      toast({ title: "Failed to cancel job", variant: "destructive" });
     }
 
     setIsRunningAI(true);
@@ -763,29 +806,41 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
         </Button>
 
         {/* Classify Models Button */}
-        <Button
-          onClick={handleRunAllAI}
-          disabled={isRunningAI}
-          className="w-full"
-          size="lg"
-        >
-          {isRunningAI ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Running AI...
-            </>
-          ) : jobProgress?.isPaused ? (
-            <>
-              <Play className="h-4 w-4 mr-2" />
-              Paused ({jobProgress.progress}/{jobProgress.total})
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4 mr-2" />
-              Classify Models
-            </>
+        <div className="flex gap-2">
+          <Button
+            onClick={handleRunAllAI}
+            disabled={isRunningAI}
+            className="flex-1"
+            size="lg"
+          >
+            {isRunningAI ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Running AI...
+              </>
+            ) : jobProgress?.isPaused ? (
+              <>
+                <Play className="h-4 w-4 mr-2" />
+                Paused ({jobProgress.progress}/{jobProgress.total})
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4 mr-2" />
+                Classify Models
+              </>
+            )}
+          </Button>
+          
+          {(isRunningAI || jobProgress?.isPaused) && (
+            <Button
+              onClick={handleCancelJob}
+              variant="destructive"
+              size="lg"
+            >
+              <Square className="h-4 w-4" />
+            </Button>
           )}
-        </Button>
+        </div>
 
         {/* Reset Button */}
         {identities.length > 0 && (
