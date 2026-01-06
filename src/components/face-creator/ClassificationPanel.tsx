@@ -279,28 +279,52 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   useEffect(() => {
     if (!runId) return;
 
+    // Check for active pipeline jobs on mount
+    const checkActiveJobs = async () => {
+      const { data } = await supabase
+        .from('pipeline_jobs')
+        .select('id, status, progress_done, progress_total, type')
+        .or(`origin_context->scrape_run_id.eq.${runId},origin_context->>scrape_run_id.eq.${runId}`)
+        .eq('status', 'RUNNING')
+        .maybeSingle();
+      
+      if (data) {
+        setIsRunningAI(true);
+        setJobProgress({
+          progress: data.progress_done || 0,
+          total: data.progress_total || 0,
+          status: data.type,
+        });
+      }
+    };
+    checkActiveJobs();
+
     const channel = supabase
-      .channel('face-job-progress')
+      .channel('pipeline-job-progress')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'face_jobs',
-          filter: `scrape_run_id=eq.${runId}`,
+          table: 'pipeline_jobs',
         },
         (payload) => {
           const job = payload.new as any;
-          if (job.status === 'running') {
+          // Check if this job is for our scrape run
+          const jobRunId = job.origin_context?.scrape_run_id;
+          if (jobRunId !== runId) return;
+          
+          if (job.status === 'RUNNING') {
+            setIsRunningAI(true);
             setJobProgress({
-              progress: job.progress || 0,
-              total: job.total || 0,
+              progress: job.progress_done || 0,
+              total: job.progress_total || 0,
               status: job.type,
             });
-          } else if (job.status === 'completed' || job.status === 'failed') {
+          } else if (job.status === 'COMPLETE' || job.status === 'FAILED' || job.status === 'CANCELED') {
             setJobProgress(null);
             setIsRunningAI(false);
-            if (job.status === 'completed') {
+            if (job.status === 'COMPLETE') {
               toast({ title: "AI classification completed" });
             }
           }
