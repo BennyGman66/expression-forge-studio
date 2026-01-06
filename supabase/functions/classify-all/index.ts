@@ -364,11 +364,18 @@ async function findFrontFacingImages(
       }
     }
 
+    // Fallback: if no front found, use the first image as representative
+    const fallbackImage = model.images[0];
+    
     results.push({
       ...model,
-      frontImageUrl: frontImage?.source_url,
-      frontImageId: frontImage?.id,
+      frontImageUrl: frontImage?.source_url || fallbackImage?.source_url,
+      frontImageId: frontImage?.id || fallbackImage?.id,
     });
+
+    if (!frontImage && fallbackImage) {
+      console.log(`No front found for ${model.name}, using first image as fallback`);
+    }
   }
 
   return results;

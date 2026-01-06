@@ -9,6 +9,33 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// URL patterns for pre-filtering (before AI classification)
+const KIDS_URL_PATTERNS = [
+  /\/kb0kb/i,      // Tommy boys
+  /\/kg0kg/i,      // Tommy girls  
+  /\/kn0kn/i,      // Tommy kids unisex
+  /\/kids?\//i,    // /kids/ or /kid/ in URL
+  /children/i,
+  /\/junior/i,
+  /\/youth/i,
+  /\/boy[s]?\//i,
+  /\/girl[s]?\//i,
+];
+
+const SHOE_URL_PATTERNS = [
+  /espadrille/i,
+  /sneaker/i,
+  /trainer/i,
+  /sandal/i,
+  /slipper/i,
+  /loafer/i,
+  /boot[^h]/i,     // boot but not booth
+  /\/fw0fw/i,      // Tommy footwear product codes
+  /\/fm0fm/i,      // Tommy mens footwear
+  /\/shoe[s]?\//i,
+  /\/footwear\//i,
+];
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -92,36 +119,68 @@ async function processImages(jobId: string, scrapeRunId: string, supabase: any) 
     // Get all images for this scrape run
     const { data: images, error: imagesError } = await supabase
       .from('face_scrape_images')
-      .select('id, source_url')
+      .select('id, source_url, product_url')
       .eq('scrape_run_id', scrapeRunId);
 
     if (imagesError) throw imagesError;
 
     console.log(`Processing ${images.length} images for organization`);
 
+    // === PHASE 1: URL-based pre-filtering (fast, no AI calls) ===
+    const urlFilteredIds: string[] = [];
+    const remainingImages: any[] = [];
+    
+    for (const image of images) {
+      const url = image.source_url || image.product_url || '';
+      const isKids = KIDS_URL_PATTERNS.some(pattern => pattern.test(url));
+      const isShoes = SHOE_URL_PATTERNS.some(pattern => pattern.test(url));
+      
+      if (isKids || isShoes) {
+        urlFilteredIds.push(image.id);
+        console.log(`URL pre-filter: ${image.id} - ${isKids ? 'kids' : 'shoes'} product`);
+      } else {
+        remainingImages.push(image);
+      }
+    }
+
+    console.log(`URL pre-filter: ${urlFilteredIds.length} images matched (kids/shoes)`);
+
+    // Delete URL-matched images immediately
+    if (urlFilteredIds.length > 0) {
+      const { error: deleteError } = await supabase
+        .from('face_scrape_images')
+        .delete()
+        .in('id', urlFilteredIds);
+      
+      if (deleteError) {
+        console.error('Error deleting URL-filtered images:', deleteError);
+      }
+    }
+
     await supabase
       .from('pipeline_jobs')
       .update({ 
         progress_total: images.length, 
-        progress_done: 0,
-        progress_message: `Analyzing ${images.length} images...`
+        progress_done: urlFilteredIds.length,
+        progress_message: `Removed ${urlFilteredIds.length} by URL, analyzing ${remainingImages.length} with AI...`
       })
       .eq('id', jobId);
 
+    // === PHASE 2: AI-based classification for remaining images ===
     const imagesToDelete: string[] = [];
-    let processed = 0;
+    let processed = urlFilteredIds.length;
     let failed = 0;
 
     // Process in batches for better performance
     const BATCH_SIZE = 5;
-    for (let i = 0; i < images.length; i += BATCH_SIZE) {
+    for (let i = 0; i < remainingImages.length; i += BATCH_SIZE) {
       // Check for cancellation
       if (await checkJobCanceled(supabase, jobId)) {
         console.log(`Job ${jobId} was canceled/paused, stopping`);
         break;
       }
 
-      const batch = images.slice(i, i + BATCH_SIZE);
+      const batch = remainingImages.slice(i, i + BATCH_SIZE);
       
       const batchResults = await Promise.allSettled(
         batch.map(async (image: any) => {
@@ -156,19 +215,19 @@ async function processImages(jobId: string, scrapeRunId: string, supabase: any) 
         .update({ 
           progress_done: processed,
           progress_failed: failed,
-          progress_message: `Analyzed ${processed}/${images.length} images, ${imagesToDelete.length} to remove`
+          progress_message: `Analyzed ${processed}/${images.length} images, ${urlFilteredIds.length + imagesToDelete.length} to remove`
         })
         .eq('id', jobId);
 
       // Small delay between batches to avoid rate limits
-      if (i + BATCH_SIZE < images.length) {
+      if (i + BATCH_SIZE < remainingImages.length) {
         await new Promise(r => setTimeout(r, 100));
       }
     }
 
     // Delete flagged images
     if (imagesToDelete.length > 0) {
-      console.log(`Deleting ${imagesToDelete.length} images`);
+      console.log(`Deleting ${imagesToDelete.length} AI-flagged images`);
       
       const { error: deleteError } = await supabase
         .from('face_scrape_images')
@@ -180,6 +239,8 @@ async function processImages(jobId: string, scrapeRunId: string, supabase: any) 
       }
     }
 
+    const totalDeleted = urlFilteredIds.length + imagesToDelete.length;
+
     // Mark job as completed
     await supabase
       .from('pipeline_jobs')
@@ -188,11 +249,11 @@ async function processImages(jobId: string, scrapeRunId: string, supabase: any) 
         completed_at: new Date().toISOString(),
         progress_done: images.length,
         progress_failed: failed,
-        progress_message: `Removed ${imagesToDelete.length} of ${images.length} images`
+        progress_message: `Removed ${totalDeleted} of ${images.length} images (${urlFilteredIds.length} by URL, ${imagesToDelete.length} by AI)`
       })
       .eq('id', jobId);
 
-    console.log(`Organization complete: removed ${imagesToDelete.length} of ${images.length} images`);
+    console.log(`Organization complete: removed ${totalDeleted} of ${images.length} images`);
   } catch (error) {
     console.error('Organization job failed:', error);
     await supabase
@@ -218,17 +279,38 @@ async function classifyImage(imageUrl: string, apiKey: string | undefined): Prom
     throw new Error('LOVABLE_API_KEY not configured');
   }
 
-  // Enhanced prompt to catch more junk images
-  const prompt = `Analyze this fashion/e-commerce image and classify it:
+  // Enhanced prompt to catch shoes, products, kids, and detail crops
+  const prompt = `Analyze this fashion/e-commerce image carefully. Answer each question:
 
-1. Is this a product-only shot (flat lay, hanger, mannequin, no human)? YES/NO
-2. Does this show a child (under 18)? YES/NO
-3. Is this a cropped detail shot (shoes only, trouser legs only, belt/accessories only, hands with product)? YES/NO
-4. Is an adult model's face visible from front, side, or 3/4 angle? YES/NO
-5. Is this an extreme close-up (just fabric texture, buttons, stitching, or material detail)? YES/NO
+1. PRODUCT SHOT: Is this a product-only image with NO human model visible? This includes:
+   - Flat lay clothing on a surface
+   - Clothes on hangers or mannequins
+   - Shoes photographed alone (not on a person's feet in a full outfit)
+   - Bags, accessories without a person
+   Answer: YES if no human body is visible
 
-Respond in this exact JSON format only:
-{"isProductShot": true/false, "isChild": true/false, "isDetailCrop": true/false, "hasVisibleFace": true/false, "isExtremeCloseup": true/false, "reason": "brief explanation"}`;
+2. CHILD: Does this show a child or teenager (appears under 18 years old)?
+   Look for: smaller stature, youthful face, children's clothing sizes
+
+3. DETAIL CROP: Does this image show only a small portion of the body without a visible face?
+   - Just feet/shoes on a person
+   - Just lower legs/trousers
+   - Just hands holding something
+   - Just torso without head visible
+   Answer: YES if the head/face is cropped out
+
+4. FACE VISIBLE: Is an adult model's face visible from any angle (front, side, 3/4, or even partial)?
+   Answer: YES if you can see facial features
+
+5. EXTREME CLOSEUP: Is this just a fabric texture, buttons, stitching, label, or material detail?
+
+IMPORTANT CLARIFICATIONS:
+- Shoes photographed alone on white background = PRODUCT SHOT = YES
+- Full-body shot where you can only see feet = DETAIL CROP = NO (head should be visible)
+- Cropped shot showing only legs/feet = DETAIL CROP = YES
+
+Respond in JSON only:
+{"isProductShot": boolean, "isChild": boolean, "isDetailCrop": boolean, "hasVisibleFace": boolean, "isExtremeCloseup": boolean, "reason": "brief explanation"}`;
 
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
