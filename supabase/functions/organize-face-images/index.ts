@@ -36,6 +36,10 @@ const SHOE_URL_PATTERNS = [
   /\/footwear\//i,
 ];
 
+// Time limit for each worker invocation (2 minutes)
+const MAX_PROCESSING_TIME_MS = 2 * 60 * 1000;
+const BATCH_SIZE = 3;
+
 // Retry wrapper for transient API failures
 async function withRetry<T>(
   fn: () => Promise<T>,
@@ -129,9 +133,10 @@ Deno.serve(async (req) => {
 
     // Get processed IDs from context (for resume)
     const processedIds = resumeFromContext?.processed_ids || [];
+    const skipUrlPhase = resumeFromContext?.url_phase_done || false;
 
     // Start background processing
-    EdgeRuntime.waitUntil(processImages(jobId, scrapeRunId, supabase, processedIds));
+    EdgeRuntime.waitUntil(processImages(jobId, scrapeRunId, supabase, processedIds, skipUrlPhase));
 
     return new Response(
       JSON.stringify({ success: true, jobId }),
@@ -160,10 +165,12 @@ async function processImages(
   jobId: string, 
   scrapeRunId: string, 
   supabase: any,
-  alreadyProcessedIds: string[] = []
+  alreadyProcessedIds: string[] = [],
+  skipUrlPhase: boolean = false
 ) {
   const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
   const processedSet = new Set(alreadyProcessedIds);
+  const startTime = Date.now();
   
   try {
     // Get all images for this scrape run
@@ -177,62 +184,108 @@ async function processImages(
     // Filter out already processed images (for resume)
     const images = allImages.filter((img: any) => !processedSet.has(img.id));
 
-    console.log(`[organize-face-images] Processing ${images.length} images (${processedSet.size} already done)`);
+    console.log(`[organize-face-images] Processing ${images.length} images (${processedSet.size} already done, skipUrlPhase=${skipUrlPhase})`);
 
-    // === PHASE 1: URL-based pre-filtering (fast, no AI calls) ===
-    const urlFilteredIds: string[] = [];
-    const remainingImages: any[] = [];
-    
-    for (const image of images) {
-      const url = image.source_url || image.product_url || '';
-      const isKids = KIDS_URL_PATTERNS.some(pattern => pattern.test(url));
-      const isShoes = SHOE_URL_PATTERNS.some(pattern => pattern.test(url));
+    let urlFilteredIds: string[] = [];
+    let remainingImages: any[] = images;
+
+    // === PHASE 1: URL-based pre-filtering (skip if resuming) ===
+    if (!skipUrlPhase) {
+      remainingImages = [];
       
-      if (isKids || isShoes) {
-        urlFilteredIds.push(image.id);
-        processedSet.add(image.id);
-        console.log(`URL pre-filter: ${image.id} - ${isKids ? 'kids' : 'shoes'} product`);
-      } else {
-        remainingImages.push(image);
+      for (const image of images) {
+        const url = image.source_url || image.product_url || '';
+        const isKids = KIDS_URL_PATTERNS.some(pattern => pattern.test(url));
+        const isShoes = SHOE_URL_PATTERNS.some(pattern => pattern.test(url));
+        
+        if (isKids || isShoes) {
+          urlFilteredIds.push(image.id);
+          processedSet.add(image.id);
+          console.log(`URL pre-filter: ${image.id} - ${isKids ? 'kids' : 'shoes'} product`);
+        } else {
+          remainingImages.push(image);
+        }
       }
-    }
 
-    console.log(`URL pre-filter: ${urlFilteredIds.length} images matched (kids/shoes)`);
+      console.log(`URL pre-filter: ${urlFilteredIds.length} images matched (kids/shoes)`);
 
-    // Delete URL-matched images immediately
-    if (urlFilteredIds.length > 0) {
-      const { error: deleteError } = await supabase
-        .from('face_scrape_images')
-        .delete()
-        .in('id', urlFilteredIds);
-      
-      if (deleteError) {
-        console.error('Error deleting URL-filtered images:', deleteError);
+      // Delete URL-matched images immediately
+      if (urlFilteredIds.length > 0) {
+        const { error: deleteError } = await supabase
+          .from('face_scrape_images')
+          .delete()
+          .in('id', urlFilteredIds);
+        
+        if (deleteError) {
+          console.error('Error deleting URL-filtered images:', deleteError);
+        }
       }
-    }
 
-    // Update job with initial progress
-    await supabase
-      .from('pipeline_jobs')
-      .update({ 
-        progress_total: allImages.length, 
-        progress_done: processedSet.size,
-        progress_message: `Removed ${urlFilteredIds.length} by URL, analyzing ${remainingImages.length} with AI...`,
-        origin_context: { 
-          scrape_run_id: scrapeRunId, 
-          processed_ids: Array.from(processedSet) 
-        },
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', jobId);
+      // Update job with initial progress
+      await supabase
+        .from('pipeline_jobs')
+        .update({ 
+          progress_total: allImages.length, 
+          progress_done: processedSet.size,
+          progress_message: `Removed ${urlFilteredIds.length} by URL, analyzing ${remainingImages.length} with AI...`,
+          origin_context: { 
+            scrape_run_id: scrapeRunId, 
+            processed_ids: Array.from(processedSet),
+            url_phase_done: true
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+    }
 
     // === PHASE 2: AI-based classification for remaining images ===
     const imagesToDelete: string[] = [];
     let failed = 0;
 
-    // Process in small batches for better performance and timeout resilience
-    const BATCH_SIZE = 3; // Small batch for reliability
     for (let i = 0; i < remainingImages.length; i += BATCH_SIZE) {
+      // Check if we're approaching timeout - auto-continue in new worker
+      const elapsedMs = Date.now() - startTime;
+      if (elapsedMs > MAX_PROCESSING_TIME_MS) {
+        console.log(`Approaching timeout after ${elapsedMs}ms, scheduling continuation...`);
+        
+        // Delete images flagged so far before continuing
+        if (imagesToDelete.length > 0) {
+          await supabase
+            .from('face_scrape_images')
+            .delete()
+            .in('id', imagesToDelete);
+        }
+        
+        // Update status to show continuation
+        await supabase
+          .from('pipeline_jobs')
+          .update({ 
+            progress_message: `Continuing in new worker (${processedSet.size}/${allImages.length})...`,
+            origin_context: { 
+              scrape_run_id: scrapeRunId, 
+              processed_ids: Array.from(processedSet),
+              url_phase_done: true
+            },
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', jobId);
+        
+        // Re-invoke ourselves to continue processing
+        await supabase.functions.invoke('organize-face-images', {
+          body: { 
+            scrapeRunId, 
+            resumeJobId: jobId,
+            resumeFromContext: { 
+              processed_ids: Array.from(processedSet),
+              url_phase_done: true
+            }
+          }
+        });
+        
+        console.log(`Scheduled continuation, exiting current worker`);
+        return; // Exit this worker, new one will continue
+      }
+
       // Check for cancellation
       if (await checkJobCanceled(supabase, jobId)) {
         console.log(`Job ${jobId} was canceled/paused, stopping`);
@@ -251,13 +304,10 @@ async function processImages(
         })
       );
 
-      const batchProcessedIds: string[] = [];
-
       for (const result of batchResults) {
         if (result.status === 'fulfilled') {
           const { image, classification } = result.value;
           processedSet.add(image.id);
-          batchProcessedIds.push(image.id);
           
           // Delete if it matches any exclusion criteria
           if (classification.isProductShot || 
@@ -283,7 +333,8 @@ async function processImages(
           progress_message: `Analyzed ${processedSet.size}/${allImages.length} images, ${urlFilteredIds.length + imagesToDelete.length} to remove`,
           origin_context: { 
             scrape_run_id: scrapeRunId, 
-            processed_ids: Array.from(processedSet) 
+            processed_ids: Array.from(processedSet),
+            url_phase_done: true
           },
           updated_at: new Date().toISOString()
         })
