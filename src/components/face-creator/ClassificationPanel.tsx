@@ -299,6 +299,36 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     };
     checkActiveJobs();
 
+    // Polling fallback for reliable progress updates (every 2s)
+    const pollInterval = setInterval(async () => {
+      if (!isRunningAI) return;
+      
+      const { data } = await supabase
+        .from('pipeline_jobs')
+        .select('id, status, progress_done, progress_total, type')
+        .or(`origin_context->scrape_run_id.eq.${runId},origin_context->>scrape_run_id.eq.${runId}`)
+        .in('status', ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELED'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (data) {
+        if (data.status === 'RUNNING') {
+          setJobProgress({
+            progress: data.progress_done || 0,
+            total: data.progress_total || 0,
+            status: data.type,
+          });
+        } else if (data.status === 'COMPLETED' || data.status === 'FAILED' || data.status === 'CANCELED') {
+          setJobProgress(null);
+          setIsRunningAI(false);
+          if (data.status === 'COMPLETED') {
+            toast({ title: "AI classification completed" });
+          }
+        }
+      }
+    }, 2000);
+
     const channel = supabase
       .channel('pipeline-job-progress')
       .on(
@@ -321,16 +351,21 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
               total: job.progress_total || 0,
               status: job.type,
             });
-          } else if (job.status === 'COMPLETE' || job.status === 'FAILED' || job.status === 'CANCELED') {
+          } else if (job.status === 'COMPLETED' || job.status === 'FAILED' || job.status === 'CANCELED') {
             setJobProgress(null);
             setIsRunningAI(false);
-            if (job.status === 'COMPLETE') {
+            if (job.status === 'COMPLETED') {
               toast({ title: "AI classification completed" });
             }
           }
         }
       )
       .subscribe();
+    
+    return () => {
+      clearInterval(pollInterval);
+      supabase.removeChannel(channel);
+    };
 
     return () => {
       supabase.removeChannel(channel);
