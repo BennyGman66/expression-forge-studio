@@ -61,98 +61,41 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
 
   const handleResume = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    setIsResuming(true);
     
-    // For CLAY_GENERATION jobs, use server-side resume
-    if (job.type === 'CLAY_GENERATION') {
-      setIsResuming(true);
-      try {
-        const { error } = await supabase.functions.invoke('resume-clay-job', {
-          body: { jobId: job.id }
-        });
-        
-        if (error) {
-          console.error('Resume error:', error);
-          toast.error('Failed to resume job');
-        } else {
-          toast.success('Job resumed in background');
-        }
-      } catch (err) {
-        console.error('Resume exception:', err);
-        toast.error('Failed to resume job');
-      } finally {
-        setIsResuming(false);
-        onClose?.();
-      }
-      return;
-    }
-    
-    // For SCRAPE_FACES jobs, use server-side resume
-    if (job.type === 'SCRAPE_FACES') {
-      // Get scrape_run_id from origin_context or fallback to source_job_id
-      const scrapeRunId = (job.origin_context as Record<string, unknown>)?.scrape_run_id || job.source_job_id;
-      if (!scrapeRunId) {
-        toast.error('Cannot resume: missing scrape run ID');
-        return;
-      }
+    try {
+      // Use the unified resume-pipeline-job function for all supported types
+      const { data, error } = await supabase.functions.invoke('resume-pipeline-job', {
+        body: { jobId: job.id }
+      });
       
-      setIsResuming(true);
-      try {
-        const { error } = await supabase.functions.invoke('resume-face-scrape', {
-          body: { runId: scrapeRunId }
-        });
-        
-        if (error) {
-          console.error('Resume error:', error);
-          toast.error('Failed to resume scrape');
+      if (error) {
+        console.error('Resume error:', error);
+        // If no handler for this type, fall back to navigation
+        if (error.message?.includes('No resume handler')) {
+          if (onResume) {
+            onResume(job);
+          } else if (isOnOriginPage) {
+            window.dispatchEvent(new CustomEvent('resume-job', { 
+              detail: { jobId: job.id } 
+            }));
+          } else {
+            const url = new URL(job.origin_route, window.location.origin);
+            url.searchParams.set('resumeJobId', job.id);
+            navigate(url.pathname + url.search);
+          }
         } else {
-          toast.success('Scrape resumed in background');
+          toast.error('Failed to resume job');
         }
-      } catch (err) {
-        console.error('Resume exception:', err);
-        toast.error('Failed to resume scrape');
-      } finally {
-        setIsResuming(false);
-        onClose?.();
+      } else {
+        toast.success('Job resumed in background');
       }
-      return;
-    }
-
-    // For REPOSE_GENERATION jobs, use server-side resume
-    if (job.type === 'REPOSE_GENERATION') {
-      setIsResuming(true);
-      try {
-        const { error } = await supabase.functions.invoke('resume-repose-job', {
-          body: { jobId: job.id }
-        });
-        
-        if (error) {
-          console.error('Resume error:', error);
-          toast.error('Failed to resume repose generation');
-        } else {
-          toast.success('Repose generation resumed in background');
-        }
-      } catch (err) {
-        console.error('Resume exception:', err);
-        toast.error('Failed to resume repose generation');
-      } finally {
-        setIsResuming(false);
-        onClose?.();
-      }
-      return;
-    }
-    
-    // For other job types, fall back to existing behavior
-    if (onResume) {
-      onResume(job);
-    } else if (isOnOriginPage) {
-      window.dispatchEvent(new CustomEvent('resume-job', { 
-        detail: { jobId: job.id } 
-      }));
+    } catch (err) {
+      console.error('Resume exception:', err);
+      toast.error('Failed to resume job');
+    } finally {
+      setIsResuming(false);
       onClose?.();
-    } else {
-      const url = new URL(job.origin_route, window.location.origin);
-      url.searchParams.set('resumeJobId', job.id);
-      navigate(url.pathname + url.search);
     }
   };
 

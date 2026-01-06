@@ -50,52 +50,34 @@ export function JobDetailModal({ job, onClose, onMarkStalled }: JobDetailModalPr
   };
 
   const handleResume = async () => {
-    // For SCRAPE_FACES jobs, call the edge function directly
-    if (job.type === 'SCRAPE_FACES') {
-      const scrapeRunId = (job.origin_context as Record<string, unknown>)?.scrape_run_id;
-      if (scrapeRunId) {
-        setIsResuming(true);
-        try {
-          const { error } = await supabase.functions.invoke('resume-face-scrape', {
-            body: { runId: scrapeRunId }
-          });
-          if (error) throw error;
-          toast.success('Resuming face scrape in background...');
-          onClose();
-        } catch (err) {
-          console.error('Failed to resume:', err);
-          toast.error('Failed to resume job');
-        } finally {
-          setIsResuming(false);
-        }
-        return;
-      }
-    }
-
-    // For REPOSE_GENERATION jobs, call the edge function directly
-    if (job.type === 'REPOSE_GENERATION') {
-      setIsResuming(true);
-      try {
-        const { error } = await supabase.functions.invoke('resume-repose-job', {
-          body: { jobId: job.id }
-        });
-        if (error) throw error;
-        toast.success('Resuming repose generation in background...');
-        onClose();
-      } catch (err) {
-        console.error('Failed to resume:', err);
-        toast.error('Failed to resume job');
-      } finally {
-        setIsResuming(false);
-      }
-      return;
-    }
+    setIsResuming(true);
     
-    // For other job types, navigate to origin with resumeJobId
-    const url = new URL(job.origin_route, window.location.origin);
-    url.searchParams.set('resumeJobId', job.id);
-    navigate(url.pathname + url.search);
-    onClose();
+    try {
+      // Use the unified resume-pipeline-job function
+      const { data, error } = await supabase.functions.invoke('resume-pipeline-job', {
+        body: { jobId: job.id }
+      });
+      
+      if (error) {
+        // If no handler for this type, fall back to navigation
+        if (error.message?.includes('No resume handler')) {
+          const url = new URL(job.origin_route, window.location.origin);
+          url.searchParams.set('resumeJobId', job.id);
+          navigate(url.pathname + url.search);
+          onClose();
+          return;
+        }
+        throw error;
+      }
+      
+      toast.success('Job resumed in background');
+      onClose();
+    } catch (err) {
+      console.error('Failed to resume:', err);
+      toast.error('Failed to resume job');
+    } finally {
+      setIsResuming(false);
+    }
   };
 
   const handleMarkFailed = () => {
