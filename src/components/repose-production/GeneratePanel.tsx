@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -25,16 +26,18 @@ interface GeneratePanelProps {
 }
 
 export function GeneratePanel({ batchId }: GeneratePanelProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: batch, isLoading: batchLoading, refetch: refetchBatch } = useReposeBatch(batchId);
   const { data: batchItems } = useReposeBatchItems(batchId);
   const { data: outputs, refetch: refetchOutputs } = useReposeOutputs(batchId);
   const updateStatus = useUpdateReposeBatchStatus();
   const updateConfig = useUpdateReposeBatchConfig();
-  const { createJob, updateProgress, setStatus } = usePipelineJobs();
+  const { createJob, updateProgress, setStatus, getJob } = usePipelineJobs();
 
   const [isGenerating, setIsGenerating] = useState(false);
   const shouldStopRef = useRef(false);
   const pipelineJobIdRef = useRef<string | null>(null);
+  const hasTriggeredResumeRef = useRef(false);
 
   // Subscribe to realtime updates for outputs
   useEffect(() => {
@@ -59,6 +62,22 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
       supabase.removeChannel(channel);
     };
   }, [batchId, refetchOutputs]);
+
+  // Handle resume from URL param or custom event
+  useEffect(() => {
+    const resumeJobId = searchParams.get('resumeJobId');
+    
+    if (resumeJobId && batchId && !hasTriggeredResumeRef.current) {
+      hasTriggeredResumeRef.current = true;
+      // Clear the param from URL
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete('resumeJobId');
+      setSearchParams(newParams, { replace: true });
+      
+      // Trigger resume
+      handleResumeGeneration(resumeJobId);
+    }
+  }, [searchParams, batchId]);
 
   // Track generation based on batch status
   useEffect(() => {
@@ -90,6 +109,40 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
         refetchBatch();
       }
     });
+  };
+
+  // Resume generation from a stalled/paused job
+  const handleResumeGeneration = async (pipelineJobId: string) => {
+    if (!batchId || !batch) return;
+
+    console.log('Resuming generation for job:', pipelineJobId);
+    toast.info('Resuming generation...');
+
+    // Reset any stuck 'running' outputs to 'queued'
+    const { error: resetError } = await supabase
+      .from('repose_outputs')
+      .update({ status: 'queued' })
+      .eq('batch_id', batchId)
+      .eq('status', 'running');
+
+    if (resetError) {
+      console.error('Failed to reset running outputs:', resetError);
+    }
+
+    // Update batch status to RUNNING
+    updateStatus.mutate({ batchId, status: 'RUNNING' });
+    
+    // Update pipeline job status to RUNNING
+    await setStatus(pipelineJobId, 'RUNNING');
+    pipelineJobIdRef.current = pipelineJobId;
+
+    shouldStopRef.current = false;
+    setIsGenerating(true);
+
+    const model = config?.model || DEFAULT_REPOSE_MODEL;
+    
+    // Continue processing queued outputs
+    await processQueuedOutputs(pipelineJobId, model);
   };
 
   const handleStartGeneration = async () => {
