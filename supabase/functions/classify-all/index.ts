@@ -250,6 +250,7 @@ async function runClassificationPipeline(runId: string, jobId: string, supabase:
             .eq('id', identity.id);
           console.log(`Model ${identity.name} classified as ${gender}`);
         }
+      }
     }
 
     // ===== STEP 5: Classify views for all identity images (only unclassified ones) =====
