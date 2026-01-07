@@ -406,6 +406,21 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
       toast({ title: "No scrape run selected", variant: "destructive" });
       return;
     }
+
+    setIsRunningAI(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('classify-all', {
+        body: { runId },
+      });
+
+      if (error) throw error;
+
+      toast({ title: "AI classification started", description: "This may take a few minutes" });
+    } catch (error) {
+      console.error('Error running AI classification:', error);
+      toast({ title: "Failed to start AI classification", variant: "destructive" });
+      setIsRunningAI(false);
+    }
   };
 
   const handleCancelJob = async () => {
@@ -435,21 +450,6 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     } catch (error) {
       console.error('Error canceling job:', error);
       toast({ title: "Failed to cancel job", variant: "destructive" });
-    }
-
-    setIsRunningAI(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('classify-all', {
-        body: { runId },
-      });
-
-      if (error) throw error;
-
-      toast({ title: "AI classification started", description: "This may take a few minutes" });
-    } catch (error) {
-      console.error('Error running AI classification:', error);
-      toast({ title: "Failed to start AI classification", variant: "destructive" });
-      setIsRunningAI(false);
     }
   };
 
