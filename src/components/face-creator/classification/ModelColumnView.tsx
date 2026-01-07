@@ -35,6 +35,7 @@ interface ModelColumnViewProps {
   onDeleteImages: (imageIds: string[]) => Promise<void>;
   onDeleteModel: (identityId: string) => void;
   onUpdateModelName: (identityId: string, newName: string) => Promise<void>;
+  onLinkToTwin?: (identityId: string) => void;
   selectedModelIds: Set<string>;
   onToggleModelSelect: (identityId: string) => void;
   isOperating: boolean;
@@ -54,6 +55,7 @@ export function ModelColumnView({
   onDeleteImages,
   onDeleteModel,
   onUpdateModelName,
+  onLinkToTwin,
   selectedModelIds,
   onToggleModelSelect,
   isOperating,
@@ -242,6 +244,7 @@ export function ModelColumnView({
                   onToggleColumnSelect={() => onToggleModelSelect(identity.id)}
                   isDragOver={dragOverColumnId === identity.id}
                   onUpdateName={(newName) => onUpdateModelName(identity.id, newName)}
+                  onLinkToTwin={onLinkToTwin ? () => onLinkToTwin(identity.id) : undefined}
                 />
               </div>
             );

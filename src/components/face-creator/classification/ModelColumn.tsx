@@ -3,13 +3,18 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useDroppable } from '@dnd-kit/core';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { User, Maximize2, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { MoreVertical, Maximize2, Trash2, Link2 } from 'lucide-react';
 import { Identity, IdentityImage } from './types';
 import { ModelImage } from './ModelImage';
-import { getImageUrl } from '@/lib/imageUtils';
 import { cn } from '@/lib/utils';
 
 const IMAGES_PER_ROW = 2;
@@ -30,6 +35,7 @@ interface ModelColumnProps {
   onToggleColumnSelect: () => void;
   isDragOver?: boolean;
   onUpdateName?: (newName: string) => Promise<void>;
+  onLinkToTwin?: () => void;
 }
 
 export function ModelColumn({
@@ -46,6 +52,7 @@ export function ModelColumn({
   onToggleColumnSelect,
   isDragOver,
   onUpdateName,
+  onLinkToTwin,
 }: ModelColumnProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isEditingName, setIsEditingName] = useState(false);
@@ -119,21 +126,8 @@ export function ModelColumn({
           checked={isSelected}
           onCheckedChange={() => onToggleColumnSelect()}
           onClick={e => e.stopPropagation()}
-          className="opacity-0 group-hover:opacity-100 transition-opacity"
+          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
         />
-
-        <Avatar className="h-8 w-8 flex-shrink-0">
-          {identity.representative_image_url ? (
-            <AvatarImage
-              src={getImageUrl(identity.representative_image_url, 'tiny')}
-              alt={identity.name}
-              className="object-cover"
-            />
-          ) : null}
-          <AvatarFallback>
-            <User className="h-4 w-4" />
-          </AvatarFallback>
-        </Avatar>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
@@ -154,28 +148,30 @@ export function ModelColumn({
                 }}
                 onClick={(e) => e.stopPropagation()}
                 autoFocus
-                className="h-6 text-sm px-1 w-24"
+                className="h-6 text-sm px-1 flex-1"
               />
             ) : (
               <span 
-                className="font-medium text-sm truncate cursor-text hover:bg-muted/50 px-1 rounded"
+                className="font-medium text-sm cursor-text hover:bg-muted/50 px-1 rounded truncate"
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsEditingName(true);
                 }}
+                title={identity.name}
               >
                 {identity.name}
               </span>
             )}
-            {identity.digital_talent && (
-              <Badge variant="outline" className="text-[9px] px-1 flex-shrink-0">
-                {identity.digital_talent.name}
-              </Badge>
-            )}
           </div>
+          {identity.digital_talent && (
+            <span className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
+              <Link2 className="h-2.5 w-2.5" />
+              {identity.digital_talent.name}
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-shrink-0">
           {selectedInColumn > 0 && (
             <Badge variant="default" className="text-xs">
               {selectedInColumn}
@@ -186,30 +182,39 @@ export function ModelColumn({
           </Badge>
         </div>
 
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            onClick={e => {
-              e.stopPropagation();
-              onExpand();
-            }}
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-            onClick={e => {
-              e.stopPropagation();
-              onDelete();
-            }}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+        {/* Dropdown Menu */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+              onClick={e => e.stopPropagation()}
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuItem onClick={onExpand}>
+              <Maximize2 className="h-4 w-4 mr-2" />
+              Expand View
+            </DropdownMenuItem>
+            {onLinkToTwin && (
+              <DropdownMenuItem onClick={onLinkToTwin}>
+                <Link2 className="h-4 w-4 mr-2" />
+                Link to Twin
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={onDelete}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Model
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Virtualized Image Grid */}

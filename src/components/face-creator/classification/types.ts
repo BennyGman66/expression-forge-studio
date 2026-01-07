@@ -6,6 +6,7 @@ export interface Identity {
   representative_image_id: string | null;
   representative_image_url?: string | null;
   talent_id?: string | null;
+  linked_twin_id?: string | null;
   digital_talent?: DigitalTalent | null;
 }
 

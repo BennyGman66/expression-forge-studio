@@ -2,12 +2,16 @@ import { useMemo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { Search, User, Users, HelpCircle, Trash2, X } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Search, Users, HelpCircle, Trash2, X, MoreVertical, Link2 } from 'lucide-react';
 import { Identity } from './types';
-import { getImageUrl } from '@/lib/imageUtils';
 
 interface ModelNavigatorProps {
   identities: Identity[];
@@ -23,6 +27,8 @@ interface ModelNavigatorProps {
   onSelectAllModels: () => void;
   onClearModelSelection: () => void;
   onDeleteSelectedModels: () => void;
+  onDeleteModel?: (identityId: string) => void;
+  onLinkToTwin?: (identityId: string) => void;
 }
 
 export function ModelNavigator({
@@ -39,6 +45,8 @@ export function ModelNavigator({
   onSelectAllModels,
   onClearModelSelection,
   onDeleteSelectedModels,
+  onDeleteModel,
+  onLinkToTwin,
 }: ModelNavigatorProps) {
   const filteredIdentities = useMemo(() => {
     if (!searchQuery.trim()) return identities;
@@ -109,11 +117,7 @@ export function ModelNavigator({
                   : 'hover:bg-muted/50'
               }`}
             >
-              <Avatar className="h-7 w-7 flex-shrink-0">
-                <AvatarFallback className="bg-amber-500/20 text-amber-600">
-                  <HelpCircle className="h-3.5 w-3.5" />
-                </AvatarFallback>
-              </Avatar>
+              <HelpCircle className="h-4 w-4 flex-shrink-0 text-amber-600" />
               <span className="text-sm font-medium truncate flex-1">Unclassified</span>
               <Badge variant="secondary" className="bg-amber-500/20 text-amber-600 text-xs">
                 {unclassifiedCount}
@@ -127,14 +131,9 @@ export function ModelNavigator({
 
           {/* Models */}
           {filteredIdentities.map(identity => (
-            <button
+            <div
               key={identity.id}
-              onClick={() => onModelClick(identity.id)}
-              onContextMenu={e => {
-                e.preventDefault();
-                onToggleModelSelect(identity.id);
-              }}
-              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors group ${
+              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md transition-colors group ${
                 focusedModelId === identity.id
                   ? 'bg-primary/10 text-primary'
                   : selectedModelIds.has(identity.id)
@@ -142,32 +141,54 @@ export function ModelNavigator({
                   : 'hover:bg-muted/50'
               }`}
             >
-              <Avatar className="h-7 w-7 flex-shrink-0">
-                {identity.representative_image_url ? (
-                  <AvatarImage
-                    src={getImageUrl(identity.representative_image_url, 'tiny')}
-                    alt={identity.name}
-                    className="object-cover"
-                  />
-                ) : null}
-                <AvatarFallback>
-                  <User className="h-3.5 w-3.5" />
-                </AvatarFallback>
-              </Avatar>
-
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium truncate block">{identity.name}</span>
+              <button
+                onClick={() => onModelClick(identity.id)}
+                onContextMenu={e => {
+                  e.preventDefault();
+                  onToggleModelSelect(identity.id);
+                }}
+                className="flex-1 min-w-0 text-left"
+              >
+                <span className="text-sm font-medium block truncate">{identity.name}</span>
                 {identity.digital_talent && (
-                  <span className="text-[10px] text-muted-foreground truncate block">
+                  <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <Link2 className="h-2.5 w-2.5" />
                     {identity.digital_talent.name}
                   </span>
                 )}
-              </div>
+              </button>
 
-              <Badge variant="secondary" className="text-xs flex-shrink-0">
-                {identity.image_count}
-              </Badge>
-            </button>
+              {/* Dropdown Menu */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 opacity-0 group-hover:opacity-100 flex-shrink-0"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <MoreVertical className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40">
+                  {onLinkToTwin && (
+                    <DropdownMenuItem onClick={() => onLinkToTwin(identity.id)}>
+                      <Link2 className="h-4 w-4 mr-2" />
+                      Link to Twin
+                    </DropdownMenuItem>
+                  )}
+                  {onDeleteModel && (
+                    <DropdownMenuItem
+                      onClick={() => onDeleteModel(identity.id)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete Model
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           ))}
 
           {filteredIdentities.length === 0 && (
