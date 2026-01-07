@@ -165,7 +165,6 @@ export function ModelColumnView({
   }, [sourceIdentityIds, onMergeModels, onClearSelection]);
 
   const handleDeleteSelected = useCallback(async () => {
-    if (!confirm(`Delete ${selectedImageIds.size} images?`)) return;
     await onDeleteImages(Array.from(selectedImageIds));
     onClearSelection();
   }, [selectedImageIds, onDeleteImages, onClearSelection]);

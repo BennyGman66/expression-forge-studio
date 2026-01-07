@@ -43,9 +43,9 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   const [unclassifiedImages, setUnclassifiedImages] = useState<any[]>([]);
 
   // Use new hooks
-  const { identities, imagesByIdentity, isLoading, refetch } = useModelData(runId, selectedGender);
+  const { identities, imagesByIdentity, isLoading, refetch, refetchSilent } = useModelData(runId, selectedGender);
   const selection = useImageSelection();
-  const operations = useImageOperations(refetch);
+  const operations = useImageOperations(refetch, refetchSilent);
 
   // Fetch unclassified images
   useEffect(() => {

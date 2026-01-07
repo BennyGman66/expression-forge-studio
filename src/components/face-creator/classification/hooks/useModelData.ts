@@ -7,6 +7,7 @@ interface UseModelDataReturn {
   imagesByIdentity: Record<string, IdentityImage[]>;
   isLoading: boolean;
   refetch: () => Promise<void>;
+  refetchSilent: () => Promise<void>;
 }
 
 export function useModelData(
@@ -17,14 +18,16 @@ export function useModelData(
   const [imagesByIdentity, setImagesByIdentity] = useState<Record<string, IdentityImage[]>>({});
   const [isLoading, setIsLoading] = useState(false);
 
-  const fetchIdentities = useCallback(async () => {
+  const fetchData = useCallback(async (silent: boolean = false) => {
     if (!runId) {
       setIdentities([]);
       setImagesByIdentity({});
       return;
     }
 
-    setIsLoading(true);
+    if (!silent) {
+      setIsLoading(true);
+    }
 
     try {
       // Fetch identities with representative images
@@ -46,7 +49,7 @@ export function useModelData(
 
       if (identityError) {
         console.error('Error fetching identities:', identityError);
-        setIsLoading(false);
+        if (!silent) setIsLoading(false);
         return;
       }
 
@@ -109,20 +112,26 @@ export function useModelData(
         }
       }
     } catch (error) {
-      console.error('Error in fetchIdentities:', error);
+      console.error('Error in fetchData:', error);
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [runId, genderFilter]);
 
+  const refetch = useCallback(() => fetchData(false), [fetchData]);
+  const refetchSilent = useCallback(() => fetchData(true), [fetchData]);
+
   useEffect(() => {
-    fetchIdentities();
-  }, [fetchIdentities]);
+    fetchData(false);
+  }, [fetchData]);
 
   return {
     identities,
     imagesByIdentity,
     isLoading,
-    refetch: fetchIdentities,
+    refetch,
+    refetchSilent,
   };
 }
