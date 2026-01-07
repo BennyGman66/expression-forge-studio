@@ -28,7 +28,10 @@ interface UseImageOperationsReturn {
   isOperating: boolean;
 }
 
-export function useImageOperations(refetch: () => Promise<void>): UseImageOperationsReturn {
+export function useImageOperations(
+  refetch: () => Promise<void>,
+  refetchSilent?: () => Promise<void>
+): UseImageOperationsReturn {
   const { toast } = useToast();
   const [isOperating, setIsOperating] = useState(false);
 
@@ -213,7 +216,8 @@ export function useImageOperations(refetch: () => Promise<void>): UseImageOperat
 
       if (error) throw error;
 
-      await refetch();
+      // Use silent refetch to preserve scroll position
+      await (refetchSilent || refetch)();
       toast({ title: `${imageIds.length} images removed` });
     } catch (error) {
       console.error('Error deleting images:', error);
@@ -221,7 +225,7 @@ export function useImageOperations(refetch: () => Promise<void>): UseImageOperat
     } finally {
       setIsOperating(false);
     }
-  }, [refetch, toast]);
+  }, [refetch, refetchSilent, toast]);
 
   const deleteModels = useCallback(async (identityIds: string[]) => {
     if (identityIds.length === 0) return;
