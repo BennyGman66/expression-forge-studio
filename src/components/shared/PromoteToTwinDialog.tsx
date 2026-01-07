@@ -150,12 +150,12 @@ export function PromoteToTwinDialog({
             {mode === "create" ? (
               <>
                 <UserPlus className="h-5 w-5" />
-                Create Digital Twin
+                Create Digital Talent
               </>
             ) : (
               <>
                 <Link className="h-5 w-5" />
-                Link to Existing Twin
+                Link to Existing Talent
               </>
             )}
           </DialogTitle>
@@ -188,7 +188,7 @@ export function PromoteToTwinDialog({
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Enter twin name"
+                placeholder="Enter talent name"
               />
             </div>
 
@@ -238,12 +238,12 @@ export function PromoteToTwinDialog({
               </div>
             )}
 
-            {/* Twin Select */}
+            {/* Talent Select */}
             <div className="space-y-2">
-              <Label>Select Digital Twin</Label>
+              <Label>Select Digital Talent</Label>
               <Select value={selectedTwinId} onValueChange={setSelectedTwinId}>
                 <SelectTrigger>
-                  <SelectValue placeholder={loadingTwins ? "Loading twins..." : "Select a twin"} />
+                  <SelectValue placeholder={loadingTwins ? "Loading..." : "Select a talent"} />
                 </SelectTrigger>
                 <SelectContent>
                   {existingTwins.map((twin) => (
@@ -264,7 +264,7 @@ export function PromoteToTwinDialog({
               </Select>
             </div>
 
-            {/* Selected Twin Preview */}
+            {/* Selected Talent Preview */}
             {selectedTwin && (
               <div className="p-3 rounded-lg bg-muted/50 flex items-center gap-3">
                 {selectedTwin.front_face_url && (
@@ -285,7 +285,7 @@ export function PromoteToTwinDialog({
 
             {existingTwins.length === 0 && !loadingTwins && (
               <p className="text-sm text-muted-foreground text-center py-4">
-                No existing twins found{defaultGender ? ` for ${defaultGender}` : ""}. 
+                No existing talents found{defaultGender ? ` for ${defaultGender}` : ""}. 
                 Create a new one instead.
               </p>
             )}
@@ -298,7 +298,7 @@ export function PromoteToTwinDialog({
           </Button>
           <Button onClick={handleSubmit} disabled={!isValid || isPromoting}>
             {isPromoting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {mode === "create" ? "Create Digital Twin" : "Link to Twin"}
+            {mode === "create" ? "Create Digital Talent" : "Link to Talent"}
           </Button>
         </DialogFooter>
       </DialogContent>
