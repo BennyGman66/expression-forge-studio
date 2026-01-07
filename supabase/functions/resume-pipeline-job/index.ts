@@ -654,12 +654,16 @@ async function resumeClassifyFaces(supabase: any, job: PipelineJob) {
   const context = job.origin_context || {};
   const scrapeRunId = context.scrape_run_id as string;
   const currentStep = (context.current_step as number) || 1;
+  
+  // Extract step3 indices for inner-loop resumption
+  const step3Index = (context.step3Index as number) || 0;
+  const step3InnerIndex = (context.step3InnerIndex as number) || 0;
 
   if (!scrapeRunId) {
     throw new Error("Job context missing scrape_run_id");
   }
 
-  console.log(`[resume-pipeline-job/classify] Resuming classification for scrape run ${scrapeRunId} from step ${currentStep}`);
+  console.log(`[resume-pipeline-job/classify] Resuming classification for scrape run ${scrapeRunId} from step ${currentStep} (step3Index=${step3Index}, step3InnerIndex=${step3InnerIndex})`);
 
   // Update job status
   await supabase
@@ -669,13 +673,21 @@ async function resumeClassifyFaces(supabase: any, job: PipelineJob) {
     })
     .eq("id", job.id);
 
+  // Build resume context - pass through step3 indices for proper inner loop resumption
+  const resumeContext: Record<string, number> = {};
+  if (currentStep === 3) {
+    resumeContext.step3Index = step3Index;
+    resumeContext.step3InnerIndex = step3InnerIndex;
+  }
+
   // Invoke the classify-all function to continue processing
   try {
     const response = await supabase.functions.invoke("classify-all", {
       body: { 
         runId: scrapeRunId, 
         pipelineJobId: job.id,
-        resumeFromStep: currentStep
+        resumeFromStep: currentStep,
+        resumeContext
       }
     });
 
