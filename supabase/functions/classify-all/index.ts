@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.46.1';
 
 declare const EdgeRuntime: {
   waitUntil(promise: Promise<unknown>): void;
@@ -267,7 +267,7 @@ async function runClassificationPipeline(
       console.log('Step 3: Comparing faces across models...');
       
       const step3Result = await compareFacesAndMerge(
-        modelsWithFronts, supabase, lovableKey, jobId,
+        runId, supabase, lovableKey, jobId,
         resumeContext.step3Index || 0, isNearTimeout
       );
       
@@ -607,16 +607,10 @@ async function findFrontFacingImages(
   return { results, needsContinuation: false, processedCount: results.length };
 }
 
-// Step 3: Compare faces across models and merge duplicates (with Union-Find optimization + timeout handling)
+// Step 3: Compare faces across models and merge duplicates (IMMEDIATE MERGE - timeout resilient)
+// Instead of Union-Find which loses state on continuation, we merge immediately to the database
 async function compareFacesAndMerge(
-  models: Array<{ 
-    id: string; 
-    name: string; 
-    images: any[]; 
-    productUrl: string;
-    frontImageUrl?: string;
-    frontImageId?: string;
-  }>,
+  runId: string,
   supabase: any,
   lovableKey?: string,
   jobId?: string,
@@ -626,100 +620,116 @@ async function compareFacesAndMerge(
   needsContinuation: boolean;
   processedCount: number;
 }> {
-  // Only compare models that have front-facing images
-  const modelsWithFronts = models.filter(m => m.frontImageUrl);
-  console.log(`Comparing ${modelsWithFronts.length} models with front-facing images (starting from index ${startFromIndex})`);
+  // Fetch current models FRESH from DB (gets state after any prior merges in previous workers)
+  const { data: freshModels, error: modelsError } = await supabase
+    .from('face_identities')
+    .select(`
+      id, 
+      name, 
+      representative_image_id,
+      face_identity_images(
+        id,
+        view,
+        scrape_image:face_scrape_images(id, source_url)
+      )
+    `)
+    .eq('scrape_run_id', runId)
+    .order('created_at');
+  
+  if (modelsError) {
+    console.error('Error fetching models:', modelsError);
+    throw modelsError;
+  }
 
-  // Sort by image count - compare larger groups first (Union-Find optimization)
-  modelsWithFronts.sort((a, b) => b.images.length - a.images.length);
+  // Build models with front image URLs
+  const modelsWithFronts = (freshModels || [])
+    .map((m: any) => {
+      // Prefer front view, fallback to first available image
+      const frontImage = m.face_identity_images?.find((ii: any) => ii.view === 'front')?.scrape_image
+        || m.face_identity_images?.[0]?.scrape_image;
+      return {
+        id: m.id,
+        name: m.name,
+        frontImageUrl: frontImage?.source_url,
+        imageCount: m.face_identity_images?.length || 0,
+      };
+    })
+    .filter((m: any) => m.frontImageUrl);
 
-  // Union-Find data structure for efficient merging
-  const parent = new Map<string, string>();
-  const getRoot = (id: string): string => {
-    if (!parent.has(id)) parent.set(id, id);
-    if (parent.get(id) !== id) {
-      parent.set(id, getRoot(parent.get(id)!));
-    }
-    return parent.get(id)!;
-  };
-  const union = (a: string, b: string) => {
-    const rootA = getRoot(a);
-    const rootB = getRoot(b);
-    if (rootA !== rootB) {
-      parent.set(rootB, rootA);
-    }
-  };
+  // Sort by image count - compare larger groups first
+  modelsWithFronts.sort((a: any, b: any) => b.imageCount - a.imageCount);
+
+  const totalModels = modelsWithFronts.length;
+  console.log(`Comparing ${totalModels} models (starting from index ${startFromIndex})`);
+
+  // Track already-merged IDs to skip them
+  const mergedIds = new Set<string>();
+  let mergeCount = 0;
 
   // Compare each pair of models with timeout checking
-  for (let i = startFromIndex; i < modelsWithFronts.length; i++) {
+  for (let i = startFromIndex; i < totalModels; i++) {
     // Check for timeout at the start of each outer loop iteration
     if (isNearTimeout && isNearTimeout()) {
-      console.log(`Timeout approaching in step 3, processed ${i}/${modelsWithFronts.length} models`);
+      console.log(`Timeout approaching in step 3, processed ${i}/${totalModels} models`);
       return { needsContinuation: true, processedCount: i };
     }
 
     const modelA = modelsWithFronts[i];
     
     // Skip if already merged into another
-    if (getRoot(modelA.id) !== modelA.id) continue;
+    if (mergedIds.has(modelA.id)) continue;
 
-    for (let j = i + 1; j < modelsWithFronts.length; j++) {
+    for (let j = i + 1; j < totalModels; j++) {
       const modelB = modelsWithFronts[j];
       
       // Skip if already merged
-      if (getRoot(modelB.id) !== modelB.id) continue;
+      if (mergedIds.has(modelB.id)) continue;
+
+      // Check if modelB still exists in DB (might have been merged in a previous worker continuation)
+      const { data: exists } = await supabase
+        .from('face_identities')
+        .select('id')
+        .eq('id', modelB.id)
+        .single();
+      
+      if (!exists) {
+        mergedIds.add(modelB.id);
+        continue;
+      }
 
       const isSamePerson = await compareFaces(
-        modelA.frontImageUrl!,
-        modelB.frontImageUrl!,
+        modelA.frontImageUrl,
+        modelB.frontImageUrl,
         lovableKey
       );
 
       if (isSamePerson) {
-        console.log(`MATCH: ${modelA.name} and ${modelB.name} are the same person`);
-        union(modelA.id, modelB.id);
+        console.log(`MATCH: ${modelA.name} and ${modelB.name} → merging immediately`);
+        await mergeModels(modelA.id, modelB.id, supabase);
+        mergedIds.add(modelB.id);
+        mergeCount++;
       }
 
       // Small delay between comparisons
       await new Promise(r => setTimeout(r, 100));
     }
 
-    // Update progress periodically
-    if (jobId && i % 5 === 0) {
-      const percent = Math.round((i / modelsWithFronts.length) * 100);
+    // Update progress periodically (preserve full origin_context!)
+    if (jobId && i % 3 === 0) {
+      const percent = Math.round((i / totalModels) * 100);
       await supabase
         .from('pipeline_jobs')
         .update({ 
-          progress_message: `Step 3/6: Matching faces... ${i}/${modelsWithFronts.length} models (${percent}%)`,
-          origin_context: { step3Index: i },
+          progress_message: `Step 3/6: Matching faces... ${i}/${totalModels} (${percent}%)`,
+          origin_context: { scrape_run_id: runId, current_step: 3, step3Index: i },
           updated_at: new Date().toISOString()
         })
         .eq('id', jobId);
     }
   }
 
-  // Batch merge using Union-Find results
-  const mergeGroups = new Map<string, string[]>();
-  for (const model of modelsWithFronts) {
-    const root = getRoot(model.id);
-    if (!mergeGroups.has(root)) {
-      mergeGroups.set(root, []);
-    }
-    if (model.id !== root) {
-      mergeGroups.get(root)!.push(model.id);
-    }
-  }
-
-  let mergeCount = 0;
-  for (const [targetId, sourceIds] of mergeGroups) {
-    for (const sourceId of sourceIds) {
-      await mergeModels(targetId, sourceId, supabase);
-      mergeCount++;
-    }
-  }
-
-  console.log(`Merged ${mergeCount} duplicate models`);
-  return { needsContinuation: false, processedCount: modelsWithFronts.length };
+  console.log(`Merged ${mergeCount} duplicate models (immediate merge mode)`);
+  return { needsContinuation: false, processedCount: totalModels };
 }
 
 // Compare two face images using AI
