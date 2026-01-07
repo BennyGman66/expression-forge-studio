@@ -142,11 +142,11 @@ export function usePromoteToTwin() {
 
       if (talentError) throw talentError;
 
-      // 2. Update face_identities with talent_id and sync name
+      // 2. Update face_identities with digital_talent_id and sync name
       const { error: linkError } = await supabase
         .from("face_identities")
         .update({
-          talent_id: talentId,
+          digital_talent_id: talentId,
           name: talent.name,
         })
         .eq("id", identityId);

@@ -1052,6 +1052,7 @@ export type Database = {
           archived_at: string | null
           archived_to_twin_id: string | null
           created_at: string
+          digital_talent_id: string | null
           gender: string
           id: string
           image_count: number
@@ -1065,6 +1066,7 @@ export type Database = {
           archived_at?: string | null
           archived_to_twin_id?: string | null
           created_at?: string
+          digital_talent_id?: string | null
           gender: string
           id?: string
           image_count?: number
@@ -1078,6 +1080,7 @@ export type Database = {
           archived_at?: string | null
           archived_to_twin_id?: string | null
           created_at?: string
+          digital_talent_id?: string | null
           gender?: string
           id?: string
           image_count?: number
@@ -1093,6 +1096,13 @@ export type Database = {
             columns: ["archived_to_twin_id"]
             isOneToOne: false
             referencedRelation: "digital_twins"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "face_identities_digital_talent_id_fkey"
+            columns: ["digital_talent_id"]
+            isOneToOne: false
+            referencedRelation: "digital_talents"
             referencedColumns: ["id"]
           },
           {
