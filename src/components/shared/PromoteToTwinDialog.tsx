@@ -36,7 +36,7 @@ interface ExistingTwin {
   id: string;
   name: string;
   gender: string | null;
-  representative_image_url: string | null;
+  front_face_url: string | null;
 }
 
 // Normalize gender values to match database format
@@ -89,8 +89,8 @@ export function PromoteToTwinDialog({
     setLoadingTwins(true);
     try {
       let query = supabase
-        .from("digital_twins")
-        .select("id, name, gender, representative_image_url")
+        .from("digital_talents")
+        .select("id, name, gender, front_face_url")
         .order("name");
       
       // Filter by normalized gender if available
@@ -249,9 +249,9 @@ export function PromoteToTwinDialog({
                   {existingTwins.map((twin) => (
                     <SelectItem key={twin.id} value={twin.id}>
                       <div className="flex items-center gap-2">
-                        {twin.representative_image_url && (
+                        {twin.front_face_url && (
                           <img
-                            src={twin.representative_image_url}
+                            src={twin.front_face_url}
                             alt={twin.name}
                             className="w-6 h-6 rounded object-cover"
                           />
@@ -267,9 +267,9 @@ export function PromoteToTwinDialog({
             {/* Selected Talent Preview */}
             {selectedTwin && (
               <div className="p-3 rounded-lg bg-muted/50 flex items-center gap-3">
-                {selectedTwin.representative_image_url && (
+                {selectedTwin.front_face_url && (
                   <img
-                    src={selectedTwin.representative_image_url}
+                    src={selectedTwin.front_face_url}
                     alt={selectedTwin.name}
                     className="w-16 h-16 rounded-lg object-cover"
                   />
