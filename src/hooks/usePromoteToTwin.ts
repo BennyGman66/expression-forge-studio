@@ -133,28 +133,28 @@ export function usePromoteToTwin() {
   }: LinkToExistingTalentParams): Promise<{ talentId: string; talentName: string } | null> => {
     setIsPromoting(true);
     try {
-      // 1. Fetch the talent to get its name
-      const { data: talent, error: talentError } = await supabase
-        .from("digital_talents")
+      // 1. Fetch the twin to get its name
+      const { data: twin, error: twinError } = await supabase
+        .from("digital_twins")
         .select("id, name")
         .eq("id", talentId)
         .single();
 
-      if (talentError) throw talentError;
+      if (twinError) throw twinError;
 
-      // 2. Update face_identities with talent_id and sync name
+      // 2. Update face_identities with linked_twin_id and sync name
       const { error: linkError } = await supabase
         .from("face_identities")
         .update({
-          talent_id: talentId,
-          name: talent.name,
+          linked_twin_id: talentId,
+          name: twin.name,
         })
         .eq("id", identityId);
 
       if (linkError) throw linkError;
 
-      toast.success(`Linked to Digital Talent: ${talent.name}`);
-      return { talentId: talent.id, talentName: talent.name };
+      toast.success(`Linked to Digital Talent: ${twin.name}`);
+      return { talentId: twin.id, talentName: twin.name };
     } catch (error) {
       console.error("Error linking to talent:", error);
       toast.error("Failed to link to Digital Talent");
