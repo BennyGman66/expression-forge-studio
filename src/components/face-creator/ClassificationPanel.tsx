@@ -8,6 +8,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/supabase/client";
+import { getThumbnailUrl } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Loader2, 
@@ -1089,7 +1090,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                           <Avatar className="h-10 w-10 flex-shrink-0">
                             {identity.representative_image_url ? (
                               <AvatarImage 
-                                src={identity.representative_image_url} 
+                                src={getThumbnailUrl(identity.representative_image_url, 100)} 
                                 alt={identity.name}
                                 className="object-cover"
                               />
@@ -1255,7 +1256,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                   {unclassifiedImages.map(image => {
-                    const imageUrl = image.stored_url || image.source_url;
+                    const imageUrl = getThumbnailUrl(image.stored_url || image.source_url);
                     return (
                       <div 
                         key={image.id} 
@@ -1312,7 +1313,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                 {filteredImages.map(image => {
-                  const imageUrl = image.scrape_image?.stored_url || image.scrape_image?.source_url || '';
+                  const imageUrl = getThumbnailUrl(image.scrape_image?.stored_url || image.scrape_image?.source_url);
                   return (
                     <div 
                       key={image.id} 
@@ -1400,7 +1401,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                     <Avatar className="h-8 w-8">
                       {identity.representative_image_url ? (
                         <AvatarImage 
-                          src={identity.representative_image_url} 
+                          src={getThumbnailUrl(identity.representative_image_url, 80)} 
                           alt={identity.name}
                           className="object-cover"
                         />
@@ -1499,7 +1500,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
             <DialogTitle className="flex items-center gap-3">
               {previewIdentity?.representative_image_url && (
                 <Avatar className="h-10 w-10">
-                  <AvatarImage src={previewIdentity.representative_image_url} className="object-cover" />
+                  <AvatarImage src={getThumbnailUrl(previewIdentity.representative_image_url, 100)} className="object-cover" />
                   <AvatarFallback><User className="h-4 w-4" /></AvatarFallback>
                 </Avatar>
               )}
@@ -1523,7 +1524,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                 {previewImages.map((img) => (
                   <div key={img.id} className="relative group">
                     <img
-                      src={img.scrape_image?.stored_url || img.scrape_image?.source_url}
+                      src={getThumbnailUrl(img.scrape_image?.stored_url || img.scrape_image?.source_url)}
                       alt="Model image"
                       className="w-full aspect-[3/4] object-cover rounded-lg"
                     />
