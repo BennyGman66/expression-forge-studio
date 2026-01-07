@@ -89,7 +89,7 @@ export function ModelColumnView({
   const columnVirtualizer = useVirtualizer({
     count: identities.length,
     getScrollElement: () => containerRef.current,
-    estimateSize: () => COLUMN_WIDTH + COLUMN_GAP,
+    estimateSize: () => COLUMN_WIDTH,
     horizontal: true,
     overscan: 2,
   });
@@ -206,10 +206,9 @@ export function ModelColumnView({
         className="flex-1 overflow-x-auto overflow-y-hidden p-4"
       >
         <div
-          className="flex gap-6"
+          className="relative h-full"
           style={{
             width: `${columnVirtualizer.getTotalSize()}px`,
-            height: '100%',
           }}
         >
           {columnVirtualizer.getVirtualItems().map(virtualColumn => {
