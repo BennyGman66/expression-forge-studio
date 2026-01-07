@@ -402,10 +402,6 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
       clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [runId, toast]);
 
   const handleRunAllAI = async () => {
@@ -434,29 +430,21 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     if (!runId) return;
     
     try {
-      // Find the active job for this run
-      const { data: job } = await supabase
+      // Cancel ALL running/paused jobs for this run (not just the latest)
+      const { error } = await supabase
         .from('pipeline_jobs')
-        .select('id')
+        .update({ status: 'CANCELED', completed_at: new Date().toISOString() })
         .or(`origin_context->scrape_run_id.eq.${runId},origin_context->>scrape_run_id.eq.${runId}`)
-        .in('status', ['RUNNING', 'PAUSED'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .in('status', ['RUNNING', 'PAUSED']);
       
-      if (job) {
-        await supabase
-          .from('pipeline_jobs')
-          .update({ status: 'CANCELED' })
-          .eq('id', job.id);
-        
-        setIsRunningAI(false);
-        setJobProgress(null);
-        toast({ title: "Job canceled" });
-      }
+      if (error) throw error;
+      
+      setIsRunningAI(false);
+      setJobProgress(null);
+      toast({ title: "Jobs canceled" });
     } catch (error) {
-      console.error('Error canceling job:', error);
-      toast({ title: "Failed to cancel job", variant: "destructive" });
+      console.error('Error canceling jobs:', error);
+      toast({ title: "Failed to cancel jobs", variant: "destructive" });
     }
   };
 
@@ -907,7 +895,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
             )}
           </Button>
           
-          {(isRunningAI || jobProgress?.isPaused) && (
+          {(isRunningAI || jobProgress) && (
             <Button
               onClick={handleCancelJob}
               variant="destructive"
