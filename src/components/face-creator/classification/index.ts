@@ -5,6 +5,7 @@ export * from './ModelColumn';
 export * from './ModelImage';
 export * from './BulkActionBar';
 export * from './MoveToModelDialog';
+export * from './SplitToNewDialog';
 export * from './hooks/useModelData';
 export * from './hooks/useImageSelection';
 export * from './hooks/useImageOperations';

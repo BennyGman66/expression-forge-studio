@@ -283,9 +283,9 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     await operations.moveImages(imageIds, sourceId, targetId, imagesByIdentity);
   }, [operations, imagesByIdentity]);
 
-  const handleSplitImages = useCallback(async (imageIds: string[], sourceId: string) => {
+  const handleSplitImages = useCallback(async (imageIds: string[], sourceId: string, customName?: string) => {
     if (!runId) return;
-    await operations.splitToNewModel(imageIds, sourceId, runId, identities, imagesByIdentity);
+    await operations.splitToNewModel(imageIds, sourceId, runId, identities, imagesByIdentity, customName);
   }, [operations, runId, identities, imagesByIdentity]);
 
   const handleMergeModels = useCallback(async (sourceIds: string[], targetId: string) => {

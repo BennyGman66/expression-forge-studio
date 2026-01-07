@@ -15,7 +15,8 @@ interface UseImageOperationsReturn {
     sourceIdentityId: string,
     runId: string,
     identities: Identity[],
-    imagesByIdentity: Record<string, IdentityImage[]>
+    imagesByIdentity: Record<string, IdentityImage[]>,
+    customName?: string
   ) => Promise<Identity | null>;
   mergeModels: (
     sourceIds: string[],
@@ -81,7 +82,8 @@ export function useImageOperations(refetch: () => Promise<void>): UseImageOperat
     sourceIdentityId: string,
     runId: string,
     identities: Identity[],
-    imagesByIdentity: Record<string, IdentityImage[]>
+    imagesByIdentity: Record<string, IdentityImage[]>,
+    customName?: string
   ): Promise<Identity | null> => {
     if (imageIds.length === 0) return null;
 
@@ -90,11 +92,16 @@ export function useImageOperations(refetch: () => Promise<void>): UseImageOperat
       const sourceIdentity = identities.find(i => i.id === sourceIdentityId);
       if (!sourceIdentity) throw new Error('Source identity not found');
 
-      // Get next model number
-      const maxNumber = identities.reduce((max, id) => {
-        const match = id.name.match(/Model (\d+)/);
-        return match ? Math.max(max, parseInt(match[1])) : max;
-      }, 0);
+      // Determine model name
+      let modelName = customName?.trim();
+      if (!modelName) {
+        // Get next model number
+        const maxNumber = identities.reduce((max, id) => {
+          const match = id.name.match(/Model (\d+)/);
+          return match ? Math.max(max, parseInt(match[1])) : max;
+        }, 0);
+        modelName = `Model ${maxNumber + 1}`;
+      }
 
       // Get the first image to set as representative
       const firstImageData = imagesByIdentity[sourceIdentityId]?.find(img => imageIds.includes(img.id));
@@ -105,7 +112,7 @@ export function useImageOperations(refetch: () => Promise<void>): UseImageOperat
         .from('face_identities')
         .insert({
           scrape_run_id: runId,
-          name: `Model ${maxNumber + 1}`,
+          name: modelName,
           gender: sourceIdentity.gender,
           image_count: imageIds.length,
           representative_image_id: representativeImageId,

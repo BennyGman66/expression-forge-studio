@@ -14,11 +14,12 @@ import { Badge } from '@/components/ui/badge';
 import { ModelColumn } from './ModelColumn';
 import { BulkActionBar } from './BulkActionBar';
 import { MoveToModelDialog } from './MoveToModelDialog';
+import { SplitToNewDialog } from './SplitToNewDialog';
 import { Identity, IdentityImage, DragData } from './types';
 import { getImageUrl } from '@/lib/imageUtils';
 
-const COLUMN_WIDTH = 296; // 280 + gap
-const COLUMN_GAP = 16;
+const COLUMN_WIDTH = 244; // 220 + gap
+const COLUMN_GAP = 24;
 
 interface ModelColumnViewProps {
   identities: Identity[];
@@ -29,7 +30,7 @@ interface ModelColumnViewProps {
   onClearSelection: () => void;
   onSelectAllInColumn: (imageIds: string[]) => void;
   onMoveImages: (imageIds: string[], sourceId: string, targetId: string) => Promise<void>;
-  onSplitImages: (imageIds: string[], sourceId: string) => Promise<void>;
+  onSplitImages: (imageIds: string[], sourceId: string, customName?: string) => Promise<void>;
   onMergeModels: (sourceIds: string[], targetId: string) => Promise<void>;
   onDeleteImages: (imageIds: string[]) => Promise<void>;
   onDeleteModel: (identityId: string) => void;
@@ -58,6 +59,7 @@ export function ModelColumnView({
   const containerRef = useRef<HTMLDivElement>(null);
   const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const [activeDrag, setActiveDrag] = useState<DragData | null>(null);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
 
@@ -142,11 +144,16 @@ export function ModelColumnView({
     setMoveDialogOpen(false);
   }, [selectedImageIds, sourceIdentityIds, onMoveImages, onClearSelection]);
 
-  const handleSplit = useCallback(async () => {
+  const handleSplitClick = useCallback(() => {
+    setSplitDialogOpen(true);
+  }, []);
+
+  const handleSplitConfirm = useCallback(async (customName: string) => {
     const imageIds = Array.from(selectedImageIds);
     const sourceId = Array.from(sourceIdentityIds)[0];
-    await onSplitImages(imageIds, sourceId);
+    await onSplitImages(imageIds, sourceId, customName || undefined);
     onClearSelection();
+    setSplitDialogOpen(false);
   }, [selectedImageIds, sourceIdentityIds, onSplitImages, onClearSelection]);
 
   const handleMerge = useCallback(async () => {
@@ -199,7 +206,7 @@ export function ModelColumnView({
         className="flex-1 overflow-x-auto overflow-y-hidden p-4"
       >
         <div
-          className="flex gap-4"
+          className="flex gap-6"
           style={{
             width: `${columnVirtualizer.getTotalSize()}px`,
             height: '100%',
@@ -266,10 +273,19 @@ export function ModelColumnView({
         selectedCount={selectedImageIds.size}
         selectedIdentityCount={sourceIdentityIds.size}
         onMove={handleMoveClick}
-        onSplit={handleSplit}
+        onSplit={handleSplitClick}
         onMerge={handleMerge}
         onDelete={handleDeleteSelected}
         onClear={onClearSelection}
+        isOperating={isOperating}
+      />
+
+      {/* Split Dialog */}
+      <SplitToNewDialog
+        open={splitDialogOpen}
+        onOpenChange={setSplitDialogOpen}
+        onConfirm={handleSplitConfirm}
+        selectedCount={selectedImageIds.size}
         isOperating={isOperating}
       />
 
@@ -280,7 +296,7 @@ export function ModelColumnView({
         identities={identities}
         excludeIdentityIds={Array.from(sourceIdentityIds)}
         onSelect={handleMoveToModel}
-        onCreateNew={handleSplit}
+        onCreateNew={() => setSplitDialogOpen(true)}
         selectedCount={selectedImageIds.size}
       />
     </DndContext>
