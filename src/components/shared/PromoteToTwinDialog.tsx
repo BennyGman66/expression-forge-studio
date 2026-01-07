@@ -36,9 +36,17 @@ interface ExistingTwin {
   id: string;
   name: string;
   gender: string | null;
-  representative_image_url: string | null;
-  image_count: number;
+  front_face_url: string | null;
 }
+
+// Normalize gender values to match database format
+const normalizeGender = (gender: string | null): string | null => {
+  if (!gender) return null;
+  const g = gender.toLowerCase();
+  if (g === 'men' || g === 'male' || g === 'm') return 'male';
+  if (g === 'women' || g === 'female' || g === 'f') return 'female';
+  return gender;
+};
 
 export function PromoteToTwinDialog({
   open,
@@ -81,13 +89,16 @@ export function PromoteToTwinDialog({
     setLoadingTwins(true);
     try {
       let query = supabase
-        .from("digital_twins")
-        .select("id, name, gender, representative_image_url, image_count")
+        .from("digital_talents")
+        .select("id, name, gender, front_face_url")
         .order("name");
       
-      // Filter by gender if available
+      // Filter by normalized gender if available
       if (defaultGender) {
-        query = query.eq("gender", defaultGender);
+        const normalizedGender = normalizeGender(defaultGender);
+        if (normalizedGender) {
+          query = query.eq("gender", normalizedGender);
+        }
       }
 
       const { data, error } = await query;
@@ -189,8 +200,8 @@ export function PromoteToTwinDialog({
                   <SelectValue placeholder="Select gender" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="women">Women</SelectItem>
-                  <SelectItem value="men">Men</SelectItem>
+                  <SelectItem value="female">Female</SelectItem>
+                  <SelectItem value="male">Male</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -238,17 +249,14 @@ export function PromoteToTwinDialog({
                   {existingTwins.map((twin) => (
                     <SelectItem key={twin.id} value={twin.id}>
                       <div className="flex items-center gap-2">
-                        {twin.representative_image_url && (
+                        {twin.front_face_url && (
                           <img
-                            src={twin.representative_image_url}
+                            src={twin.front_face_url}
                             alt={twin.name}
                             className="w-6 h-6 rounded object-cover"
                           />
                         )}
                         <span>{twin.name}</span>
-                        <span className="text-muted-foreground text-xs">
-                          ({twin.image_count} images)
-                        </span>
                       </div>
                     </SelectItem>
                   ))}
@@ -259,17 +267,17 @@ export function PromoteToTwinDialog({
             {/* Selected Twin Preview */}
             {selectedTwin && (
               <div className="p-3 rounded-lg bg-muted/50 flex items-center gap-3">
-                {selectedTwin.representative_image_url && (
+                {selectedTwin.front_face_url && (
                   <img
-                    src={selectedTwin.representative_image_url}
+                    src={selectedTwin.front_face_url}
                     alt={selectedTwin.name}
                     className="w-16 h-16 rounded-lg object-cover"
                   />
                 )}
                 <div>
                   <p className="font-medium">{selectedTwin.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {selectedTwin.gender} • {selectedTwin.image_count} images
+                  <p className="text-sm text-muted-foreground capitalize">
+                    {selectedTwin.gender}
                   </p>
                 </div>
               </div>
