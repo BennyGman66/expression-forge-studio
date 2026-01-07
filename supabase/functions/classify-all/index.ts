@@ -158,7 +158,7 @@ async function runClassificationPipeline(
   jobId: string, 
   supabase: any, 
   resumeFromStep: number = 1,
-  resumeContext: { step2Index?: number; step3Index?: number; step5Index?: number } = {}
+  resumeContext: { step2Index?: number; step3Index?: number; step3InnerIndex?: number; step5Index?: number } = {}
 ) {
   const lovableKey = Deno.env.get('LOVABLE_API_KEY');
   const startTime = Date.now();
@@ -268,12 +268,17 @@ async function runClassificationPipeline(
       
       const step3Result = await compareFacesAndMerge(
         runId, supabase, lovableKey, jobId,
-        resumeContext.step3Index || 0, isNearTimeout
+        resumeContext.step3Index || 0, 
+        resumeContext.step3InnerIndex || 0,
+        isNearTimeout
       );
       
       // Check if we need to continue later
       if (step3Result.needsContinuation) {
-        await continueLater(3, { step3Index: step3Result.processedCount });
+        await continueLater(3, { 
+          step3Index: step3Result.processedOuterIndex, 
+          step3InnerIndex: step3Result.processedInnerIndex 
+        });
         return;
       }
     }
@@ -614,11 +619,13 @@ async function compareFacesAndMerge(
   supabase: any,
   lovableKey?: string,
   jobId?: string,
-  startFromIndex: number = 0,
+  startFromOuterIndex: number = 0,
+  startFromInnerIndex: number = 0,
   isNearTimeout?: () => boolean
 ): Promise<{
   needsContinuation: boolean;
-  processedCount: number;
+  processedOuterIndex: number;
+  processedInnerIndex: number;
 }> {
   // Fetch current models FRESH from DB (gets state after any prior merges in previous workers)
   const { data: freshModels, error: modelsError } = await supabase
@@ -660,18 +667,18 @@ async function compareFacesAndMerge(
   modelsWithFronts.sort((a: any, b: any) => b.imageCount - a.imageCount);
 
   const totalModels = modelsWithFronts.length;
-  console.log(`Comparing ${totalModels} models (starting from index ${startFromIndex})`);
+  console.log(`Comparing ${totalModels} models (starting from outer=${startFromOuterIndex}, inner=${startFromInnerIndex})`);
 
   // Track already-merged IDs to skip them
   const mergedIds = new Set<string>();
   let mergeCount = 0;
 
   // Compare each pair of models with timeout checking
-  for (let i = startFromIndex; i < totalModels; i++) {
+  for (let i = startFromOuterIndex; i < totalModels; i++) {
     // Check for timeout at the start of each outer loop iteration
     if (isNearTimeout && isNearTimeout()) {
-      console.log(`Timeout approaching in step 3, processed ${i}/${totalModels} models`);
-      return { needsContinuation: true, processedCount: i };
+      console.log(`Timeout approaching in step 3 outer loop, i=${i}, total=${totalModels}`);
+      return { needsContinuation: true, processedOuterIndex: i, processedInnerIndex: 0 };
     }
 
     const modelA = modelsWithFronts[i];
@@ -679,7 +686,16 @@ async function compareFacesAndMerge(
     // Skip if already merged into another
     if (mergedIds.has(modelA.id)) continue;
 
-    for (let j = i + 1; j < totalModels; j++) {
+    // Determine starting j: if resuming this specific i, start from saved inner index; otherwise start from i+1
+    const startJ = (i === startFromOuterIndex && startFromInnerIndex > i + 1) ? startFromInnerIndex : i + 1;
+
+    for (let j = startJ; j < totalModels; j++) {
+      // Check for timeout inside inner loop too - this is critical for large model counts
+      if (isNearTimeout && isNearTimeout()) {
+        console.log(`Timeout approaching in step 3 inner loop, i=${i}, j=${j}`);
+        return { needsContinuation: true, processedOuterIndex: i, processedInnerIndex: j };
+      }
+
       const modelB = modelsWithFronts[j];
       
       // Skip if already merged
@@ -721,7 +737,7 @@ async function compareFacesAndMerge(
         .from('pipeline_jobs')
         .update({ 
           progress_message: `Step 3/6: Matching faces... ${i}/${totalModels} (${percent}%)`,
-          origin_context: { scrape_run_id: runId, current_step: 3, step3Index: i },
+          origin_context: { scrape_run_id: runId, current_step: 3, step3Index: i, step3InnerIndex: 0 },
           updated_at: new Date().toISOString()
         })
         .eq('id', jobId);
@@ -729,10 +745,10 @@ async function compareFacesAndMerge(
   }
 
   console.log(`Merged ${mergeCount} duplicate models (immediate merge mode)`);
-  return { needsContinuation: false, processedCount: totalModels };
+  return { needsContinuation: false, processedOuterIndex: totalModels, processedInnerIndex: 0 };
 }
 
-// Compare two face images using AI
+// Compare two face images using AI - STRICT matching to avoid false positives
 async function compareFaces(imageUrl1: string, imageUrl2: string, lovableKey?: string): Promise<boolean> {
   if (!lovableKey) {
     console.log('No LOVABLE_API_KEY found, skipping face comparison');
@@ -755,10 +771,28 @@ async function compareFaces(imageUrl1: string, imageUrl2: string, lovableKey?: s
             content: [
               {
                 type: 'text',
-                text: `Look at these two photos of fashion models. Are they the same person? 
-Focus on facial features like face shape, eyes, nose, mouth, and overall appearance.
-Ignore clothing, background, pose, and lighting differences.
-Reply with just "yes" if they are definitely the same person, or "no" if they are different people or if you are unsure.`,
+                text: `You are an expert at facial recognition. Compare these two photos of fashion models.
+
+ONLY answer "yes" if you are 100% CERTAIN they are the SAME PERSON based on DISTINCTIVE facial features:
+- Face shape and bone structure
+- Eye shape, color, and spacing
+- Nose shape and size
+- Mouth and lip shape
+- Eyebrows shape and thickness
+- Ears (if visible)
+- Unique features like moles, dimples, or facial structure
+
+Answer "no" if:
+- They are different people
+- You have ANY doubt or uncertainty
+- They merely look similar (same ethnicity, similar build, similar hair)
+- The images are too obscured, low quality, or at angles that prevent confident matching
+- You cannot see enough facial detail to be certain
+
+Be CONSERVATIVE. It is much worse to incorrectly merge different people than to miss a match.
+When in doubt, answer "no".
+
+Reply with ONLY "yes" or "no".`,
               },
               {
                 type: 'image_url',
