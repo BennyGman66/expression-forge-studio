@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -23,7 +25,8 @@ import {
   Trash2,
   Plus,
   Maximize2,
-  Square
+  Square,
+  CheckSquare
 } from "lucide-react";
 import {
   Select,
@@ -128,6 +131,9 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   const [previewIdentity, setPreviewIdentity] = useState<Identity | null>(null);
   const [previewImages, setPreviewImages] = useState<IdentityImage[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Multi-select state
+  const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
 
   // Fetch identities with thumbnails when runId or gender changes
   useEffect(() => {
@@ -635,6 +641,75 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     }
   };
 
+  // Multi-select handlers
+  const handleToggleSelect = (e: React.MouseEvent, identityId: string) => {
+    e.stopPropagation();
+    setSelectedModelIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(identityId)) {
+        newSet.delete(identityId);
+      } else {
+        newSet.add(identityId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    setSelectedModelIds(new Set(identities.map(i => i.id)));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedModelIds(new Set());
+  };
+
+  const handleBulkDeleteModels = async () => {
+    const count = selectedModelIds.size;
+    if (!confirm(`Delete ${count} models and all their images? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const idsArray = Array.from(selectedModelIds);
+      
+      // Get all scrape_image_ids linked to these identities
+      const { data: imageLinks } = await supabase
+        .from('face_identity_images')
+        .select('scrape_image_id')
+        .in('identity_id', idsArray);
+
+      const scrapeImageIds = (imageLinks || []).map(link => link.scrape_image_id);
+
+      // Delete the identities (cascades to face_identity_images)
+      const { error: deleteIdentityError } = await supabase
+        .from('face_identities')
+        .delete()
+        .in('id', idsArray);
+
+      if (deleteIdentityError) throw deleteIdentityError;
+
+      // Delete the actual scrape images
+      if (scrapeImageIds.length > 0) {
+        await supabase
+          .from('face_scrape_images')
+          .delete()
+          .in('id', scrapeImageIds);
+      }
+
+      // Update local state
+      setIdentities(prev => prev.filter(id => !selectedModelIds.has(id.id)));
+      if (selectedIdentity && selectedModelIds.has(selectedIdentity)) {
+        setSelectedIdentity(null);
+      }
+      setSelectedModelIds(new Set());
+
+      toast({ title: `${count} models deleted`, description: `${scrapeImageIds.length} images removed` });
+    } catch (error) {
+      console.error('Error bulk deleting models:', error);
+      toast({ title: "Failed to delete models", variant: "destructive" });
+    }
+  };
+
   const handleDeleteUnclassifiedImage = async (e: React.MouseEvent, imageId: string) => {
     e.stopPropagation();
     
@@ -913,13 +988,33 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
         </Card>
 
         {/* Models List */}
-        <Card className="flex-1">
+        <Card className="flex-1 relative">
           <CardContent className="p-0">
-            <div className="px-4 py-3 border-b border-border">
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
               <p className="text-sm font-medium flex items-center gap-2">
                 <Users className="h-4 w-4" />
                 Models ({identities.length})
               </p>
+              {identities.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={selectedModelIds.size === identities.length ? handleClearSelection : handleSelectAll}
+                >
+                  {selectedModelIds.size === identities.length ? (
+                    <>
+                      <Square className="h-3 w-3 mr-1" />
+                      Deselect
+                    </>
+                  ) : (
+                    <>
+                      <CheckSquare className="h-3 w-3 mr-1" />
+                      Select All
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
             <ScrollArea className="h-[400px]">
               {isLoading ? (
@@ -972,6 +1067,25 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
                         }`}
                       >
                         <div className="flex items-center gap-3">
+                          {/* Checkbox for multi-select */}
+                          <Checkbox
+                            checked={selectedModelIds.has(identity.id)}
+                            onCheckedChange={() => {
+                              setSelectedModelIds(prev => {
+                                const newSet = new Set(prev);
+                                if (newSet.has(identity.id)) {
+                                  newSet.delete(identity.id);
+                                } else {
+                                  newSet.add(identity.id);
+                                }
+                                return newSet;
+                              });
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className={`flex-shrink-0 transition-opacity ${
+                              selectedModelIds.has(identity.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                            }`}
+                          />
                           <Avatar className="h-10 w-10 flex-shrink-0">
                             {identity.representative_image_url ? (
                               <AvatarImage 
@@ -1064,6 +1178,29 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
               )}
             </ScrollArea>
           </CardContent>
+          
+          {/* Floating Bulk Action Bar */}
+          {selectedModelIds.size > 0 && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20">
+              <div className="flex items-center gap-2 bg-card border rounded-lg shadow-lg px-4 py-2">
+                <Badge variant="secondary" className="text-sm">
+                  {selectedModelIds.size} selected
+                </Badge>
+                
+                <Button size="sm" variant="ghost" onClick={handleClearSelection}>
+                  <X className="w-4 h-4 mr-1" />
+                  Clear
+                </Button>
+                
+                <Separator orientation="vertical" className="h-6" />
+                
+                <Button size="sm" variant="destructive" onClick={handleBulkDeleteModels}>
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  Delete
+                </Button>
+              </div>
+            </div>
+          )}
         </Card>
       </div>
 
