@@ -25,6 +25,7 @@ interface UseImageOperationsReturn {
   ) => Promise<void>;
   deleteImages: (imageIds: string[]) => Promise<void>;
   deleteModels: (identityIds: string[]) => Promise<void>;
+  updateModelName: (identityId: string, newName: string) => Promise<void>;
   isOperating: boolean;
 }
 
@@ -269,12 +270,29 @@ export function useImageOperations(
     }
   }, [refetch, toast]);
 
+  const updateModelName = useCallback(async (identityId: string, newName: string) => {
+    try {
+      const { error } = await supabase
+        .from('face_identities')
+        .update({ name: newName })
+        .eq('id', identityId);
+
+      if (error) throw error;
+
+      await (refetchSilent || refetch)();
+    } catch (error) {
+      console.error('Error updating model name:', error);
+      toast({ title: 'Failed to update name', variant: 'destructive' });
+    }
+  }, [refetch, refetchSilent, toast]);
+
   return {
     moveImages,
     splitToNewModel,
     mergeModels,
     deleteImages,
     deleteModels,
+    updateModelName,
     isOperating,
   };
 }
