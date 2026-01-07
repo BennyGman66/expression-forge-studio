@@ -266,7 +266,16 @@ async function runClassificationPipeline(
       await updateJobStep(supabase, jobId, 2, 'Step 3/6: Matching faces across models...');
       console.log('Step 3: Comparing faces across models...');
       
-      await compareFacesAndMerge(modelsWithFronts, supabase, lovableKey, jobId);
+      const step3Result = await compareFacesAndMerge(
+        modelsWithFronts, supabase, lovableKey, jobId,
+        resumeContext.step3Index || 0, isNearTimeout
+      );
+      
+      // Check if we need to continue later
+      if (step3Result.needsContinuation) {
+        await continueLater(3, { step3Index: step3Result.processedCount });
+        return;
+      }
     }
 
     // ===== STEP 4: Classify gender for each remaining model =====
@@ -598,7 +607,7 @@ async function findFrontFacingImages(
   return { results, needsContinuation: false, processedCount: results.length };
 }
 
-// Step 3: Compare faces across models and merge duplicates (with Union-Find optimization)
+// Step 3: Compare faces across models and merge duplicates (with Union-Find optimization + timeout handling)
 async function compareFacesAndMerge(
   models: Array<{ 
     id: string; 
@@ -610,11 +619,16 @@ async function compareFacesAndMerge(
   }>,
   supabase: any,
   lovableKey?: string,
-  jobId?: string
-) {
+  jobId?: string,
+  startFromIndex: number = 0,
+  isNearTimeout?: () => boolean
+): Promise<{
+  needsContinuation: boolean;
+  processedCount: number;
+}> {
   // Only compare models that have front-facing images
   const modelsWithFronts = models.filter(m => m.frontImageUrl);
-  console.log(`Comparing ${modelsWithFronts.length} models with front-facing images`);
+  console.log(`Comparing ${modelsWithFronts.length} models with front-facing images (starting from index ${startFromIndex})`);
 
   // Sort by image count - compare larger groups first (Union-Find optimization)
   modelsWithFronts.sort((a, b) => b.images.length - a.images.length);
@@ -636,8 +650,14 @@ async function compareFacesAndMerge(
     }
   };
 
-  // Compare each pair of models
-  for (let i = 0; i < modelsWithFronts.length; i++) {
+  // Compare each pair of models with timeout checking
+  for (let i = startFromIndex; i < modelsWithFronts.length; i++) {
+    // Check for timeout at the start of each outer loop iteration
+    if (isNearTimeout && isNearTimeout()) {
+      console.log(`Timeout approaching in step 3, processed ${i}/${modelsWithFronts.length} models`);
+      return { needsContinuation: true, processedCount: i };
+    }
+
     const modelA = modelsWithFronts[i];
     
     // Skip if already merged into another
@@ -663,6 +683,19 @@ async function compareFacesAndMerge(
       // Small delay between comparisons
       await new Promise(r => setTimeout(r, 100));
     }
+
+    // Update progress periodically
+    if (jobId && i % 5 === 0) {
+      const percent = Math.round((i / modelsWithFronts.length) * 100);
+      await supabase
+        .from('pipeline_jobs')
+        .update({ 
+          progress_message: `Step 3/6: Matching faces... ${i}/${modelsWithFronts.length} models (${percent}%)`,
+          origin_context: { step3Index: i },
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+    }
   }
 
   // Batch merge using Union-Find results
@@ -686,6 +719,7 @@ async function compareFacesAndMerge(
   }
 
   console.log(`Merged ${mergeCount} duplicate models`);
+  return { needsContinuation: false, processedCount: modelsWithFronts.length };
 }
 
 // Compare two face images using AI
