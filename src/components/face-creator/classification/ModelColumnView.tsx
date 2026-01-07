@@ -17,7 +17,7 @@ import { MoveToModelDialog } from './MoveToModelDialog';
 import { Identity, IdentityImage, DragData } from './types';
 import { getImageUrl } from '@/lib/imageUtils';
 
-const COLUMN_WIDTH = 256; // 240 + gap
+const COLUMN_WIDTH = 296; // 280 + gap
 const COLUMN_GAP = 16;
 
 interface ModelColumnViewProps {

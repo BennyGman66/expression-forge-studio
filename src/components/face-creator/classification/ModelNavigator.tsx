@@ -50,7 +50,7 @@ export function ModelNavigator({
   }, [identities, searchQuery]);
 
   return (
-    <div className="w-56 flex-shrink-0 border-r border-border flex flex-col bg-card/50">
+    <div className="flex-1 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="p-3 border-b border-border space-y-3">
         <div className="flex items-center justify-between">

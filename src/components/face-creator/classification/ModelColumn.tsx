@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 
 const IMAGES_PER_ROW = 2;
 const ROW_HEIGHT = 180; // Approximate height for 2 images
-const COLUMN_WIDTH = 240;
+const COLUMN_WIDTH = 280;
 
 interface ModelColumnProps {
   identity: Identity;
@@ -85,7 +85,7 @@ export function ModelColumn({
       ref={setNodeRef}
       className={cn(
         'flex flex-col rounded-lg border bg-card transition-all',
-        isExpanded ? 'w-[400px]' : 'w-[240px]',
+        isExpanded ? 'w-[400px]' : 'w-[280px]',
         isSelected && 'ring-2 ring-primary',
         (isOver || isDragOver) && 'ring-2 ring-primary bg-primary/5',
         'flex-shrink-0'
