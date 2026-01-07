@@ -22,6 +22,8 @@ import {
   GenderFilter,
   IdentityImage,
 } from "./classification";
+import { PromoteToTwinDialog } from "@/components/shared/PromoteToTwinDialog";
+import { getImageUrl } from "@/lib/imageUtils";
 
 interface ClassificationPanelProps {
   runId: string | null;
@@ -38,6 +40,15 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
   const [focusedModelId, setFocusedModelId] = useState<string | null>(null);
   const [showUnclassified, setShowUnclassified] = useState(false);
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
+  
+  // Twin linking state
+  const [twinDialogOpen, setTwinDialogOpen] = useState(false);
+  const [selectedIdentityForTwin, setSelectedIdentityForTwin] = useState<{
+    id: string;
+    name: string;
+    gender: string | null;
+    representativeImageUrl: string | null;
+  } | null>(null);
   
   // Unclassified images
   const [unclassifiedImages, setUnclassifiedImages] = useState<any[]>([]);
@@ -329,6 +340,25 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
     setSelectedModelIds(new Set());
   }, []);
 
+  // Twin linking handler
+  const handleLinkToTwin = useCallback((identityId: string) => {
+    const identity = identities.find(i => i.id === identityId);
+    if (!identity) return;
+    
+    setSelectedIdentityForTwin({
+      id: identity.id,
+      name: identity.name,
+      gender: identity.gender || null,
+      representativeImageUrl: identity.representative_image_url || null,
+    });
+    setTwinDialogOpen(true);
+  }, [identities]);
+
+  const handleTwinLinkSuccess = useCallback((twinId: string, twinName: string) => {
+    toast({ title: `Linked to ${twinName}` });
+    refetch();
+  }, [toast, refetch]);
+
   if (!runId) {
     return (
       <Card>
@@ -473,6 +503,8 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           onSelectAllModels={handleSelectAllModels}
           onClearModelSelection={handleClearModelSelection}
           onDeleteSelectedModels={handleDeleteSelectedModels}
+          onDeleteModel={handleDeleteModel}
+          onLinkToTwin={handleLinkToTwin}
         />
       </div>
 
@@ -496,9 +528,24 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           onDeleteImages={handleDeleteImages}
           onDeleteModel={handleDeleteModel}
           onUpdateModelName={operations.updateModelName}
+          onLinkToTwin={handleLinkToTwin}
           selectedModelIds={selectedModelIds}
           onToggleModelSelect={handleToggleModelSelect}
           isOperating={operations.isOperating}
+        />
+      )}
+
+      {/* Promote to Twin Dialog */}
+      {selectedIdentityForTwin && (
+        <PromoteToTwinDialog
+          open={twinDialogOpen}
+          onOpenChange={setTwinDialogOpen}
+          identityId={selectedIdentityForTwin.id}
+          defaultName={selectedIdentityForTwin.name}
+          defaultGender={selectedIdentityForTwin.gender}
+          representativeImageUrl={selectedIdentityForTwin.representativeImageUrl ? 
+            getImageUrl(selectedIdentityForTwin.representativeImageUrl, 'thumb') : null}
+          onSuccess={handleTwinLinkSuccess}
         />
       )}
     </div>
