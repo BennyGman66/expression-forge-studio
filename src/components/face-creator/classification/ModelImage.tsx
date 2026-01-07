@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useEffect } from 'react';
+import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -64,6 +64,12 @@ export const ModelImage = memo(function ModelImage({
     },
   });
 
+  // Combine refs properly
+  const setRefs = useCallback((node: HTMLDivElement | null) => {
+    setNodeRef(node);
+    containerRef.current = node;
+  }, [setNodeRef]);
+
   const style = transform
     ? {
         transform: CSS.Translate.toString(transform),
@@ -74,10 +80,7 @@ export const ModelImage = memo(function ModelImage({
 
   return (
     <div
-      ref={node => {
-        setNodeRef(node);
-        (containerRef as any).current = node;
-      }}
+      ref={setRefs}
       style={style}
       className={cn(
         'relative rounded-md overflow-hidden border-2 transition-all cursor-grab active:cursor-grabbing',
