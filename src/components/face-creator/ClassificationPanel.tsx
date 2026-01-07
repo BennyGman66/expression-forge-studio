@@ -495,6 +495,7 @@ export function ClassificationPanel({ runId }: ClassificationPanelProps) {
           onMergeModels={handleMergeModels}
           onDeleteImages={handleDeleteImages}
           onDeleteModel={handleDeleteModel}
+          onUpdateModelName={operations.updateModelName}
           selectedModelIds={selectedModelIds}
           onToggleModelSelect={handleToggleModelSelect}
           isOperating={operations.isOperating}

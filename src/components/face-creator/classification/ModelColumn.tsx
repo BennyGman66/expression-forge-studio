@@ -1,10 +1,11 @@
-import { useRef, useMemo, useCallback } from 'react';
+import { useRef, useMemo, useCallback, useState, useEffect } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useDroppable } from '@dnd-kit/core';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { User, Maximize2, Trash2 } from 'lucide-react';
 import { Identity, IdentityImage } from './types';
 import { ModelImage } from './ModelImage';
@@ -28,6 +29,7 @@ interface ModelColumnProps {
   isSelected: boolean;
   onToggleColumnSelect: () => void;
   isDragOver?: boolean;
+  onUpdateName?: (newName: string) => Promise<void>;
 }
 
 export function ModelColumn({
@@ -43,8 +45,24 @@ export function ModelColumn({
   isSelected,
   onToggleColumnSelect,
   isDragOver,
+  onUpdateName,
 }: ModelColumnProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState(identity.name);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync editedName when identity changes
+  useEffect(() => {
+    setEditedName(identity.name);
+  }, [identity.name]);
+
+  const handleSaveName = useCallback(async () => {
+    if (editedName.trim() && editedName !== identity.name && onUpdateName) {
+      await onUpdateName(editedName.trim());
+    }
+    setIsEditingName(false);
+  }, [editedName, identity.name, onUpdateName]);
 
   const { setNodeRef, isOver } = useDroppable({
     id: `column-${identity.id}`,
@@ -119,7 +137,36 @@ export function ModelColumn({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="font-medium text-sm truncate">{identity.name}</span>
+            {isEditingName ? (
+              <Input
+                ref={inputRef}
+                value={editedName}
+                onChange={(e) => setEditedName(e.target.value)}
+                onBlur={handleSaveName}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSaveName();
+                  }
+                  if (e.key === 'Escape') {
+                    setEditedName(identity.name);
+                    setIsEditingName(false);
+                  }
+                }}
+                onClick={(e) => e.stopPropagation()}
+                autoFocus
+                className="h-6 text-sm px-1 w-24"
+              />
+            ) : (
+              <span 
+                className="font-medium text-sm truncate cursor-text hover:bg-muted/50 px-1 rounded"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditingName(true);
+                }}
+              >
+                {identity.name}
+              </span>
+            )}
             {identity.digital_talent && (
               <Badge variant="outline" className="text-[9px] px-1 flex-shrink-0">
                 {identity.digital_talent.name}

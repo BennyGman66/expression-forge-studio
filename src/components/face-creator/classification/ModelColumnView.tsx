@@ -34,6 +34,7 @@ interface ModelColumnViewProps {
   onMergeModels: (sourceIds: string[], targetId: string) => Promise<void>;
   onDeleteImages: (imageIds: string[]) => Promise<void>;
   onDeleteModel: (identityId: string) => void;
+  onUpdateModelName: (identityId: string, newName: string) => Promise<void>;
   selectedModelIds: Set<string>;
   onToggleModelSelect: (identityId: string) => void;
   isOperating: boolean;
@@ -52,6 +53,7 @@ export function ModelColumnView({
   onMergeModels,
   onDeleteImages,
   onDeleteModel,
+  onUpdateModelName,
   selectedModelIds,
   onToggleModelSelect,
   isOperating,
@@ -239,6 +241,7 @@ export function ModelColumnView({
                   isSelected={selectedModelIds.has(identity.id)}
                   onToggleColumnSelect={() => onToggleModelSelect(identity.id)}
                   isDragOver={dragOverColumnId === identity.id}
+                  onUpdateName={(newName) => onUpdateModelName(identity.id, newName)}
                 />
               </div>
             );

@@ -89,20 +89,19 @@ export const ModelImage = memo(function ModelImage({
           : 'border-transparent hover:border-muted-foreground/30',
         isDragging && 'shadow-lg'
       )}
-      onClick={onSelect}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
       {...listeners}
       {...attributes}
     >
-      {/* Checkbox */}
+      {/* Checkbox - visual only */}
       <div
         className={cn(
-          'absolute top-1.5 left-1.5 z-10 transition-opacity',
+          'absolute top-1.5 left-1.5 z-10 transition-opacity pointer-events-none',
           isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
         )}
-        onClick={e => {
-          e.stopPropagation();
-          onToggle();
-        }}
       >
         <Checkbox
           checked={isSelected}
