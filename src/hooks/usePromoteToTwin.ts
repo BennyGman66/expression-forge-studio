@@ -10,9 +10,9 @@ interface PromoteToTwinParams {
   brandId: string | null;
 }
 
-interface LinkToExistingTwinParams {
+interface LinkToExistingTalentParams {
   identityId: string;
-  twinId: string;
+  talentId: string;
 }
 
 export function usePromoteToTwin() {
@@ -127,107 +127,42 @@ export function usePromoteToTwin() {
     }
   };
 
-  const linkIdentityToExistingTwin = async ({
+  const linkIdentityToExistingTalent = async ({
     identityId,
-    twinId,
-  }: LinkToExistingTwinParams): Promise<{ twinId: string; twinName: string } | null> => {
+    talentId,
+  }: LinkToExistingTalentParams): Promise<{ talentId: string; talentName: string } | null> => {
     setIsPromoting(true);
     try {
-      // 1. Fetch the twin to get its name
-      const { data: twin, error: twinError } = await supabase
-        .from("digital_twins")
-        .select("id, name, image_count")
-        .eq("id", twinId)
+      // 1. Fetch the talent to get its name
+      const { data: talent, error: talentError } = await supabase
+        .from("digital_talents")
+        .select("id, name")
+        .eq("id", talentId)
         .single();
 
-      if (twinError) throw twinError;
+      if (talentError) throw talentError;
 
-      // 2. Fetch identity with its images
-      const { data: identity, error: identityError } = await supabase
-        .from("face_identities")
-        .select(`
-          *,
-          face_identity_images(
-            id,
-            scrape_image_id,
-            view,
-            is_ignored,
-            face_scrape_images(
-              id,
-              source_url,
-              stored_url,
-              face_crops(
-                crop_x,
-                crop_y,
-                crop_width,
-                crop_height,
-                cropped_stored_url
-              )
-            )
-          )
-        `)
-        .eq("id", identityId)
-        .single();
-
-      if (identityError) throw identityError;
-
-      // 3. Copy images to digital_twin_images
-      const newImages = identity.face_identity_images
-        ?.filter((img: any) => !img.is_ignored)
-        .map((img: any) => ({
-          twin_id: twinId,
-          source_url: img.face_scrape_images.source_url,
-          stored_url: img.face_scrape_images.stored_url,
-          view: img.view || "unknown",
-          crop_data: img.face_scrape_images.face_crops?.[0]
-            ? {
-                crop_x: img.face_scrape_images.face_crops[0].crop_x,
-                crop_y: img.face_scrape_images.face_crops[0].crop_y,
-                crop_width: img.face_scrape_images.face_crops[0].crop_width,
-                crop_height: img.face_scrape_images.face_crops[0].crop_height,
-              }
-            : null,
-        })) || [];
-
-      if (newImages.length > 0) {
-        const { error: imagesError } = await supabase
-          .from("digital_twin_images")
-          .insert(newImages);
-
-        if (imagesError) throw imagesError;
-      }
-
-      // 4. Update face_identities with linked_twin_id and name
+      // 2. Update face_identities with talent_id and sync name
       const { error: linkError } = await supabase
         .from("face_identities")
         .update({
-          linked_twin_id: twinId,
-          name: twin.name,
+          talent_id: talentId,
+          name: talent.name,
         })
         .eq("id", identityId);
 
       if (linkError) throw linkError;
 
-      // 5. Update twin's image_count
-      const { error: countError } = await supabase
-        .from("digital_twins")
-        .update({
-          image_count: (twin.image_count || 0) + newImages.length,
-        })
-        .eq("id", twinId);
-
-      if (countError) throw countError;
-
-      toast.success(`Linked to Digital Twin: ${twin.name}`);
-      return { twinId: twin.id, twinName: twin.name };
+      toast.success(`Linked to Digital Talent: ${talent.name}`);
+      return { talentId: talent.id, talentName: talent.name };
     } catch (error) {
-      console.error("Error linking to twin:", error);
-      toast.error("Failed to link to Digital Twin");
+      console.error("Error linking to talent:", error);
+      toast.error("Failed to link to Digital Talent");
       return null;
     } finally {
       setIsPromoting(false);
     }
   };
 
-  return { promoteIdentityToTwin, linkIdentityToExistingTwin, isPromoting };
+  return { promoteIdentityToTwin, linkIdentityToExistingTalent, isPromoting };
 }

@@ -65,7 +65,7 @@ export function PromoteToTwinDialog({
   const [existingTwins, setExistingTwins] = useState<ExistingTwin[]>([]);
   const [loadingTwins, setLoadingTwins] = useState(false);
   
-  const { promoteIdentityToTwin, linkIdentityToExistingTwin, isPromoting } = usePromoteToTwin();
+  const { promoteIdentityToTwin, linkIdentityToExistingTalent, isPromoting } = usePromoteToTwin();
   const { brands, loading: brandsLoading } = useBrands();
 
   useEffect(() => {
@@ -127,14 +127,14 @@ export function PromoteToTwinDialog({
     } else {
       if (!selectedTwinId) return;
       
-      const result = await linkIdentityToExistingTwin({
+      const result = await linkIdentityToExistingTalent({
         identityId,
-        twinId: selectedTwinId,
+        talentId: selectedTwinId,
       });
 
       if (result) {
         onOpenChange(false);
-        onSuccess?.(result.twinId, result.twinName);
+        onSuccess?.(result.talentId, result.talentName);
       }
     }
   };
