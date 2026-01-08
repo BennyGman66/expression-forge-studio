@@ -18,7 +18,7 @@ interface CropOutputDialogProps {
   onCropComplete: (outputId: string, newUrl: string) => void;
 }
 
-const OUTPUT_SIZE = 1000; // Final crop size
+const OUTPUT_SIZE = 1000;
 
 export function CropOutputDialog({
   open,
@@ -27,50 +27,75 @@ export function CropOutputDialog({
   imageUrl,
   onCropComplete,
 }: CropOutputDialogProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
+  // Track actual rendered image position within container (accounts for object-contain)
+  const [imageBounds, setImageBounds] = useState({ offsetX: 0, offsetY: 0, width: 0, height: 0 });
+  // Crop box in CONTAINER pixel coordinates
   const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 200, height: 200 });
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [resizeCorner, setResizeCorner] = useState<'nw' | 'ne' | 'sw' | 'se' | null>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [startCrop, setStartCrop] = useState({ x: 0, y: 0, width: 0, height: 0 });
-  const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
   const [processing, setProcessing] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const imageRef = useRef<HTMLImageElement>(null);
 
-  // Reset crop when image changes
+  // Reset when dialog opens
   useEffect(() => {
-    if (open && imageUrl) {
-      // Reset to default center crop
-      setCropBox({ x: 0, y: 0, width: 200, height: 200 });
+    if (open) {
+      setImageBounds({ offsetX: 0, offsetY: 0, width: 0, height: 0 });
+      setImageDimensions({ width: 0, height: 0 });
     }
   }, [open, imageUrl]);
 
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
+    const container = containerRef.current;
+    if (!container) return;
+
     setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
 
-    // Default crop to center, 40% of image
-    const defaultSize = Math.min(img.naturalWidth, img.naturalHeight) * 0.6;
+    // Calculate actual rendered image bounds with object-contain
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    const imgAspect = img.naturalWidth / img.naturalHeight;
+    const containerAspect = containerWidth / containerHeight;
+
+    let renderedWidth: number, renderedHeight: number, offsetX: number, offsetY: number;
+
+    if (imgAspect > containerAspect) {
+      // Image is wider than container - letterbox top/bottom
+      renderedWidth = containerWidth;
+      renderedHeight = containerWidth / imgAspect;
+      offsetX = 0;
+      offsetY = (containerHeight - renderedHeight) / 2;
+    } else {
+      // Image is taller than container - letterbox left/right
+      renderedHeight = containerHeight;
+      renderedWidth = containerHeight * imgAspect;
+      offsetX = (containerWidth - renderedWidth) / 2;
+      offsetY = 0;
+    }
+
+    setImageBounds({ offsetX, offsetY, width: renderedWidth, height: renderedHeight });
+
+    // Set default 1:1 crop centered on image (60% of smaller dimension)
+    const defaultSize = Math.min(renderedWidth, renderedHeight) * 0.6;
     setCropBox({
-      x: (img.naturalWidth - defaultSize) / 2,
-      y: (img.naturalHeight - defaultSize) / 2,
+      x: offsetX + (renderedWidth - defaultSize) / 2,
+      y: offsetY + (renderedHeight - defaultSize) / 2,
       width: defaultSize,
       height: defaultSize,
     });
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!containerRef.current || !imageRef.current) return;
+    if (!containerRef.current || imageBounds.width === 0) return;
 
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = imageDimensions.width / rect.width;
-    const scaleY = imageDimensions.height / rect.height;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-
-    // Check if clicking inside crop box
+    // Check if clicking inside crop box for dragging
     if (
       x >= cropBox.x &&
       x <= cropBox.x + cropBox.width &&
@@ -84,96 +109,92 @@ export function CropOutputDialog({
 
   const handleCornerMouseDown = (e: React.MouseEvent, corner: 'nw' | 'ne' | 'sw' | 'se') => {
     e.stopPropagation();
-    if (!imageRef.current) return;
+    if (imageBounds.width === 0) return;
 
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = imageDimensions.width / rect.width;
-    const scaleY = imageDimensions.height / rect.height;
-
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const rect = containerRef.current!.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
     setIsResizing(true);
     setResizeCorner(corner);
     setDragStart({ x, y });
-    setStartCrop({ ...cropBox });
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!imageRef.current) return;
+    if (!containerRef.current || imageBounds.width === 0) return;
+    if (!isDragging && !isResizing) return;
 
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = imageDimensions.width / rect.width;
-    const scaleY = imageDimensions.height / rect.height;
-
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
     if (isDragging) {
       let newX = x - dragStart.x;
       let newY = y - dragStart.y;
 
-      // Constrain to image bounds
-      newX = Math.max(0, Math.min(newX, imageDimensions.width - cropBox.width));
-      newY = Math.max(0, Math.min(newY, imageDimensions.height - cropBox.height));
+      // Constrain to image bounds (not container)
+      newX = Math.max(imageBounds.offsetX, Math.min(newX, imageBounds.offsetX + imageBounds.width - cropBox.width));
+      newY = Math.max(imageBounds.offsetY, Math.min(newY, imageBounds.offsetY + imageBounds.height - cropBox.height));
 
       setCropBox((prev) => ({ ...prev, x: newX, y: newY }));
     } else if (isResizing && resizeCorner) {
-      const deltaX = x - dragStart.x;
-      const deltaY = y - dragStart.y;
+      const dx = x - dragStart.x;
+      const dy = y - dragStart.y;
 
-      let newCrop = { ...startCrop };
+      // Use larger delta to maintain 1:1
+      const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
 
-      // Maintain 1:1 aspect ratio
-      const delta = Math.max(Math.abs(deltaX), Math.abs(deltaY));
-      const signX = resizeCorner.includes('e') ? 1 : -1;
-      const signY = resizeCorner.includes('s') ? 1 : -1;
-      const effectiveDelta = (deltaX * signX + deltaY * signY) / 2;
+      let newCrop = { ...cropBox };
 
       switch (resizeCorner) {
         case 'se':
-          newCrop.width = Math.max(50, startCrop.width + effectiveDelta);
+          newCrop.width = Math.max(50, cropBox.width + delta);
           newCrop.height = newCrop.width;
           break;
         case 'sw':
-          newCrop.width = Math.max(50, startCrop.width + effectiveDelta);
-          newCrop.height = newCrop.width;
-          newCrop.x = startCrop.x + startCrop.width - newCrop.width;
+          const swNewWidth = Math.max(50, cropBox.width - delta);
+          newCrop.x = cropBox.x + cropBox.width - swNewWidth;
+          newCrop.width = swNewWidth;
+          newCrop.height = swNewWidth;
           break;
         case 'ne':
-          newCrop.width = Math.max(50, startCrop.width + effectiveDelta);
+          newCrop.width = Math.max(50, cropBox.width + delta);
           newCrop.height = newCrop.width;
-          newCrop.y = startCrop.y + startCrop.height - newCrop.height;
+          newCrop.y = cropBox.y + cropBox.height - newCrop.height;
           break;
         case 'nw':
-          newCrop.width = Math.max(50, startCrop.width + effectiveDelta);
-          newCrop.height = newCrop.width;
-          newCrop.x = startCrop.x + startCrop.width - newCrop.width;
-          newCrop.y = startCrop.y + startCrop.height - newCrop.height;
+          const nwNewWidth = Math.max(50, cropBox.width - delta);
+          newCrop.x = cropBox.x + cropBox.width - nwNewWidth;
+          newCrop.y = cropBox.y + cropBox.height - nwNewWidth;
+          newCrop.width = nwNewWidth;
+          newCrop.height = nwNewWidth;
           break;
       }
 
       // Constrain to image bounds
-      if (newCrop.x < 0) {
-        newCrop.width += newCrop.x;
-        newCrop.x = 0;
+      if (newCrop.x < imageBounds.offsetX) {
+        const overflow = imageBounds.offsetX - newCrop.x;
+        newCrop.x = imageBounds.offsetX;
+        newCrop.width -= overflow;
+        newCrop.height = newCrop.width;
       }
-      if (newCrop.y < 0) {
-        newCrop.height += newCrop.y;
-        newCrop.y = 0;
+      if (newCrop.y < imageBounds.offsetY) {
+        const overflow = imageBounds.offsetY - newCrop.y;
+        newCrop.y = imageBounds.offsetY;
+        newCrop.height -= overflow;
+        newCrop.width = newCrop.height;
       }
-      if (newCrop.x + newCrop.width > imageDimensions.width) {
-        newCrop.width = imageDimensions.width - newCrop.x;
+      if (newCrop.x + newCrop.width > imageBounds.offsetX + imageBounds.width) {
+        newCrop.width = imageBounds.offsetX + imageBounds.width - newCrop.x;
+        newCrop.height = newCrop.width;
       }
-      if (newCrop.y + newCrop.height > imageDimensions.height) {
-        newCrop.height = imageDimensions.height - newCrop.y;
+      if (newCrop.y + newCrop.height > imageBounds.offsetY + imageBounds.height) {
+        newCrop.height = imageBounds.offsetY + imageBounds.height - newCrop.y;
+        newCrop.width = newCrop.height;
       }
-      // Keep square
-      const minDim = Math.min(newCrop.width, newCrop.height);
-      newCrop.width = minDim;
-      newCrop.height = minDim;
 
       setCropBox(newCrop);
+      setDragStart({ x, y });
     }
   };
 
@@ -184,18 +205,25 @@ export function CropOutputDialog({
   };
 
   const handleApplyCrop = async () => {
-    if (!outputId || !imageUrl) return;
+    if (!outputId || !imageUrl || imageBounds.width === 0) return;
     setProcessing(true);
 
     try {
-      // Call edge function to crop and store (using same pattern as HeadCropTab)
+      // Convert from container pixels to image percentages
+      const cropXPercent = ((cropBox.x - imageBounds.offsetX) / imageBounds.width) * 100;
+      const cropYPercent = ((cropBox.y - imageBounds.offsetY) / imageBounds.height) * 100;
+      const cropWidthPercent = (cropBox.width / imageBounds.width) * 100;
+      const cropHeightPercent = (cropBox.height / imageBounds.height) * 100;
+
+      console.log("Applying crop:", { cropXPercent, cropYPercent, cropWidthPercent, cropHeightPercent });
+
       const response = await supabase.functions.invoke("crop-and-store-image", {
         body: {
           imageUrl: imageUrl,
-          cropX: (cropBox.x / imageDimensions.width) * 100,
-          cropY: (cropBox.y / imageDimensions.height) * 100,
-          cropWidth: (cropBox.width / imageDimensions.width) * 100,
-          cropHeight: (cropBox.height / imageDimensions.height) * 100,
+          cropX: cropXPercent,
+          cropY: cropYPercent,
+          cropWidth: cropWidthPercent,
+          cropHeight: cropHeightPercent,
           targetSize: OUTPUT_SIZE,
           cropId: `output-crop-${outputId}-${Date.now()}`,
         },
@@ -204,11 +232,8 @@ export function CropOutputDialog({
       if (response.error) throw response.error;
 
       const { croppedUrl } = response.data;
-      
-      // Add cache-busting to prevent browser caching
       const cacheBustedUrl = `${croppedUrl}?t=${Date.now()}`;
 
-      // Update the output in database
       await supabase
         .from("face_pairing_outputs")
         .update({ stored_url: cacheBustedUrl })
@@ -226,33 +251,15 @@ export function CropOutputDialog({
   };
 
   const handleReset = () => {
-    if (imageDimensions.width && imageDimensions.height) {
-      const defaultSize = Math.min(imageDimensions.width, imageDimensions.height) * 0.6;
-      setCropBox({
-        x: (imageDimensions.width - defaultSize) / 2,
-        y: (imageDimensions.height - defaultSize) / 2,
-        width: defaultSize,
-        height: defaultSize,
-      });
-    }
+    if (imageBounds.width === 0) return;
+    const defaultSize = Math.min(imageBounds.width, imageBounds.height) * 0.6;
+    setCropBox({
+      x: imageBounds.offsetX + (imageBounds.width - defaultSize) / 2,
+      y: imageBounds.offsetY + (imageBounds.height - defaultSize) / 2,
+      width: defaultSize,
+      height: defaultSize,
+    });
   };
-
-  // Calculate crop box position for display
-  const getCropStyle = () => {
-    if (!imageRef.current || !imageDimensions.width) return {};
-    const rect = imageRef.current.getBoundingClientRect();
-    const scaleX = rect.width / imageDimensions.width;
-    const scaleY = rect.height / imageDimensions.height;
-
-    return {
-      left: cropBox.x * scaleX,
-      top: cropBox.y * scaleY,
-      width: cropBox.width * scaleX,
-      height: cropBox.height * scaleY,
-    };
-  };
-
-  const cropStyle = getCropStyle();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -266,83 +273,76 @@ export function CropOutputDialog({
             <>
               <div
                 ref={containerRef}
-                className="relative bg-muted rounded-lg overflow-hidden select-none cursor-crosshair"
+                className="relative bg-muted rounded-lg overflow-hidden select-none cursor-crosshair h-[60vh]"
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
               >
                 <img
-                  ref={imageRef}
                   src={imageUrl}
                   alt="Edit"
-                  className="w-full h-auto max-h-[60vh] object-contain"
+                  className="w-full h-full object-contain"
                   onLoad={handleImageLoad}
                   draggable={false}
                 />
-                
+
                 {/* Dark overlay - 4 regions outside crop */}
-                {imageDimensions.width > 0 && imageRef.current && (
+                {imageBounds.width > 0 && (
                   <>
-                    {/* Top region */}
-                    <div 
+                    <div
                       className="absolute left-0 right-0 top-0 bg-black/50 pointer-events-none"
-                      style={{ height: cropStyle.top || 0 }} 
+                      style={{ height: cropBox.y }}
                     />
-                    {/* Bottom region */}
-                    <div 
+                    <div
                       className="absolute left-0 right-0 bg-black/50 pointer-events-none"
-                      style={{ 
-                        top: (cropStyle.top || 0) + (cropStyle.height || 0),
-                        bottom: 0 
-                      }} 
+                      style={{ top: cropBox.y + cropBox.height, bottom: 0 }}
                     />
-                    {/* Left region */}
-                    <div 
+                    <div
                       className="absolute left-0 bg-black/50 pointer-events-none"
-                      style={{ 
-                        top: cropStyle.top || 0, 
-                        width: cropStyle.left || 0, 
-                        height: cropStyle.height || 0 
-                      }} 
+                      style={{ top: cropBox.y, width: cropBox.x, height: cropBox.height }}
                     />
-                    {/* Right region */}
-                    <div 
+                    <div
                       className="absolute bg-black/50 pointer-events-none"
-                      style={{ 
-                        top: cropStyle.top || 0, 
-                        left: (cropStyle.left || 0) + (cropStyle.width || 0),
+                      style={{
+                        top: cropBox.y,
+                        left: cropBox.x + cropBox.width,
                         right: 0,
-                        height: cropStyle.height || 0 
-                      }} 
+                        height: cropBox.height,
+                      }}
                     />
                   </>
                 )}
-                
-                {/* Crop box */}
-                <div
-                  className="absolute border-2 border-green-500 cursor-move"
-                  style={cropStyle}
-                >
-                  {/* 1:1 indicator */}
-                  <div className="absolute top-1 left-1 text-xs bg-green-500 text-white px-1 rounded">
-                    1:1
+
+                {/* Crop box - already in container pixels */}
+                {imageBounds.width > 0 && (
+                  <div
+                    className="absolute border-2 border-green-500 cursor-move"
+                    style={{
+                      left: cropBox.x,
+                      top: cropBox.y,
+                      width: cropBox.width,
+                      height: cropBox.height,
+                    }}
+                  >
+                    <div className="absolute top-1 left-1 text-xs bg-green-500 text-white px-1 rounded">
+                      1:1
+                    </div>
+                    {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+                      <div
+                        key={corner}
+                        className="absolute w-3 h-3 bg-green-500 border border-white rounded-full cursor-nwse-resize"
+                        style={{
+                          top: corner.includes('n') ? -6 : undefined,
+                          bottom: corner.includes('s') ? -6 : undefined,
+                          left: corner.includes('w') ? -6 : undefined,
+                          right: corner.includes('e') ? -6 : undefined,
+                        }}
+                        onMouseDown={(e) => handleCornerMouseDown(e, corner)}
+                      />
+                    ))}
                   </div>
-                  {/* Corner handles */}
-                  {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
-                    <div
-                      key={corner}
-                      className="absolute w-3 h-3 bg-green-500 border border-white rounded-full cursor-nwse-resize"
-                      style={{
-                        top: corner.includes('n') ? -6 : undefined,
-                        bottom: corner.includes('s') ? -6 : undefined,
-                        left: corner.includes('w') ? -6 : undefined,
-                        right: corner.includes('e') ? -6 : undefined,
-                      }}
-                      onMouseDown={(e) => handleCornerMouseDown(e, corner)}
-                    />
-                  ))}
-                </div>
+                )}
               </div>
 
               <div className="flex justify-between items-center">
@@ -373,19 +373,18 @@ export function CropOutputDialog({
               {/* Preview */}
               <div className="border-t pt-4">
                 <p className="text-sm font-medium mb-2">Preview:</p>
-                <div 
-                  className="w-32 h-32 overflow-hidden rounded border bg-muted"
-                >
-                  {imageUrl && imageDimensions.width > 0 && (
+                <div className="w-32 h-32 overflow-hidden rounded border bg-muted">
+                  {imageBounds.width > 0 && (
                     <div className="w-full h-full overflow-hidden relative">
                       <img
                         src={imageUrl}
                         alt="Preview"
                         className="absolute origin-top-left"
                         style={{
-                          transform: `scale(${100 / (cropBox.width / imageDimensions.width * 100)}) translate(${-(cropBox.x / imageDimensions.width) * 100}%, ${-(cropBox.y / imageDimensions.height) * 100}%)`,
-                          width: '100%',
-                          height: 'auto',
+                          width: (imageBounds.width / cropBox.width) * 128,
+                          height: (imageBounds.height / cropBox.height) * 128,
+                          left: -((cropBox.x - imageBounds.offsetX) / cropBox.width) * 128,
+                          top: -((cropBox.y - imageBounds.offsetY) / cropBox.height) * 128,
                         }}
                       />
                     </div>
