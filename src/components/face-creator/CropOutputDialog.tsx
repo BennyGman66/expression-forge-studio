@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, RotateCcw, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-
+import { CropPreview } from "@/components/shared/CropPreview";
 interface CropOutputDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -374,21 +374,11 @@ export function CropOutputDialog({
               <div className="border-t pt-4">
                 <p className="text-sm font-medium mb-2">Preview:</p>
                 <div className="w-32 h-32 overflow-hidden rounded border bg-muted">
-                  {imageBounds.width > 0 && (
-                    <div className="w-full h-full overflow-hidden relative">
-                      <img
-                        src={imageUrl}
-                        alt="Preview"
-                        className="absolute origin-top-left"
-                        style={{
-                          width: (imageBounds.width / cropBox.width) * 128,
-                          height: (imageBounds.height / cropBox.height) * 128,
-                          left: -((cropBox.x - imageBounds.offsetX) / cropBox.width) * 128,
-                          top: -((cropBox.y - imageBounds.offsetY) / cropBox.height) * 128,
-                        }}
-                      />
-                    </div>
-                  )}
+                  <CropPreview
+                    imageUrl={imageUrl}
+                    cropRect={cropBox}
+                    imageBounds={imageBounds}
+                  />
                 </div>
               </div>
             </>

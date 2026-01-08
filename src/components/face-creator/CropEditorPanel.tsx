@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useFaceDetector } from "@/hooks/useFaceDetector";
 import { calculateHeadAndShouldersCrop, getBestFaceDetection } from "@/lib/cropCalculation";
+import { CropPreview } from "@/components/shared/CropPreview";
 import type { FaceScrapeImage, FaceCrop, FaceJob } from "@/types/face-creator";
 
 interface CropEditorPanelProps {
@@ -1949,7 +1950,6 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
                       imageUrl={selectedImage.stored_url || selectedImage.source_url}
                       cropRect={cropRect}
                       imageBounds={imageBounds}
-                      aspectRatio={aspectRatio}
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">
@@ -2057,45 +2057,3 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
   );
 }
 
-// Separate component for crop preview with cleaner calculation
-function CropPreview({ 
-  imageUrl, 
-  cropRect, 
-  imageBounds, 
-  aspectRatio 
-}: { 
-  imageUrl: string; 
-  cropRect: { x: number; y: number; width: number; height: number }; 
-  imageBounds: { offsetX: number; offsetY: number; width: number; height: number };
-  aspectRatio: '1:1' | '4:5';
-}) {
-  // Convert crop from container space to image-relative percentages
-  const cropXInImage = cropRect.x - imageBounds.offsetX;
-  const cropYInImage = cropRect.y - imageBounds.offsetY;
-  
-  const cropXPercent = (cropXInImage / imageBounds.width) * 100;
-  const cropYPercent = (cropYInImage / imageBounds.height) * 100;
-  const cropWidthPercent = (cropRect.width / imageBounds.width) * 100;
-  const cropHeightPercent = (cropRect.height / imageBounds.height) * 100;
-  
-  // Calculate scale to fill the preview container
-  const scale = 100 / cropWidthPercent;
-  
-  return (
-    <div className="w-full h-full overflow-hidden relative">
-      <img
-        src={imageUrl}
-        alt=""
-        className="absolute"
-        style={{
-          transformOrigin: 'top left',
-          transform: `scale(${scale})`,
-          left: `${-cropXPercent * scale}%`,
-          top: `${-cropYPercent * scale}%`,
-          width: '100%',
-          height: 'auto',
-        }}
-      />
-    </div>
-  );
-}
