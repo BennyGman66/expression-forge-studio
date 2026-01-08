@@ -857,16 +857,17 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
           // Generate and store the actual cropped image file
           let croppedStoredUrl: string | null = null;
           try {
-            const { data: cropResult, error: cropFnError } = await supabase.functions.invoke('crop-and-store-image', {
-              body: {
-                imageUrl,
-                cropX: cropCoords.x,
-                cropY: cropCoords.y,
-                cropWidth: cropCoords.width,
-                cropHeight: cropCoords.height,
-                cropId,
-              }
-            });
+          const { data: cropResult, error: cropFnError } = await supabase.functions.invoke('crop-and-store-image', {
+            body: {
+              imageUrl,
+              cropX: cropCoords.x,
+              cropY: cropCoords.y,
+              cropWidth: cropCoords.width,
+              cropHeight: cropCoords.height,
+              cropId,
+              targetSize: 1000,
+            }
+          });
             
             if (!cropFnError && cropResult?.success) {
               croppedStoredUrl = cropResult.croppedUrl;
@@ -1053,6 +1054,7 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
           cropWidth: cropWidthPercent,
           cropHeight: cropHeightPercent,
           cropId,
+          targetSize: 1000,
         }
       });
       
@@ -1220,6 +1222,7 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
             cropWidth: image.crop.crop_width,
             cropHeight: image.crop.crop_height,
             cropId: image.crop.id,
+            targetSize: 1000,
           }
         });
         
