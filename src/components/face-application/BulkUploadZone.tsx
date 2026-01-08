@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isSupportedImage } from "@/lib/tiffImportUtils";
 
 interface BulkUploadZoneProps {
   onFilesSelected: (files: File[]) => void;
@@ -23,9 +24,8 @@ export function BulkUploadZone({
       e.stopPropagation();
       setIsDragOver(false);
 
-      const files = Array.from(e.dataTransfer.files).filter((f) =>
-        f.type.startsWith("image/")
-      );
+      // Filter to supported image files (including TIFF)
+      const files = Array.from(e.dataTransfer.files).filter(isSupportedImage);
       if (files.length > 0) {
         onFilesSelected(files);
       }
@@ -35,7 +35,7 @@ export function BulkUploadZone({
 
   const handleFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files || []);
+      const files = Array.from(e.target.files || []).filter(isSupportedImage);
       if (files.length > 0) {
         onFilesSelected(files);
       }
@@ -91,13 +91,13 @@ export function BulkUploadZone({
         </p>
         {!compact && (
           <p className="text-xs text-muted-foreground">
-            Upload multiple outfit images to create looks automatically
+            Supports TIFF, PNG, and JPG files
           </p>
         )}
       </div>
       <input
         type="file"
-        accept="image/*"
+        accept=".tif,.tiff,.png,.jpg,.jpeg,image/*"
         multiple
         className="hidden"
         onChange={handleFileInput}

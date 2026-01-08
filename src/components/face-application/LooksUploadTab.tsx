@@ -5,6 +5,8 @@ import { Plus, ArrowRight, Image as ImageIcon, FolderOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BulkUploadZone } from "./BulkUploadZone";
 import { LooksTable, LookData, TalentOption } from "./LooksTable";
+import { TiffImportDialog } from "./TiffImportDialog";
+import { isTiffFile } from "@/lib/tiffImportUtils";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +45,8 @@ export function LooksUploadTab({
   }>({ isUploading: false, progress: { current: 0, total: 0 } });
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newLookName, setNewLookName] = useState("");
+  const [tiffImportFiles, setTiffImportFiles] = useState<File[]>([]);
+  const [showTiffImport, setShowTiffImport] = useState(false);
   const { toast } = useToast();
 
   // Fetch talents
@@ -299,34 +303,34 @@ export function LooksUploadTab({
   const handleBulkUpload = async (files: File[]) => {
     if (files.length === 0) return;
 
-    // Parse filenames to group by look
-    // Expected patterns: "look-name-front.jpg", "look-name_back.png", etc.
+    // Check if any files are TIFFs - if so, use TIFF import dialog
+    const hasTiffs = files.some(isTiffFile);
+    if (hasTiffs) {
+      setTiffImportFiles(files);
+      setShowTiffImport(true);
+      return;
+    }
+
+    // Legacy flow for non-TIFF files
     const viewPatterns = /(front|back|side|detail)/i;
     const groups: Record<string, { view: string; file: File }[]> = {};
 
     files.forEach((file) => {
-      const baseName = file.name.replace(/\.[^.]+$/, ""); // Remove extension
+      const baseName = file.name.replace(/\.[^.]+$/, "");
       const viewMatch = baseName.match(viewPatterns);
       const view = viewMatch ? viewMatch[1].toLowerCase() : "front";
-      
-      // Extract look name by removing the view suffix
       let lookName = baseName
         .replace(viewPatterns, "")
         .replace(/[-_]+$/, "")
         .replace(/^[-_]+/, "")
         .trim();
-      
       if (!lookName) lookName = `Look ${Object.keys(groups).length + 1}`;
-
       if (!groups[lookName]) groups[lookName] = [];
       groups[lookName].push({ view, file });
     });
 
     const lookNames = Object.keys(groups);
-    setBulkUploadState({
-      isUploading: true,
-      progress: { current: 0, total: files.length },
-    });
+    setBulkUploadState({ isUploading: true, progress: { current: 0, total: files.length } });
 
     const talentId = await getDefaultTalentId();
     if (!talentId) {
@@ -336,66 +340,62 @@ export function LooksUploadTab({
     }
 
     let processedCount = 0;
-
     for (const lookName of lookNames) {
-      // Create the look
       const { data: lookData, error: lookError } = await supabase
         .from("talent_looks")
-        .insert({
-          name: lookName,
-          talent_id: talentId,
-          project_id: projectId,
-          digital_talent_id: null,
-        })
+        .insert({ name: lookName, talent_id: talentId, project_id: projectId, digital_talent_id: null })
         .select()
         .single();
-
-      if (lookError) {
-        console.error("Error creating look:", lookError);
-        continue;
-      }
+      if (lookError) continue;
 
       const newLook: LookData = { ...lookData, sourceImages: [] };
-
-      // Upload images for this look
       for (const { view, file } of groups[lookName]) {
         try {
           const fileName = `${lookData.id}/${view}-${Date.now()}.${file.name.split(".").pop()}`;
           await supabase.storage.from("images").upload(fileName, file);
           const { data: urlData } = supabase.storage.from("images").getPublicUrl(fileName);
-
           const { data: imageData } = await supabase
             .from("look_source_images")
-            .insert({
-              look_id: lookData.id,
-              view,
-              source_url: urlData.publicUrl,
-            })
+            .insert({ look_id: lookData.id, view, source_url: urlData.publicUrl })
             .select()
             .single();
-
-          if (imageData) {
-            newLook.sourceImages.push(imageData);
-          }
+          if (imageData) newLook.sourceImages.push(imageData);
         } catch (err) {
           console.error("Error uploading image:", err);
         }
-
         processedCount++;
-        setBulkUploadState((prev) => ({
-          ...prev,
-          progress: { ...prev.progress, current: processedCount },
-        }));
+        setBulkUploadState((prev) => ({ ...prev, progress: { ...prev.progress, current: processedCount } }));
       }
-
       setLooks((prev) => [newLook, ...prev]);
     }
 
     setBulkUploadState({ isUploading: false, progress: { current: 0, total: 0 } });
-    toast({
-      title: "Bulk upload complete",
-      description: `Created ${lookNames.length} looks from ${files.length} images.`,
-    });
+    toast({ title: "Bulk upload complete", description: `Created ${lookNames.length} looks from ${files.length} images.` });
+  };
+
+  const handleTiffImportComplete = async (createdLooks: { lookName: string; imageUrls: string[] }[]) => {
+    const talentId = await getDefaultTalentId();
+    if (!talentId) return;
+
+    for (const { lookName, imageUrls } of createdLooks) {
+      const { data: lookData, error } = await supabase
+        .from("talent_looks")
+        .insert({ name: lookName, talent_id: talentId, project_id: projectId, digital_talent_id: null })
+        .select()
+        .single();
+      if (error || !lookData) continue;
+
+      const newLook: LookData = { ...lookData, sourceImages: [] };
+      for (const url of imageUrls) {
+        const { data: imageData } = await supabase
+          .from("look_source_images")
+          .insert({ look_id: lookData.id, view: "front", source_url: url })
+          .select()
+          .single();
+        if (imageData) newLook.sourceImages.push(imageData);
+      }
+      setLooks((prev) => [newLook, ...prev]);
+    }
   };
 
   const hasAnyLooksWithImages = looks.some((look) => look.sourceImages.length > 0);
@@ -504,6 +504,14 @@ export function LooksUploadTab({
         name={newLookName}
         setName={setNewLookName}
         onCreate={handleCreateLook}
+      />
+
+      <TiffImportDialog
+        open={showTiffImport}
+        onOpenChange={setShowTiffImport}
+        files={tiffImportFiles}
+        projectId={projectId}
+        onComplete={handleTiffImportComplete}
       />
     </div>
   );
