@@ -46,6 +46,7 @@ interface OutputCarouselProps {
   onRegenerate?: (outputId: string) => void;
   onCrop?: (id: string) => void;
   onGenerateMore?: (pairingId: string, count: number) => void;
+  onFoundationChange?: (outputId: string, isFoundation: boolean) => void;
   sourcePreview?: React.ReactNode;
   talentAvatar?: string;
   isRegenerating?: boolean;
@@ -62,6 +63,7 @@ export function OutputCarousel({
   onRegenerate,
   onCrop,
   onGenerateMore,
+  onFoundationChange,
   sourcePreview,
   talentAvatar,
   isRegenerating = false,
@@ -100,6 +102,7 @@ export function OutputCarousel({
         .eq("id", currentVariation.id);
 
       if (error) throw error;
+      onFoundationChange?.(currentVariation.id, true);
       toast.success("Added to Face Foundations");
     } catch (error) {
       console.error("Error adding to foundation:", error);
@@ -120,6 +123,7 @@ export function OutputCarousel({
         .eq("id", currentVariation.id);
 
       if (error) throw error;
+      onFoundationChange?.(currentVariation.id, false);
       toast.success("Removed from Face Foundations");
     } catch (error) {
       console.error("Error removing from foundation:", error);

@@ -1631,6 +1631,19 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
     });
   };
 
+  // Handle foundation status change
+  const handleFoundationChange = (outputId: string, isFoundation: boolean) => {
+    setOutputs(prev => {
+      const updated = { ...prev };
+      for (const pairingId in updated) {
+        updated[pairingId] = updated[pairingId].map(o =>
+          o.id === outputId ? { ...o, is_face_foundation: isFoundation } : o
+        );
+      }
+      return updated;
+    });
+  };
+
   // Clear selection
   const clearSelection = () => {
     setSelectedOutputs(new Set());
@@ -2014,6 +2027,7 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
                           onRegenerate={regenerateOutput}
                           onCrop={openCropDialog}
                           onGenerateMore={generateMoreOutputs}
+                          onFoundationChange={handleFoundationChange}
                           isRegenerating={pairingOutputs.some(o => regeneratingOutputs.has(o.id))}
                           generatingMore={generatingMorePairings.has(pairing.id)}
                           generatingCount={generatingMorePairings.get(pairing.id) || 0}

@@ -25,6 +25,7 @@ interface OutputImageCardProps {
   onDelete?: (id: string) => void;
   onRegenerate?: (outputId: string) => void;
   onCrop?: (id: string) => void;
+  onFoundationChange?: (outputId: string, isFoundation: boolean) => void;
   sourcePreview?: React.ReactNode;
   talentAvatar?: string;
   isRegenerating?: boolean;
@@ -37,6 +38,7 @@ export function OutputImageCard({
   onDelete,
   onRegenerate,
   onCrop,
+  onFoundationChange,
   sourcePreview,
   talentAvatar,
   isRegenerating = false,
@@ -54,6 +56,7 @@ export function OutputImageCard({
 
       if (error) throw error;
       setIsFoundation(true);
+      onFoundationChange?.(output.id, true);
       toast.success("Added to Face Foundations");
     } catch (error) {
       console.error("Error adding to foundation:", error);
@@ -74,6 +77,7 @@ export function OutputImageCard({
 
       if (error) throw error;
       setIsFoundation(false);
+      onFoundationChange?.(output.id, false);
       toast.success("Removed from Face Foundations");
     } catch (error) {
       console.error("Error removing from foundation:", error);

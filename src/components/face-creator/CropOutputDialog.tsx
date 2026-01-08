@@ -188,32 +188,34 @@ export function CropOutputDialog({
     setProcessing(true);
 
     try {
-      // Call edge function to crop and store
+      // Call edge function to crop and store (using same pattern as HeadCropTab)
       const response = await supabase.functions.invoke("crop-and-store-image", {
         body: {
           imageUrl: imageUrl,
-          cropX: cropBox.x / imageDimensions.width * 100,
-          cropY: cropBox.y / imageDimensions.height * 100,
-          cropWidth: cropBox.width / imageDimensions.width * 100,
-          cropHeight: cropBox.height / imageDimensions.height * 100,
-          outputSize: OUTPUT_SIZE,
-          bucketName: "face-pairing-outputs",
-          fileName: `cropped-${outputId}-${Date.now()}.png`,
+          cropX: (cropBox.x / imageDimensions.width) * 100,
+          cropY: (cropBox.y / imageDimensions.height) * 100,
+          cropWidth: (cropBox.width / imageDimensions.width) * 100,
+          cropHeight: (cropBox.height / imageDimensions.height) * 100,
+          targetSize: OUTPUT_SIZE,
+          cropId: `output-crop-${outputId}-${Date.now()}`,
         },
       });
 
       if (response.error) throw response.error;
 
       const { croppedUrl } = response.data;
+      
+      // Add cache-busting to prevent browser caching
+      const cacheBustedUrl = `${croppedUrl}?t=${Date.now()}`;
 
       // Update the output in database
       await supabase
         .from("face_pairing_outputs")
-        .update({ stored_url: croppedUrl })
+        .update({ stored_url: cacheBustedUrl })
         .eq("id", outputId);
 
       toast.success("Image cropped successfully");
-      onCropComplete(outputId, croppedUrl);
+      onCropComplete(outputId, cacheBustedUrl);
       onOpenChange(false);
     } catch (error: any) {
       console.error("Error cropping:", error);
