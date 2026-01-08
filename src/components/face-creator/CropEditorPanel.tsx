@@ -25,6 +25,7 @@ interface ModelIdentity {
   name: string;
   gender: string;
   imageCount: number;
+  digitalTalentId: string;
 }
 
 interface ImageWithCrop extends FaceScrapeImage {
@@ -117,14 +118,15 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
 
   const selectedImage = images[selectedIndex];
 
-  // Fetch model identities for the filter dropdown
+  // Fetch model identities for the filter dropdown (only models paired with Digital Talents)
   const fetchModelIdentities = useCallback(async () => {
     if (!runId) return;
     
     const { data, error } = await supabase
       .from('face_identities')
-      .select('id, name, gender, image_count')
+      .select('id, name, gender, image_count, digital_talent_id')
       .eq('scrape_run_id', runId)
+      .not('digital_talent_id', 'is', null)
       .order('name');
     
     if (data && !error) {
@@ -132,18 +134,16 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
         id: m.id,
         name: m.name,
         gender: m.gender,
-        imageCount: m.image_count
+        imageCount: m.image_count,
+        digitalTalentId: m.digital_talent_id!
       })));
       
-      // If we have paired context, auto-select the first paired model
-      if (pairedIdentityIds.length > 0) {
-        const firstPaired = data.find(m => pairedIdentityIds.includes(m.id));
-        if (firstPaired) {
-          setSelectedModelId(firstPaired.id);
-        }
+      // Auto-select the first paired model by default
+      if (data.length > 0) {
+        setSelectedModelId(data[0].id);
       }
     }
-  }, [runId, pairedIdentityIds]);
+  }, [runId]);
 
   // Fetch image-to-identity mapping
   const fetchImageIdentityMapping = useCallback(async () => {
@@ -1627,13 +1627,13 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
       {/* Main editor */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Image list */}
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="flex flex-col max-h-[680px]">
+          <CardHeader className="pb-2 flex-shrink-0">
             <CardTitle className="text-sm flex items-center justify-between">
               <span>Images</span>
               {selectedModelId !== 'all' && (
                 <Badge variant="secondary" className="text-xs font-normal">
-                  {images.length} of {allImages.length}
+                  {images.length} images
                 </Badge>
               )}
             </CardTitle>
@@ -1646,23 +1646,21 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
               </div>
               <Select value={selectedModelId} onValueChange={setSelectedModelId}>
                 <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="All models" />
+                  <SelectValue placeholder="Select a model" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">
                     <div className="flex items-center gap-2">
                       <Users className="h-3.5 w-3.5" />
-                      <span>All models ({allImages.length} images)</span>
+                      <span>All paired models ({allImages.length} images)</span>
                     </div>
                   </SelectItem>
                   {modelIdentities.map((model) => {
-                    const isPaired = pairedIdentityIds.includes(model.id);
                     const modelImageCount = Array.from(imageToIdentityMap.entries())
                       .filter(([_, identityId]) => identityId === model.id).length;
                     return (
                       <SelectItem key={model.id} value={model.id}>
                         <div className="flex items-center gap-2">
-                          {isPaired && <Badge variant="default" className="text-[9px] px-1 h-4">Paired</Badge>}
                           <span>{model.name}</span>
                           <span className="text-muted-foreground">({modelImageCount})</span>
                         </div>
@@ -1673,21 +1671,15 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
               </Select>
               
               {/* Context indicator */}
-              {hasPairedContext && selectedModelId !== 'all' && pairedIdentityIds.includes(selectedModelId) && (
-                <p className="text-[10px] text-primary flex items-center gap-1">
-                  <Sparkles className="h-3 w-3" />
-                  Showing paired model from queue
-                </p>
-              )}
-              {hasPairedContext && selectedModelId === 'all' && (
+              {modelIdentities.length === 0 && !loading && (
                 <p className="text-[10px] text-muted-foreground">
-                  {pairedIdentityIds.length} paired model{pairedIdentityIds.length !== 1 ? 's' : ''} in queue
+                  No models paired with Digital Talents yet
                 </p>
               )}
             </div>
           </CardHeader>
-          <CardContent className="pt-2">
-            <ScrollArea className="h-[500px]" ref={scrollAreaRef}>
+          <CardContent className="pt-2 flex-1 min-h-0">
+            <ScrollArea className="h-full" ref={scrollAreaRef}>
               {loading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-6 w-6 animate-spin" />
