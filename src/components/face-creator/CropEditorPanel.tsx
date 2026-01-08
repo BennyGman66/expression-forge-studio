@@ -88,6 +88,8 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
   const [uploadingRefs, setUploadingRefs] = useState(false);
   const [generatingCropFiles, setGeneratingCropFiles] = useState(false);
   const [cropFileProgress, setCropFileProgress] = useState({ current: 0, total: 0 });
+  const [regeneratingCrops, setRegeneratingCrops] = useState(false);
+  const [regenerateProgress, setRegenerateProgress] = useState({ current: 0, total: 0 });
   const [aspectRatio, setAspectRatio] = useState<'1:1' | '4:5'>('1:1');
   const [cropRect, setCropRect] = useState({ x: 0, y: 0, width: 200, height: 200 });
   const [interactionMode, setInteractionMode] = useState<'none' | 'move' | 'nw' | 'ne' | 'sw' | 'se'>('none');
@@ -1267,6 +1269,84 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
     }
   };
 
+  // Regenerate all existing crops with targetSize: 1000
+  const handleRegenerateAllCrops = async () => {
+    // Get all crops for currently filtered images (paired models by default)
+    const cropsToRegenerate = images.filter(img => img.crop);
+    
+    if (cropsToRegenerate.length === 0) {
+      toast({ title: "No Crops", description: "No crops to regenerate" });
+      return;
+    }
+    
+    setRegeneratingCrops(true);
+    setRegenerateProgress({ current: 0, total: cropsToRegenerate.length });
+    
+    let regenerated = 0;
+    let failed = 0;
+    
+    for (const image of cropsToRegenerate) {
+      if (!image.crop) continue;
+      
+      try {
+        const imageUrl = image.stored_url || image.source_url;
+        
+        console.log(`[CropEditor] Regenerating crop for ${image.id} with targetSize: 1000...`);
+        
+        const { data: cropResult, error: cropError } = await supabase.functions.invoke('crop-and-store-image', {
+          body: {
+            imageUrl,
+            cropX: image.crop.crop_x,
+            cropY: image.crop.crop_y,
+            cropWidth: image.crop.crop_width,
+            cropHeight: image.crop.crop_height,
+            cropId: image.crop.id,
+            targetSize: 1000,
+          }
+        });
+        
+        if (cropError) {
+          console.error(`[CropEditor] Failed to regenerate crop:`, cropError);
+          failed++;
+        } else if (cropResult?.success && cropResult.croppedUrl) {
+          // Update the crop record with the new URL (force cache bust)
+          const newUrl = `${cropResult.croppedUrl}?t=${Date.now()}`;
+          await supabase
+            .from('face_crops')
+            .update({ cropped_stored_url: cropResult.croppedUrl })
+            .eq('id', image.crop.id);
+          
+          regenerated++;
+          console.log(`[CropEditor] Regenerated crop file: ${cropResult.croppedUrl}`);
+        } else {
+          console.error(`[CropEditor] Crop failed:`, cropResult?.error);
+          failed++;
+        }
+      } catch (err) {
+        console.error(`[CropEditor] Error regenerating crop for ${image.id}:`, err);
+        failed++;
+      }
+      
+      setRegenerateProgress(prev => ({ ...prev, current: prev.current + 1 }));
+    }
+    
+    setRegeneratingCrops(false);
+    
+    if (regenerated > 0) {
+      toast({ 
+        title: "Crops Regenerated", 
+        description: `Regenerated ${regenerated} crops at 1000×1000px${failed > 0 ? `, ${failed} failed` : ''}` 
+      });
+      await fetchImagesWithCrops();
+    } else if (failed > 0) {
+      toast({ 
+        title: "Regeneration Failed", 
+        description: `Failed to regenerate ${failed} crops`, 
+        variant: "destructive" 
+      });
+    }
+  };
+
   const getAspectMultiplier = () => aspectRatio === '1:1' ? 1 : 1.25;
 
   const handleCropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1516,6 +1596,28 @@ export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPan
                 <>
                   <FileImage className="h-4 w-4 mr-2" />
                   Generate {images.filter(img => img.crop && !img.crop.cropped_stored_url).length} Crop Files
+                </>
+              )}
+            </Button>
+          )}
+          {/* Regenerate all crops at 1000x1000 button */}
+          {images.some(img => img.crop) && (
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleRegenerateAllCrops}
+              disabled={regeneratingCrops || generating || loading}
+              className="border-purple-500 text-purple-600 hover:bg-purple-50"
+            >
+              {regeneratingCrops ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {regenerateProgress.current}/{regenerateProgress.total}
+                </>
+              ) : (
+                <>
+                  <ImageIcon className="h-4 w-4 mr-2" />
+                  Regenerate All 1000px
                 </>
               )}
             </Button>
