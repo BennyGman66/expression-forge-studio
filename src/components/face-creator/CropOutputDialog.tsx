@@ -279,19 +279,42 @@ export function CropOutputDialog({
                   draggable={false}
                 />
                 
-                {/* Dark overlay outside crop */}
-                {imageDimensions.width > 0 && (
-                  <div 
-                    className="absolute inset-0 pointer-events-none"
-                    style={{
-                      background: `linear-gradient(to right, 
-                        rgba(0,0,0,0.5) ${(cropBox.x / imageDimensions.width) * 100}%, 
-                        transparent ${(cropBox.x / imageDimensions.width) * 100}%, 
-                        transparent ${((cropBox.x + cropBox.width) / imageDimensions.width) * 100}%, 
-                        rgba(0,0,0,0.5) ${((cropBox.x + cropBox.width) / imageDimensions.width) * 100}%
-                      )`
-                    }}
-                  />
+                {/* Dark overlay - 4 regions outside crop */}
+                {imageDimensions.width > 0 && imageRef.current && (
+                  <>
+                    {/* Top region */}
+                    <div 
+                      className="absolute left-0 right-0 top-0 bg-black/50 pointer-events-none"
+                      style={{ height: cropStyle.top || 0 }} 
+                    />
+                    {/* Bottom region */}
+                    <div 
+                      className="absolute left-0 right-0 bg-black/50 pointer-events-none"
+                      style={{ 
+                        top: (cropStyle.top || 0) + (cropStyle.height || 0),
+                        bottom: 0 
+                      }} 
+                    />
+                    {/* Left region */}
+                    <div 
+                      className="absolute left-0 bg-black/50 pointer-events-none"
+                      style={{ 
+                        top: cropStyle.top || 0, 
+                        width: cropStyle.left || 0, 
+                        height: cropStyle.height || 0 
+                      }} 
+                    />
+                    {/* Right region */}
+                    <div 
+                      className="absolute bg-black/50 pointer-events-none"
+                      style={{ 
+                        top: cropStyle.top || 0, 
+                        left: (cropStyle.left || 0) + (cropStyle.width || 0),
+                        right: 0,
+                        height: cropStyle.height || 0 
+                      }} 
+                    />
+                  </>
                 )}
                 
                 {/* Crop box */}
@@ -299,6 +322,10 @@ export function CropOutputDialog({
                   className="absolute border-2 border-green-500 cursor-move"
                   style={cropStyle}
                 >
+                  {/* 1:1 indicator */}
+                  <div className="absolute top-1 left-1 text-xs bg-green-500 text-white px-1 rounded">
+                    1:1
+                  </div>
                   {/* Corner handles */}
                   {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
                     <div
