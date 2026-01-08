@@ -1635,6 +1635,87 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
   const clearSelection = () => {
     setSelectedOutputs(new Set());
   };
+
+  // Cancel an active job
+  const handleCancelJob = async (jobIdToCancel: string) => {
+    try {
+      // Update job status to 'failed'
+      await supabase
+        .from('face_pairing_jobs')
+        .update({ status: 'failed' })
+        .eq('id', jobIdToCancel);
+      
+      // Mark all pending/running outputs as failed
+      const { data: pairingsData } = await supabase
+        .from('face_pairings')
+        .select('id')
+        .eq('job_id', jobIdToCancel);
+      
+      if (pairingsData && pairingsData.length > 0) {
+        const pairingIds = pairingsData.map(p => p.id);
+        await supabase
+          .from('face_pairing_outputs')
+          .update({ status: 'failed', error_message: 'Job cancelled by user' })
+          .in('pairing_id', pairingIds)
+          .in('status', ['pending', 'running']);
+      }
+      
+      toast.success('Job cancelled');
+      loadAllJobs();
+    } catch (error) {
+      console.error('Error cancelling job:', error);
+      toast.error('Failed to cancel job');
+    }
+  };
+
+  // Delete a job and all its data
+  const handleDeleteJob = async (jobIdToDelete: string) => {
+    try {
+      // First get all pairings for this job
+      const { data: pairingsData } = await supabase
+        .from('face_pairings')
+        .select('id')
+        .eq('job_id', jobIdToDelete);
+      
+      if (pairingsData && pairingsData.length > 0) {
+        const pairingIds = pairingsData.map(p => p.id);
+        
+        // Delete all outputs
+        await supabase
+          .from('face_pairing_outputs')
+          .delete()
+          .in('pairing_id', pairingIds);
+        
+        // Delete all pairings
+        await supabase
+          .from('face_pairings')
+          .delete()
+          .in('id', pairingIds);
+      }
+      
+      // Delete the job itself
+      await supabase
+        .from('face_pairing_jobs')
+        .delete()
+        .eq('id', jobIdToDelete);
+      
+      toast.success('Job deleted');
+      
+      // Clear selection if we deleted the selected job
+      if (selectedJobId === jobIdToDelete) {
+        setSelectedJobId(null);
+        setJob(null);
+        setPairings([]);
+        setOutputs({});
+      }
+      
+      loadAllJobs();
+    } catch (error) {
+      console.error('Error deleting job:', error);
+      toast.error('Failed to delete job');
+    }
+  };
+
   // Group pairings for display
   const getGroupedPairings = () => {
     if (groupBy === 'talent') {
@@ -1708,13 +1789,41 @@ function ImagePairingReview({ jobId: externalJobId, onStartGeneration }: ImagePa
                           <span className="text-xs text-muted-foreground">{formatDate(j.created_at)}</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
                         <Badge variant="secondary" className="text-xs">
                           {j.progress}/{j.total_pairings}
                         </Badge>
                         <Badge variant="outline" className={`text-xs ${jStatusInfo.color}`}>
                           {jStatusInfo.label}
                         </Badge>
+                        {/* Cancel button for active jobs */}
+                        {['pending', 'describing', 'generating'].includes(j.status) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-destructive hover:bg-destructive/10"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelJob(j.id);
+                            }}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                        {/* Delete button for completed/failed jobs */}
+                        {['completed', 'failed'].includes(j.status) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteJob(j.id);
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   );
