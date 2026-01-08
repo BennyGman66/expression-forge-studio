@@ -70,7 +70,24 @@ async function processPairedGeneration(
   supabaseUrl: string,
   lovableApiKey: string
 ) {
+  const MAX_PROCESSING_TIME_MS = 50000; // 50 seconds to stay under Deno limit
+  const startTime = Date.now();
+
+  const isNearTimeout = () => Date.now() - startTime > MAX_PROCESSING_TIME_MS;
+
   try {
+    // Check if job was cancelled
+    const { data: currentJob } = await supabase
+      .from('face_pairing_jobs')
+      .select('status')
+      .eq('id', jobId)
+      .single();
+
+    if (currentJob?.status === 'failed') {
+      console.log('[generate-paired-images] Job was cancelled, stopping');
+      return;
+    }
+
     // Get job details
     const { data: job, error: jobError } = await supabase
       .from('face_pairing_jobs')
@@ -125,6 +142,25 @@ async function processPairedGeneration(
     let failed = 0;
 
     for (const pairing of pairings) {
+      // Check for timeout and self-continue
+      if (isNearTimeout()) {
+        console.log('[generate-paired-images] Approaching timeout, self-continuing...');
+        await supabase.functions.invoke('generate-paired-images', { body: { jobId } });
+        return;
+      }
+
+      // Check if job was cancelled
+      const { data: jobCheck } = await supabase
+        .from('face_pairing_jobs')
+        .select('status')
+        .eq('id', jobId)
+        .single();
+
+      if (jobCheck?.status === 'failed') {
+        console.log('[generate-paired-images] Job was cancelled, stopping');
+        return;
+      }
+
       const faceImage = pairing.face_scrape_images;
       const digitalTalent = pairing.digital_talents;
 
