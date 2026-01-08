@@ -46,6 +46,7 @@ import { PairingTemplateWithRelations } from "@/types/pairing-templates";
 
 interface ImagePairingPanelProps {
   runId: string | null;
+  onPairingQueueChange?: (identityIds: string[]) => void;
 }
 
 interface CroppedFace {
@@ -79,7 +80,7 @@ interface QueuedIdentityPairing {
   talent: DigitalTalent;
 }
 
-export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
+export function ImagePairingPanel({ runId, onPairingQueueChange }: ImagePairingPanelProps) {
   const [activeSubTab, setActiveSubTab] = useState<'select' | 'review'>('select');
   
   // Identity-level selection
@@ -144,6 +145,12 @@ export function ImagePairingPanel({ runId }: ImagePairingPanelProps) {
     setPromoteDialogOpen(false);
     setSelectedIdentityForPromote(null);
   };
+  
+  // Report pairing queue changes to parent for Crop Editor filtering
+  useEffect(() => {
+    const identityIds = pairingQueue.map(p => p.identity.id);
+    onPairingQueueChange?.(identityIds);
+  }, [pairingQueue, onPairingQueueChange]);
   
   // Load data
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan, AlertTriangle, Sparkles, Trash2, Upload, ImageIcon, FileImage } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, Play, RefreshCw, ChevronLeft, ChevronRight, RotateCcw, Check, Scan, AlertTriangle, Sparkles, Trash2, Upload, ImageIcon, FileImage, Users, Filter } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useFaceDetector } from "@/hooks/useFaceDetector";
@@ -16,6 +17,14 @@ import type { FaceScrapeImage, FaceCrop, FaceJob } from "@/types/face-creator";
 
 interface CropEditorPanelProps {
   runId: string | null;
+  pairedIdentityIds?: string[];
+}
+
+interface ModelIdentity {
+  id: string;
+  name: string;
+  gender: string;
+  imageCount: number;
 }
 
 interface ImageWithCrop extends FaceScrapeImage {
@@ -59,14 +68,14 @@ interface AILastSuggestion {
   crop: { x: number; y: number; width: number; height: number };
 }
 
-export function CropEditorPanel({ runId }: CropEditorPanelProps) {
+export function CropEditorPanel({ runId, pairedIdentityIds = [] }: CropEditorPanelProps) {
   const { toast } = useToast();
   const { detectFaces, isReady: detectorReady, isLoading: detectorLoading } = useFaceDetector();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const hiddenImgRef = useRef<HTMLImageElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const [images, setImages] = useState<ImageWithCrop[]>([]);
+  const [allImages, setAllImages] = useState<ImageWithCrop[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -89,8 +98,70 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
   const [referenceImages, setReferenceImages] = useState<CropReferenceImage[]>([]);
   const [recentCorrections, setRecentCorrections] = useState<CropCorrection[]>([]);
   const [aiLastSuggestion, setAiLastSuggestion] = useState<AILastSuggestion | null>(null);
+  
+  // Model filtering state
+  const [modelIdentities, setModelIdentities] = useState<ModelIdentity[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState<string>('all');
+  const [imageToIdentityMap, setImageToIdentityMap] = useState<Map<string, string>>(new Map());
+  
+  // Determine if we should auto-filter to paired models
+  const hasPairedContext = pairedIdentityIds.length > 0;
+  
+  // Filter images based on selected model
+  const images = useMemo(() => {
+    if (selectedModelId === 'all') {
+      return allImages;
+    }
+    return allImages.filter(img => imageToIdentityMap.get(img.id) === selectedModelId);
+  }, [allImages, selectedModelId, imageToIdentityMap]);
 
   const selectedImage = images[selectedIndex];
+
+  // Fetch model identities for the filter dropdown
+  const fetchModelIdentities = useCallback(async () => {
+    if (!runId) return;
+    
+    const { data, error } = await supabase
+      .from('face_identities')
+      .select('id, name, gender, image_count')
+      .eq('scrape_run_id', runId)
+      .order('name');
+    
+    if (data && !error) {
+      setModelIdentities(data.map(m => ({
+        id: m.id,
+        name: m.name,
+        gender: m.gender,
+        imageCount: m.image_count
+      })));
+      
+      // If we have paired context, auto-select the first paired model
+      if (pairedIdentityIds.length > 0) {
+        const firstPaired = data.find(m => pairedIdentityIds.includes(m.id));
+        if (firstPaired) {
+          setSelectedModelId(firstPaired.id);
+        }
+      }
+    }
+  }, [runId, pairedIdentityIds]);
+
+  // Fetch image-to-identity mapping
+  const fetchImageIdentityMapping = useCallback(async () => {
+    if (!runId) return;
+    
+    const { data, error } = await supabase
+      .from('face_identity_images')
+      .select('scrape_image_id, identity_id')
+      .in('identity_id', modelIdentities.map(m => m.id));
+    
+    if (data && !error) {
+      const mapping = new Map<string, string>();
+      data.forEach(item => {
+        mapping.set(item.scrape_image_id, item.identity_id);
+      });
+      setImageToIdentityMap(mapping);
+    }
+  }, [runId, modelIdentities]);
 
   useEffect(() => {
     if (!runId) return;
@@ -99,6 +170,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     fetchJob();
     fetchReferenceImages();
     fetchRecentCorrections();
+    fetchModelIdentities();
 
     const channel = supabase
       .channel('crop-editor')
@@ -123,7 +195,18 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
     };
   }, [runId]);
 
-  // Fetch recent crop corrections for few-shot learning
+  // Fetch image-identity mapping when model identities are loaded
+  useEffect(() => {
+    if (modelIdentities.length > 0) {
+      fetchImageIdentityMapping();
+    }
+  }, [modelIdentities, fetchImageIdentityMapping]);
+
+  // Reset selected index when model filter changes
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [selectedModelId]);
+
   const fetchRecentCorrections = async () => {
     const { data, error } = await supabase
       .from('crop_corrections')
@@ -372,7 +455,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       };
     }) as ImageWithCrop[];
 
-    setImages(merged);
+    setAllImages(merged);
     setLoading(false);
   };
 
@@ -1061,7 +1144,7 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
 
       // OPTIMISTIC UPDATE: Filter out the image entirely from the list
       const deletedIndex = images.findIndex(img => img.id === imageId);
-      setImages(prev => prev.filter(img => img.id !== imageId));
+      setAllImages(prev => prev.filter(img => img.id !== imageId));
       
       // Adjust selectedIndex if needed
       if (deletedIndex !== -1) {
@@ -1545,10 +1628,65 @@ export function CropEditorPanel({ runId }: CropEditorPanelProps) {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Image list */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Images</CardTitle>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center justify-between">
+              <span>Images</span>
+              {selectedModelId !== 'all' && (
+                <Badge variant="secondary" className="text-xs font-normal">
+                  {images.length} of {allImages.length}
+                </Badge>
+              )}
+            </CardTitle>
+            
+            {/* Model Filter Dropdown */}
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center gap-2">
+                <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                <Label className="text-xs text-muted-foreground">Filter by model</Label>
+              </div>
+              <Select value={selectedModelId} onValueChange={setSelectedModelId}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="All models" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-3.5 w-3.5" />
+                      <span>All models ({allImages.length} images)</span>
+                    </div>
+                  </SelectItem>
+                  {modelIdentities.map((model) => {
+                    const isPaired = pairedIdentityIds.includes(model.id);
+                    const modelImageCount = Array.from(imageToIdentityMap.entries())
+                      .filter(([_, identityId]) => identityId === model.id).length;
+                    return (
+                      <SelectItem key={model.id} value={model.id}>
+                        <div className="flex items-center gap-2">
+                          {isPaired && <Badge variant="default" className="text-[9px] px-1 h-4">Paired</Badge>}
+                          <span>{model.name}</span>
+                          <span className="text-muted-foreground">({modelImageCount})</span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+              
+              {/* Context indicator */}
+              {hasPairedContext && selectedModelId !== 'all' && pairedIdentityIds.includes(selectedModelId) && (
+                <p className="text-[10px] text-primary flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />
+                  Showing paired model from queue
+                </p>
+              )}
+              {hasPairedContext && selectedModelId === 'all' && (
+                <p className="text-[10px] text-muted-foreground">
+                  {pairedIdentityIds.length} paired model{pairedIdentityIds.length !== 1 ? 's' : ''} in queue
+                </p>
+              )}
+            </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-2">
             <ScrollArea className="h-[500px]" ref={scrollAreaRef}>
               {loading ? (
                 <div className="flex items-center justify-center py-8">

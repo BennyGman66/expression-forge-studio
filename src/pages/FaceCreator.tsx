@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,6 +14,13 @@ export default function FaceCreator() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("scrape");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  
+  // Track paired identity IDs from the Pairing tab to filter Crop Editor
+  const [pairedIdentityIds, setPairedIdentityIds] = useState<string[]>([]);
+
+  const handlePairingQueueChange = useCallback((identityIds: string[]) => {
+    setPairedIdentityIds(identityIds);
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -56,11 +63,17 @@ export default function FaceCreator() {
           </TabsContent>
           
           <TabsContent value="crop">
-            <CropEditorPanel runId={selectedRunId} />
+            <CropEditorPanel 
+              runId={selectedRunId} 
+              pairedIdentityIds={pairedIdentityIds}
+            />
           </TabsContent>
           
           <TabsContent value="pairing">
-            <ImagePairingPanel runId={selectedRunId} />
+            <ImagePairingPanel 
+              runId={selectedRunId}
+              onPairingQueueChange={handlePairingQueueChange}
+            />
           </TabsContent>
           
           <TabsContent value="export">
