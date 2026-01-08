@@ -444,6 +444,14 @@ export function LooksUploadTab({
           setName={setNewLookName}
           onCreate={handleCreateLook}
         />
+
+        <TiffImportDialog
+          open={showTiffImport}
+          onOpenChange={setShowTiffImport}
+          files={tiffImportFiles}
+          projectId={projectId}
+          onComplete={handleTiffImportComplete}
+        />
       </div>
     );
   }
