@@ -373,11 +373,11 @@ export function LooksUploadTab({
     toast({ title: "Bulk upload complete", description: `Created ${lookNames.length} looks from ${files.length} images.` });
   };
 
-  const handleTiffImportComplete = async (createdLooks: { lookName: string; imageUrls: string[] }[]) => {
+  const handleTiffImportComplete = async (createdLooks: { lookName: string; images: { url: string; view: string; originalFilename: string }[] }[]) => {
     const talentId = await getDefaultTalentId();
     if (!talentId) return;
 
-    for (const { lookName, imageUrls } of createdLooks) {
+    for (const { lookName, images } of createdLooks) {
       const { data: lookData, error } = await supabase
         .from("talent_looks")
         .insert({ name: lookName, talent_id: talentId, project_id: projectId, digital_talent_id: null })
@@ -386,15 +386,38 @@ export function LooksUploadTab({
       if (error || !lookData) continue;
 
       const newLook: LookData = { ...lookData, sourceImages: [] };
-      for (const url of imageUrls) {
+      for (const { url, view } of images) {
+        // Use actual view from import, default to 'front' if unassigned
+        const viewToUse = view === 'unassigned' ? 'front' : view;
         const { data: imageData } = await supabase
           .from("look_source_images")
-          .insert({ look_id: lookData.id, view: "front", source_url: url })
+          .insert({ look_id: lookData.id, view: viewToUse, source_url: url })
           .select()
           .single();
         if (imageData) newLook.sourceImages.push(imageData);
       }
       setLooks((prev) => [newLook, ...prev]);
+    }
+  };
+
+  const handleChangeImageView = async (imageId: string, newView: string) => {
+    const { error } = await supabase
+      .from("look_source_images")
+      .update({ view: newView })
+      .eq("id", imageId);
+
+    if (!error) {
+      setLooks((prev) =>
+        prev.map((look) => ({
+          ...look,
+          sourceImages: look.sourceImages.map((img) =>
+            img.id === imageId ? { ...img, view: newView } : img
+          ),
+        }))
+      );
+      toast({ title: "View updated" });
+    } else {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     }
   };
 
@@ -494,6 +517,7 @@ export function LooksUploadTab({
           onDuplicateLook={handleDuplicateLook}
           onUploadImage={handleUploadImage}
           onRemoveImage={handleRemoveImage}
+          onChangeImageView={handleChangeImageView}
           uploadingViews={uploadingViews}
         />
       )}

@@ -3,9 +3,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { X, Upload, Image as ImageIcon, Check, Pencil } from "lucide-react";
+import { X, Image as ImageIcon, Check, Pencil } from "lucide-react";
 import { LookData, TalentOption } from "./LooksTable";
-import { cn } from "@/lib/utils";
 
 interface LookRowExpandedProps {
   look: LookData;
@@ -13,48 +12,25 @@ interface LookRowExpandedProps {
   onUpdateLook: (lookId: string, updates: Partial<LookData>) => void;
   onUploadImage: (lookId: string, view: string, file: File) => Promise<void>;
   onRemoveImage: (lookId: string, imageId: string) => void;
+  onChangeImageView?: (imageId: string, newView: string) => void;
   uploadingViews: Record<string, boolean>;
 }
 
-const VIEWS = [
-  { key: "front", label: "Front", required: true },
-  { key: "back", label: "Back", required: true },
-  { key: "side", label: "Side", required: false },
-  { key: "detail", label: "Detail", required: false },
-] as const;
-
 export function LookRowExpanded({
   look,
-  talents,
   onUpdateLook,
   onUploadImage,
   onRemoveImage,
-  uploadingViews,
+  onChangeImageView,
 }: LookRowExpandedProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState(look.name);
-  const [dragOverView, setDragOverView] = useState<string | null>(null);
-
-  const getImageForView = (view: string) => {
-    return look.sourceImages.find((img) => img.view === view);
-  };
 
   const handleSaveName = () => {
     if (editedName.trim() && editedName !== look.name) {
       onUpdateLook(look.id, { name: editedName.trim() });
     }
     setIsEditingName(false);
-  };
-
-  const handleDrop = (view: string, e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOverView(null);
-
-    const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith("image/")) {
-      onUploadImage(look.id, view, file);
-    }
   };
 
   return (
@@ -92,102 +68,64 @@ export function LookRowExpanded({
         )}
       </div>
 
-      {/* Upload slots */}
-      <div className="grid grid-cols-4 gap-4">
-        {VIEWS.map(({ key, label, required }) => {
-          const image = getImageForView(key);
-          const isUploading = uploadingViews[`${look.id}-${key}`];
-          const isDragOver = dragOverView === key;
-
-          return (
-            <div key={key} className="space-y-1.5">
-              <Label className="text-xs flex items-center gap-1">
-                {label}
-                {required && <span className="text-amber-500">*</span>}
-              </Label>
-              <label
-                className={cn(
-                  "relative aspect-[3/4] border-2 border-dashed rounded-lg flex items-center justify-center cursor-pointer transition-all overflow-hidden group",
-                  isDragOver
-                    ? "border-primary bg-primary/5 scale-[1.02]"
-                    : "hover:border-primary",
-                  image ? "border-solid border-muted" : "border-muted-foreground/30"
-                )}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOverView(key);
-                }}
-                onDragEnter={(e) => {
-                  e.preventDefault();
-                  setDragOverView(key);
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault();
-                  setDragOverView(null);
-                }}
-                onDrop={(e) => handleDrop(key, e)}
-              >
-                {image ? (
-                  <>
-                    <img
-                      src={image.source_url}
-                      alt={label}
-                      className="absolute inset-0 w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          // Trigger file input
-                        }}
-                      >
-                        Replace
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          onRemoveImage(look.id, image.id);
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex flex-col items-center gap-1.5 text-muted-foreground">
-                    {isUploading ? (
-                      <div className="animate-spin h-5 w-5 border-2 border-primary border-t-transparent rounded-full" />
-                    ) : (
-                      <>
-                        <ImageIcon className="h-6 w-6" />
-                        <span className="text-xs">
-                          {isDragOver ? "Drop here" : "Upload"}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  disabled={isUploading}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) onUploadImage(look.id, key, file);
-                  }}
+      {/* All images with view selector */}
+      <div className="space-y-3">
+        <Label className="text-xs text-muted-foreground">All Images ({look.sourceImages.length})</Label>
+        <div className="grid grid-cols-6 gap-3">
+          {look.sourceImages.map((image) => (
+            <div key={image.id} className="space-y-1.5">
+              <div className="relative aspect-[3/4] rounded-lg overflow-hidden border group">
+                <img
+                  src={image.source_url}
+                  alt=""
+                  className="w-full h-full object-cover"
                 />
-              </label>
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={() => onRemoveImage(look.id, image.id)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+              <Select
+                value={image.view}
+                onValueChange={(newView) => onChangeImageView?.(image.id, newView)}
+              >
+                <SelectTrigger className="h-7 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="front">Front</SelectItem>
+                  <SelectItem value="back">Back</SelectItem>
+                  <SelectItem value="side">Side</SelectItem>
+                  <SelectItem value="detail">Detail</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-          );
-        })}
+          ))}
+          
+          {/* Upload new image slot */}
+          <label className="space-y-1.5 cursor-pointer">
+            <div className="relative aspect-[3/4] rounded-lg border-2 border-dashed border-muted-foreground/30 hover:border-primary transition-colors flex items-center justify-center">
+              <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                <ImageIcon className="h-5 w-5" />
+                <span className="text-xs">Add</span>
+              </div>
+            </div>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onUploadImage(look.id, "front", file);
+              }}
+            />
+            <div className="h-7" /> {/* Spacer to align with selects */}
+          </label>
+        </div>
       </div>
     </div>
   );

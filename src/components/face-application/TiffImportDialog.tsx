@@ -36,12 +36,18 @@ import {
   isTiffFile,
 } from "@/lib/tiffImportUtils";
 
+interface ImageWithView {
+  url: string;
+  view: 'front' | 'back' | 'side' | 'detail' | 'unassigned';
+  originalFilename: string;
+}
+
 interface TiffImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   files: File[];
   projectId: string;
-  onComplete: (looks: { lookName: string; imageUrls: string[] }[]) => void;
+  onComplete: (looks: { lookName: string; images: ImageWithView[] }[]) => void;
 }
 
 type ConversionStatus = "queued" | "converting" | "done" | "failed";
@@ -292,25 +298,29 @@ export function TiffImportDialog({
     setStep("committing");
 
     try {
-      const createdLooks: { lookName: string; imageUrls: string[] }[] = [];
+      const createdLooks: { lookName: string; images: ImageWithView[] }[] = [];
 
       for (const group of lookGroups) {
         if (group.lookKey === "UNMATCHED" || group.files.length === 0) continue;
 
-        const imageUrls = group.files
-          .map((f: ParsedFile & { pngUrl?: string }) => f.pngUrl)
-          .filter(Boolean) as string[];
+        const images: ImageWithView[] = group.files
+          .filter((f: ParsedFile & { pngUrl?: string }) => f.pngUrl)
+          .map((f: ParsedFile & { pngUrl?: string }) => ({
+            url: f.pngUrl!,
+            view: f.inferredView,
+            originalFilename: f.originalFilename,
+          }));
 
-        if (imageUrls.length > 0) {
+        if (images.length > 0) {
           createdLooks.push({
             lookName: group.lookName,
-            imageUrls,
+            images,
           });
         }
       }
 
       onComplete(createdLooks);
-      toast.success(`Created ${createdLooks.length} looks with ${createdLooks.reduce((acc, l) => acc + l.imageUrls.length, 0)} images`);
+      toast.success(`Created ${createdLooks.length} looks with ${createdLooks.reduce((acc, l) => acc + l.images.length, 0)} images`);
       onOpenChange(false);
     } catch (error) {
       console.error("Commit error:", error);
