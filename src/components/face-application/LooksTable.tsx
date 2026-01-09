@@ -34,6 +34,7 @@ interface LooksTableProps {
   onDuplicateLook: (lookId: string) => void;
   onUploadImage: (lookId: string, view: string, file: File) => Promise<void>;
   onRemoveImage: (lookId: string, imageId: string) => void;
+  onChangeImageView?: (imageId: string, newView: string) => void;
   uploadingViews: Record<string, boolean>;
 }
 
@@ -84,6 +85,7 @@ export function LooksTable({
   onDuplicateLook,
   onUploadImage,
   onRemoveImage,
+  onChangeImageView,
   uploadingViews,
 }: LooksTableProps) {
   const [expandedLookId, setExpandedLookId] = useState<string | null>(null);
@@ -209,6 +211,7 @@ export function LooksTable({
                         onUpdateLook={onUpdateLook}
                         onUploadImage={onUploadImage}
                         onRemoveImage={onRemoveImage}
+                        onChangeImageView={onChangeImageView}
                         uploadingViews={uploadingViews}
                       />
                     </TableCell>
