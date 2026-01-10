@@ -2,10 +2,12 @@
 export const VIEW_TYPES = ['full_front', 'cropped_front', 'back', 'detail'] as const;
 export type ViewType = typeof VIEW_TYPES[number];
 
-export const VIEW_LABELS: Record<ViewType, string> = {
+export const VIEW_LABELS: Record<string, string> = {
   full_front: 'Full Front',
   cropped_front: 'Cropped Front',
+  front: 'Front',
   back: 'Back',
+  side: 'Side',
   detail: 'Detail',
 };
 
