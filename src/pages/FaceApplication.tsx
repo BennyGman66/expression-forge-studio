@@ -7,6 +7,7 @@ import { HeadCropTab } from "@/components/face-application/HeadCropTab";
 import { FaceMatchTab } from "@/components/face-application/FaceMatchTab";
 import { GenerateTab } from "@/components/face-application/GenerateTab";
 import { ReviewTab } from "@/components/face-application/ReviewTab";
+import { AIApplyTab } from "@/components/face-application/AIApplyTab";
 import { SendToJobBoardTab } from "@/components/face-application/SendToJobBoardTab";
 import { FaceAppProjectsGrid } from "@/components/face-application/FaceAppProjectsGrid";
 import { useFaceApplicationProjects } from "@/hooks/useFaceApplicationProjects";
@@ -98,6 +99,7 @@ export default function FaceApplication() {
             <TabsTrigger value="match">Face Match</TabsTrigger>
             <TabsTrigger value="generate">Generate</TabsTrigger>
             <TabsTrigger value="review">Review</TabsTrigger>
+            <TabsTrigger value="ai-apply">AI Apply</TabsTrigger>
             <TabsTrigger value="handoff">Send to Job Board</TabsTrigger>
           </TabsList>
 
@@ -145,6 +147,10 @@ export default function FaceApplication() {
               lookId={selectedLookId}
               talentId={selectedTalentId}
             />
+          </TabsContent>
+
+          <TabsContent value="ai-apply">
+            <AIApplyTab projectId={projectId} />
           </TabsContent>
 
           <TabsContent value="handoff">

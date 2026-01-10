@@ -14,6 +14,178 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_apply_jobs: {
+        Row: {
+          attempts_per_view: number | null
+          created_at: string | null
+          digital_talent_id: string | null
+          id: string
+          look_id: string | null
+          model: string | null
+          pipeline_job_id: string | null
+          progress: number | null
+          project_id: string | null
+          status: string | null
+          strictness: string | null
+          total: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          attempts_per_view?: number | null
+          created_at?: string | null
+          digital_talent_id?: string | null
+          id?: string
+          look_id?: string | null
+          model?: string | null
+          pipeline_job_id?: string | null
+          progress?: number | null
+          project_id?: string | null
+          status?: string | null
+          strictness?: string | null
+          total?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          attempts_per_view?: number | null
+          created_at?: string | null
+          digital_talent_id?: string | null
+          id?: string
+          look_id?: string | null
+          model?: string | null
+          pipeline_job_id?: string | null
+          progress?: number | null
+          project_id?: string | null
+          status?: string | null
+          strictness?: string | null
+          total?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_apply_jobs_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "talent_looks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_apply_jobs_pipeline_job_id_fkey"
+            columns: ["pipeline_job_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_apply_jobs_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "face_application_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_apply_outputs: {
+        Row: {
+          attempt_index: number | null
+          body_image_id: string | null
+          body_image_url: string | null
+          created_at: string | null
+          error_message: string | null
+          final_prompt: string | null
+          head_image_id: string | null
+          head_image_url: string | null
+          id: string
+          is_selected: boolean | null
+          job_id: string | null
+          look_id: string | null
+          needs_human_fix: boolean | null
+          prompt_version: string | null
+          status: string | null
+          stored_url: string | null
+          view: string
+        }
+        Insert: {
+          attempt_index?: number | null
+          body_image_id?: string | null
+          body_image_url?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          final_prompt?: string | null
+          head_image_id?: string | null
+          head_image_url?: string | null
+          id?: string
+          is_selected?: boolean | null
+          job_id?: string | null
+          look_id?: string | null
+          needs_human_fix?: boolean | null
+          prompt_version?: string | null
+          status?: string | null
+          stored_url?: string | null
+          view: string
+        }
+        Update: {
+          attempt_index?: number | null
+          body_image_id?: string | null
+          body_image_url?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          final_prompt?: string | null
+          head_image_id?: string | null
+          head_image_url?: string | null
+          id?: string
+          is_selected?: boolean | null
+          job_id?: string | null
+          look_id?: string | null
+          needs_human_fix?: boolean | null
+          prompt_version?: string | null
+          status?: string | null
+          stored_url?: string | null
+          view?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_apply_outputs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ai_apply_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_apply_outputs_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "talent_looks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_apply_prompt_templates: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          template: string
+          version: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          template: string
+          version: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          template?: string
+          version?: string
+        }
+        Relationships: []
+      }
       audit_events: {
         Row: {
           action: string
