@@ -1,122 +1,176 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
-import { VIEW_LABELS } from "@/types/face-application";
 import { DEFAULT_AI_APPLY_SETTINGS } from "@/types/ai-apply";
 import { useAIApplyData } from "@/hooks/useAIApplyData";
 import { useAIApplyQueue } from "@/hooks/useAIApplyQueue";
-import { AIApplyLooksList } from "./ai-apply/AIApplyLooksList";
-import { AIApplyOutputPanel } from "./ai-apply/AIApplyOutputPanel";
-import { AIApplyActionsPanel } from "./ai-apply/AIApplyActionsPanel";
+import { BatchBar } from "./ai-apply/BatchBar";
+import { ViewSelector } from "./ai-apply/ViewSelector";
+import { ContextPreview } from "./ai-apply/ContextPreview";
+import { QueuePanel } from "./ai-apply/QueuePanel";
 
 interface AIApplyTabProps {
   projectId: string;
 }
 
 export function AIApplyTab({ projectId }: AIApplyTabProps) {
-  const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
-  const [selectedView, setSelectedView] = useState<string | null>(null);
+  // Batch selection state
+  const [selectedViews, setSelectedViews] = useState<Set<string>>(new Set());
+  const [hoveredView, setHoveredView] = useState<{ lookId: string; view: string } | null>(null);
+  const [attemptsPerView, setAttemptsPerView] = useState(DEFAULT_AI_APPLY_SETTINGS.attemptsPerView);
+  const [model, setModel] = useState(DEFAULT_AI_APPLY_SETTINGS.model);
+
   const { toast } = useToast();
 
   // Data hook
   const { 
     looks, 
-    sourceImages,
-    talentInfo, 
     isLoading,
     refetch 
   } = useAIApplyData({ projectId });
 
-  // Queue hook with fixed settings
+  // Queue hook
   const {
+    queue,
     isProcessing,
     addToQueue,
+    removeFromQueue,
+    clearQueue,
   } = useAIApplyQueue({ projectId, onComplete: refetch });
 
-  // Get current selection
-  const currentLook = looks.find(l => l.id === selectedLookId) || null;
-  const currentViewStatus = currentLook && selectedView 
-    ? currentLook.views[selectedView] 
-    : null;
+  // Toggle a single view
+  const handleToggleView = useCallback((lookId: string, view: string) => {
+    const viewId = `${lookId}:${view}`;
+    setSelectedViews(prev => {
+      const next = new Set(prev);
+      if (next.has(viewId)) {
+        next.delete(viewId);
+      } else {
+        next.add(viewId);
+      }
+      return next;
+    });
+  }, []);
 
-  // Get body image URL for current view
-  const bodyImageUrl = currentViewStatus?.pairing?.bodyImage?.url || null;
+  // Toggle all views in a look
+  const handleToggleLook = useCallback((lookId: string) => {
+    const look = looks.find(l => l.id === lookId);
+    if (!look) return;
 
-  // Handle view selection
-  const handleSelectView = (lookId: string, view: string) => {
-    setSelectedLookId(lookId);
-    setSelectedView(view);
-  };
+    const lookViewIds = Object.keys(look.views).map(v => `${lookId}:${v}`);
+    const allSelected = lookViewIds.every(id => selectedViews.has(id));
 
-  // Handle running current view
-  const handleRunView = useCallback(() => {
-    if (!currentLook || !selectedView) return;
+    setSelectedViews(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        // Deselect all
+        lookViewIds.forEach(id => next.delete(id));
+      } else {
+        // Select all
+        lookViewIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  }, [looks, selectedViews]);
+
+  // Select all views
+  const handleSelectAll = useCallback(() => {
+    const allViewIds = looks.flatMap(look => 
+      Object.keys(look.views).map(v => `${look.id}:${v}`)
+    );
     
-    const added = addToQueue('run', currentLook.id, currentLook.name, selectedView, DEFAULT_AI_APPLY_SETTINGS.attemptsPerView);
-    if (added) {
-      toast({ title: "Started", description: `${VIEW_LABELS[selectedView] || selectedView} generation started` });
+    const allSelected = allViewIds.every(id => selectedViews.has(id));
+    
+    if (allSelected) {
+      setSelectedViews(new Set());
     } else {
-      toast({ title: "Already Running", description: "This view is already in the queue", variant: "destructive" });
+      setSelectedViews(new Set(allViewIds));
     }
-  }, [currentLook, selectedView, addToQueue, toast]);
+  }, [looks, selectedViews]);
 
-  // Handle run all views for current look
-  const handleRunAll = useCallback(() => {
-    if (!currentLook) return;
-
-    // Get available views from the look's views object (dynamic, not hardcoded)
-    const viewsToRun = Object.keys(currentLook.views).filter(v => 
-      currentLook.views[v]?.pairing?.canRun && 
-      currentLook.views[v]?.status === 'not_started'
+  // Select views by type
+  const handleSelectByType = useCallback((viewType: string) => {
+    const viewIdsOfType = looks.flatMap(look => 
+      Object.keys(look.views)
+        .filter(v => v === viewType)
+        .map(v => `${look.id}:${v}`)
     );
 
+    setSelectedViews(prev => {
+      const next = new Set(prev);
+      // Add all of this type
+      viewIdsOfType.forEach(id => next.add(id));
+      return next;
+    });
+  }, [looks]);
+
+  // Clear selection
+  const handleClearSelection = useCallback(() => {
+    setSelectedViews(new Set());
+  }, []);
+
+  // Run batch - queue all selected views
+  const handleRunBatch = useCallback(() => {
+    if (selectedViews.size === 0) return;
+
     let addedCount = 0;
-    for (const view of viewsToRun) {
-      const added = addToQueue('run', currentLook.id, currentLook.name, view, DEFAULT_AI_APPLY_SETTINGS.attemptsPerView);
+    
+    selectedViews.forEach(viewId => {
+      const [lookId, view] = viewId.split(':');
+      const look = looks.find(l => l.id === lookId);
+      if (!look) return;
+
+      const viewStatus = look.views[view];
+      if (!viewStatus?.pairing?.canRun) return;
+
+      const added = addToQueue('run', lookId, look.name, view, attemptsPerView);
       if (added) addedCount++;
-    }
-
-    toast({ 
-      title: "Started", 
-      description: `${addedCount} views queued for generation` 
     });
-  }, [currentLook, addToQueue, toast]);
 
-  // Handle output selection
-  const handleSelectOutput = useCallback(async (outputId: string) => {
-    if (!currentViewStatus) return;
-
-    const clickedOutput = currentViewStatus.outputs.find(o => o.id === outputId);
-    const isCurrentlySelected = clickedOutput?.is_selected;
-
-    // Toggle selection - deselect all others in this view, toggle clicked one
-    for (const output of currentViewStatus.outputs) {
-      const shouldBeSelected = isCurrentlySelected
-        ? false
-        : output.id === outputId;
-      
-      await supabase
-        .from('ai_apply_outputs')
-        .update({ is_selected: shouldBeSelected })
-        .eq('id', output.id);
+    if (addedCount > 0) {
+      toast({
+        title: "Batch Started",
+        description: `${addedCount} views queued for generation (${addedCount * attemptsPerView} total renders)`,
+      });
+      // Clear selection after queueing
+      setSelectedViews(new Set());
+    } else {
+      toast({
+        title: "No Views Queued",
+        description: "Selected views may already be running or not ready",
+        variant: "destructive",
+      });
     }
+  }, [selectedViews, looks, attemptsPerView, addToQueue, toast]);
 
-    toast({ 
-      title: isCurrentlySelected ? "Deselected" : "Selected", 
-      description: isCurrentlySelected ? "Selection cleared" : "Output selected as best" 
-    });
-    refetch();
-  }, [currentViewStatus, refetch, toast]);
+  // Retry a failed item
+  const handleRetryItem = useCallback((item: typeof queue[0]) => {
+    const look = looks.find(l => l.id === item.lookId);
+    if (!look || !item.view) return;
 
-  // Handle send to job board
+    addToQueue('retry_failed', item.lookId, look.name, item.view, attemptsPerView);
+    removeFromQueue(item.id);
+  }, [looks, attemptsPerView, addToQueue, removeFromQueue]);
+
+  // Cancel batch
+  const handleCancelBatch = useCallback(() => {
+    clearQueue();
+    toast({ title: "Batch Cancelled" });
+  }, [clearQueue, toast]);
+
+  // Send to job board
   const handleSendToJobBoard = useCallback(() => {
     toast({ 
       title: "Coming Soon", 
       description: "Job Board integration will be available in the next update" 
     });
   }, [toast]);
+
+  // Handle hover
+  const handleHoverView = useCallback((view: { lookId: string; view: string } | null) => {
+    setHoveredView(view);
+  }, []);
 
   if (isLoading) {
     return (
@@ -140,48 +194,52 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
     );
   }
 
-  // Auto-select first look if none selected
-  if (!selectedLookId && looks.length > 0) {
-    const firstLook = looks[0];
-    const firstView = Object.keys(firstLook.views)[0] || null;
-    setSelectedLookId(firstLook.id);
-    setSelectedView(firstView);
-  }
-
   return (
-    <div className="flex h-[calc(100vh-200px)] min-h-[600px] rounded-lg border bg-card overflow-hidden">
-      {/* LEFT: Looks List */}
-      <div className="w-56 flex-shrink-0">
-        <AIApplyLooksList
+    <div className="flex flex-col h-[calc(100vh-200px)] min-h-[600px] rounded-lg border bg-card overflow-hidden">
+      {/* STICKY BATCH BAR */}
+      <BatchBar
+        selectedCount={selectedViews.size}
+        attemptsPerView={attemptsPerView}
+        model={model}
+        onAttemptsChange={setAttemptsPerView}
+        onModelChange={setModel}
+        onRunBatch={handleRunBatch}
+        onClearSelection={handleClearSelection}
+        isRunning={isProcessing}
+      />
+
+      {/* MAIN 3-COLUMN LAYOUT */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* LEFT: View Selector */}
+        <div className="w-64 flex-shrink-0">
+          <ViewSelector
+            looks={looks}
+            selectedViews={selectedViews}
+            hoveredView={hoveredView}
+            onToggleView={handleToggleView}
+            onToggleLook={handleToggleLook}
+            onSelectAll={handleSelectAll}
+            onSelectByType={handleSelectByType}
+            onHoverView={handleHoverView}
+          />
+        </div>
+
+        {/* CENTER: Context Preview */}
+        <ContextPreview
+          hoveredView={hoveredView}
           looks={looks}
-          selectedLookId={selectedLookId}
-          selectedView={selectedView}
-          onSelectView={handleSelectView}
+        />
+
+        {/* RIGHT: Queue Panel */}
+        <QueuePanel
+          queue={queue}
+          selectedViews={selectedViews}
+          onRemoveFromQueue={removeFromQueue}
+          onRetryItem={handleRetryItem}
+          onCancelBatch={handleCancelBatch}
+          onSendToJobBoard={handleSendToJobBoard}
         />
       </div>
-
-      {/* CENTER: Output Panel */}
-      <AIApplyOutputPanel
-        viewStatus={currentViewStatus}
-        view={selectedView}
-        lookName={currentLook?.name || ''}
-        onRun={handleRunView}
-        onSelectOutput={handleSelectOutput}
-        isRunning={isProcessing}
-      />
-
-      {/* RIGHT: Actions Panel */}
-      <AIApplyActionsPanel
-        look={currentLook}
-        talentName={talentInfo?.name || null}
-        talentImageUrl={currentViewStatus?.pairing?.headRender?.url || null}
-        bodyImageUrl={bodyImageUrl}
-        selectedView={selectedView}
-        onRunView={handleRunView}
-        onRunAll={handleRunAll}
-        onSendToJobBoard={handleSendToJobBoard}
-        isRunning={isProcessing}
-      />
     </div>
   );
 }
