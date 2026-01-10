@@ -75,6 +75,7 @@ serve(async (req) => {
 
     // Get model from job (or use default)
     const model = job.model || "google/gemini-2.5-flash-image-preview";
+    console.log(`🤖 Using model: ${model}`);
 
     // Process in background using setTimeout (Deno pattern)
     setTimeout(() => {
@@ -260,6 +261,7 @@ async function generateImage(
   model: string
 ): Promise<string | null> {
   try {
+    console.log(`🎨 Calling AI API with model: ${model}`);
     console.log(`Generating with body: ${bodyImageUrl.substring(0, 80)}...`);
     console.log(`Face: ${faceImageUrl.substring(0, 80)}...`);
     
