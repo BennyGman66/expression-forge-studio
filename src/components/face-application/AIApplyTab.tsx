@@ -9,6 +9,7 @@ import { BatchBar } from "./ai-apply/BatchBar";
 import { ViewSelector } from "./ai-apply/ViewSelector";
 import { ContextPreview } from "./ai-apply/ContextPreview";
 import { QueuePanel } from "./ai-apply/QueuePanel";
+import { ReviewDialog } from "./ai-apply/ReviewDialog";
 
 interface AIApplyTabProps {
   projectId: string;
@@ -24,6 +25,7 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
   const [attemptsPerView, setAttemptsPerView] = useState(DEFAULT_AI_APPLY_SETTINGS.attemptsPerView);
   const [model, setModel] = useState(DEFAULT_AI_APPLY_SETTINGS.model);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
 
   const { toast } = useToast();
 
@@ -176,6 +178,13 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
     setHoveredView(view);
   }, []);
 
+  // Check if any outputs exist
+  const hasOutputs = useMemo(() => {
+    return looks.some(look => 
+      Object.values(look.views).some(v => v.outputs.length > 0)
+    );
+  }, [looks]);
+
   if (isLoading) {
     return (
       <Card>
@@ -209,7 +218,9 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
         onModelChange={setModel}
         onRunBatch={handleRunBatch}
         onClearSelection={handleClearSelection}
+        onOpenReview={() => setIsReviewOpen(true)}
         isRunning={isProcessing}
+        hasOutputs={hasOutputs}
       />
 
       {/* MAIN 3-COLUMN LAYOUT */}
@@ -247,6 +258,14 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
           onSendToJobBoard={handleSendToJobBoard}
         />
       </div>
+
+      {/* Review Dialog */}
+      <ReviewDialog
+        open={isReviewOpen}
+        onClose={() => setIsReviewOpen(false)}
+        looks={looks}
+        onRefetch={refetch}
+      />
     </div>
   );
 }
