@@ -74,7 +74,7 @@ export function SendToJobBoardTab({ projectId }: SendToJobBoardTabProps) {
 
     if (result.success && result.jobGroupId) {
       // Navigate to Job Board with filter
-      navigate(`/job-board?group=${result.jobGroupId}`);
+      navigate(`/jobs?group=${result.jobGroupId}`);
     }
   };
 
