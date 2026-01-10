@@ -90,21 +90,39 @@ export function JobPreviewPanel({
             </p>
           </CardHeader>
           <CardContent>
-            {/* 2x2 grid of views */}
-            <div className="grid grid-cols-2 gap-3">
-              {REQUIRED_VIEWS.map((view) => {
+            {/* Grid of views - only complete pairs */}
+            {(() => {
+              const completePairs = REQUIRED_VIEWS.filter(view => {
                 const viewData = selectedLook.views[view];
+                return viewData.sourceUrl && viewData.hasSelection;
+              });
+
+              if (completePairs.length === 0) {
                 return (
-                  <ViewPreviewCard
-                    key={view}
-                    label={VIEW_LABELS[view]}
-                    sourceUrl={viewData.sourceUrl}
-                    selectedUrl={viewData.selectedUrl}
-                    hasSelection={viewData.hasSelection}
-                  />
+                  <div className="text-center text-muted-foreground p-6">
+                    <p className="text-sm">No complete pairs available</p>
+                    <p className="text-xs">Each view needs both an Original and a Head Render</p>
+                  </div>
                 );
-              })}
-            </div>
+              }
+
+              return (
+                <div className="grid grid-cols-2 gap-3">
+                  {completePairs.map((view) => {
+                    const viewData = selectedLook.views[view];
+                    return (
+                      <ViewPreviewCard
+                        key={view}
+                        label={VIEW_LABELS[view]}
+                        sourceUrl={viewData.sourceUrl}
+                        selectedUrl={viewData.selectedUrl}
+                        hasSelection={viewData.hasSelection}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       ) : (
@@ -165,8 +183,8 @@ function ViewPreviewCard({ label, sourceUrl, selectedUrl, hasSelection }: ViewPr
               />
             </div>
           ) : (
-            <div className="aspect-[3/4] bg-destructive/10 rounded flex items-center justify-center">
-              <span className="text-[10px] text-destructive">Missing</span>
+            <div className="aspect-[3/4] bg-muted rounded flex items-center justify-center">
+              <span className="text-[10px] text-muted-foreground">Missing</span>
             </div>
           )}
         </div>
