@@ -316,12 +316,35 @@ export default function PublicJobWorkspace() {
   };
 
   const handleDownloadAll = async () => {
+    toast.info(`Downloading ${inputs.length} files...`);
+    
     for (const input of inputs) {
       const url = (input as any).artifact?.file_url;
       if (url) {
-        window.open(url, '_blank');
+        try {
+          const response = await fetch(url);
+          const blob = await response.blob();
+          
+          const urlParts = url.split('/');
+          const filename = urlParts[urlParts.length - 1] || `input-${(input as any).id}`;
+          
+          const downloadUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = downloadUrl;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(downloadUrl);
+          
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (error) {
+          console.error(`Failed to download ${url}:`, error);
+        }
       }
     }
+    
+    toast.success('Downloads complete!');
   };
 
   // Check which views are already uploaded
