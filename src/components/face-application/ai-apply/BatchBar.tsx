@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Play, X, Loader2 } from "lucide-react";
+import { Play, X, Loader2, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface BatchBarProps {
@@ -18,7 +18,9 @@ interface BatchBarProps {
   onModelChange: (model: string) => void;
   onRunBatch: () => void;
   onClearSelection: () => void;
+  onOpenReview: () => void;
   isRunning: boolean;
+  hasOutputs: boolean;
 }
 
 const ATTEMPT_PRESETS = [2, 4, 6];
@@ -35,12 +37,11 @@ export function BatchBar({
   onModelChange,
   onRunBatch,
   onClearSelection,
+  onOpenReview,
   isRunning,
+  hasOutputs,
 }: BatchBarProps) {
   const totalRenders = selectedCount * attemptsPerView;
-  const isVisible = selectedCount > 0;
-
-  if (!isVisible) return null;
 
   return (
     <div className={cn(
@@ -48,16 +49,31 @@ export function BatchBar({
       "px-4 py-3 flex items-center gap-4 flex-wrap"
     )}>
       {/* Selection count */}
-      <div className="flex items-center gap-2">
-        <Badge variant="secondary" className="text-sm px-3 py-1">
-          {selectedCount} views selected
-        </Badge>
-        <span className="text-sm text-muted-foreground">
-          • {totalRenders} total renders
-        </span>
-      </div>
+      {selectedCount > 0 && (
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="text-sm px-3 py-1">
+            {selectedCount} views selected
+          </Badge>
+          <span className="text-sm text-muted-foreground">
+            • {totalRenders} total renders
+          </span>
+        </div>
+      )}
 
       <div className="flex-1" />
+
+      {/* Review Looks button - always visible when outputs exist */}
+      {hasOutputs && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1.5"
+          onClick={onOpenReview}
+        >
+          <Eye className="h-4 w-4" />
+          Review Looks
+        </Button>
+      )}
 
       {/* Model selector */}
       <div className="flex items-center gap-2">
@@ -96,16 +112,18 @@ export function BatchBar({
 
       {/* Actions */}
       <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 text-xs gap-1.5"
-          onClick={onClearSelection}
-          disabled={isRunning}
-        >
-          <X className="h-3.5 w-3.5" />
-          Clear
-        </Button>
+        {selectedCount > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs gap-1.5"
+            onClick={onClearSelection}
+            disabled={isRunning}
+          >
+            <X className="h-3.5 w-3.5" />
+            Clear
+          </Button>
+        )}
 
         <Button
           size="sm"
