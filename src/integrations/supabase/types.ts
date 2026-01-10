@@ -1752,6 +1752,51 @@ export type Database = {
           },
         ]
       }
+      job_groups: {
+        Row: {
+          brief: string
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          project_id: string | null
+          total_looks: number
+        }
+        Insert: {
+          brief: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          project_id?: string | null
+          total_looks?: number
+        }
+        Update: {
+          brief?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          project_id?: string | null
+          total_looks?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_groups_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_groups_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "face_application_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_inputs: {
         Row: {
           artifact_id: string | null
@@ -3131,11 +3176,14 @@ export type Database = {
       unified_jobs: {
         Row: {
           assigned_user_id: string | null
+          brief_snapshot: string | null
           created_at: string | null
           created_by: string | null
           due_date: string | null
           id: string
           instructions: string | null
+          job_group_id: string | null
+          locked_at: string | null
           look_id: string | null
           priority: number | null
           project_id: string | null
@@ -3146,11 +3194,14 @@ export type Database = {
         }
         Insert: {
           assigned_user_id?: string | null
+          brief_snapshot?: string | null
           created_at?: string | null
           created_by?: string | null
           due_date?: string | null
           id?: string
           instructions?: string | null
+          job_group_id?: string | null
+          locked_at?: string | null
           look_id?: string | null
           priority?: number | null
           project_id?: string | null
@@ -3161,11 +3212,14 @@ export type Database = {
         }
         Update: {
           assigned_user_id?: string | null
+          brief_snapshot?: string | null
           created_at?: string | null
           created_by?: string | null
           due_date?: string | null
           id?: string
           instructions?: string | null
+          job_group_id?: string | null
+          locked_at?: string | null
           look_id?: string | null
           priority?: number | null
           project_id?: string | null
@@ -3187,6 +3241,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "unified_jobs_job_group_id_fkey"
+            columns: ["job_group_id"]
+            isOneToOne: false
+            referencedRelation: "job_groups"
             referencedColumns: ["id"]
           },
         ]
