@@ -1499,6 +1499,33 @@ export type Database = {
           },
         ]
       }
+      freelancer_identities: {
+        Row: {
+          display_name: string | null
+          first_name: string
+          first_seen_at: string | null
+          id: string
+          last_active_at: string | null
+          last_name: string
+        }
+        Insert: {
+          display_name?: string | null
+          first_name: string
+          first_seen_at?: string | null
+          id?: string
+          last_active_at?: string | null
+          last_name: string
+        }
+        Update: {
+          display_name?: string | null
+          first_name?: string
+          first_seen_at?: string | null
+          id?: string
+          last_active_at?: string | null
+          last_name?: string
+        }
+        Relationships: []
+      }
       generation_jobs: {
         Row: {
           attempts_per_pose: number | null
@@ -1880,6 +1907,7 @@ export type Database = {
           artifact_id: string | null
           created_at: string | null
           file_url: string | null
+          freelancer_identity_id: string | null
           id: string
           job_id: string
           label: string | null
@@ -1889,6 +1917,7 @@ export type Database = {
           artifact_id?: string | null
           created_at?: string | null
           file_url?: string | null
+          freelancer_identity_id?: string | null
           id?: string
           job_id: string
           label?: string | null
@@ -1898,6 +1927,7 @@ export type Database = {
           artifact_id?: string | null
           created_at?: string | null
           file_url?: string | null
+          freelancer_identity_id?: string | null
           id?: string
           job_id?: string
           label?: string | null
@@ -1909,6 +1939,13 @@ export type Database = {
             columns: ["artifact_id"]
             isOneToOne: false
             referencedRelation: "unified_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_outputs_freelancer_identity_id_fkey"
+            columns: ["freelancer_identity_id"]
+            isOneToOne: false
+            referencedRelation: "freelancer_identities"
             referencedColumns: ["id"]
           },
           {
@@ -1930,6 +1967,7 @@ export type Database = {
       job_submissions: {
         Row: {
           created_at: string
+          freelancer_identity_id: string | null
           id: string
           job_id: string
           status: Database["public"]["Enums"]["submission_status"]
@@ -1941,6 +1979,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          freelancer_identity_id?: string | null
           id?: string
           job_id: string
           status?: Database["public"]["Enums"]["submission_status"]
@@ -1952,6 +1991,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          freelancer_identity_id?: string | null
           id?: string
           job_id?: string
           status?: Database["public"]["Enums"]["submission_status"]
@@ -1962,6 +2002,13 @@ export type Database = {
           version_number?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "job_submissions_freelancer_identity_id_fkey"
+            columns: ["freelancer_identity_id"]
+            isOneToOne: false
+            referencedRelation: "freelancer_identities"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "job_submissions_job_id_fkey"
             columns: ["job_id"]
@@ -2744,6 +2791,7 @@ export type Database = {
           author_user_id: string | null
           body: string
           created_at: string
+          freelancer_identity_id: string | null
           id: string
           read_by: Json | null
           thread_id: string
@@ -2753,6 +2801,7 @@ export type Database = {
           author_user_id?: string | null
           body: string
           created_at?: string
+          freelancer_identity_id?: string | null
           id?: string
           read_by?: Json | null
           thread_id: string
@@ -2762,6 +2811,7 @@ export type Database = {
           author_user_id?: string | null
           body?: string
           created_at?: string
+          freelancer_identity_id?: string | null
           id?: string
           read_by?: Json | null
           thread_id?: string
@@ -2773,6 +2823,13 @@ export type Database = {
             columns: ["author_user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "review_comments_freelancer_identity_id_fkey"
+            columns: ["freelancer_identity_id"]
+            isOneToOne: false
+            referencedRelation: "freelancer_identities"
             referencedColumns: ["id"]
           },
           {
@@ -2884,6 +2941,7 @@ export type Database = {
         Row: {
           created_at: string
           file_url: string | null
+          freelancer_identity_id: string | null
           id: string
           job_output_id: string | null
           label: string | null
@@ -2898,6 +2956,7 @@ export type Database = {
         Insert: {
           created_at?: string
           file_url?: string | null
+          freelancer_identity_id?: string | null
           id?: string
           job_output_id?: string | null
           label?: string | null
@@ -2912,6 +2971,7 @@ export type Database = {
         Update: {
           created_at?: string
           file_url?: string | null
+          freelancer_identity_id?: string | null
           id?: string
           job_output_id?: string | null
           label?: string | null
@@ -2924,6 +2984,13 @@ export type Database = {
           superseded_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "submission_assets_freelancer_identity_id_fkey"
+            columns: ["freelancer_identity_id"]
+            isOneToOne: false
+            referencedRelation: "freelancer_identities"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "submission_assets_job_output_id_fkey"
             columns: ["job_output_id"]
@@ -3175,6 +3242,7 @@ export type Database = {
       }
       unified_jobs: {
         Row: {
+          access_token: string | null
           assigned_user_id: string | null
           brief_snapshot: string | null
           created_at: string | null
@@ -3193,6 +3261,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          access_token?: string | null
           assigned_user_id?: string | null
           brief_snapshot?: string | null
           created_at?: string | null
@@ -3211,6 +3280,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          access_token?: string | null
           assigned_user_id?: string | null
           brief_snapshot?: string | null
           created_at?: string | null

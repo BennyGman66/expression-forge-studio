@@ -40,6 +40,7 @@ export interface UnifiedJob {
   updated_at: string;
   title?: string | null;
   priority?: number | null;
+  access_token?: string | null;
   // Joined fields
   assigned_user?: {
     id: string;
