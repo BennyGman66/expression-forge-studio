@@ -559,9 +559,9 @@ export default function FreelancerJobDetail() {
                             <p className="text-xs font-medium text-muted-foreground mb-2 uppercase">
                               Head Render
                             </p>
-                            {group.headRender?.artifact?.preview_url ? (
+                            {(group.headRender?.artifact?.preview_url || group.headRender?.artifact?.file_url) ? (
                               <img
-                                src={group.headRender.artifact.preview_url}
+                                src={group.headRender.artifact.preview_url || group.headRender.artifact.file_url}
                                 alt="Head Render"
                                 className="w-full h-32 object-contain rounded mb-3 bg-muted"
                               />
@@ -593,9 +593,9 @@ export default function FreelancerJobDetail() {
                             <p className="text-xs font-medium text-muted-foreground mb-2 uppercase">
                               Apply to Body
                             </p>
-                            {group.originalSource?.artifact?.preview_url ? (
+                            {(group.originalSource?.artifact?.preview_url || group.originalSource?.artifact?.file_url) ? (
                               <img
-                                src={group.originalSource.artifact.preview_url}
+                                src={group.originalSource.artifact.preview_url || group.originalSource.artifact.file_url}
                                 alt="Source Body"
                                 className="w-full h-32 object-contain rounded mb-3 bg-muted"
                               />
@@ -628,9 +628,9 @@ export default function FreelancerJobDetail() {
                         className="p-4 rounded-lg bg-muted/50 border border-border"
                       >
                         <p className="text-sm font-medium text-foreground mb-2">{input.label || 'Input File'}</p>
-                        {input.artifact?.preview_url ? (
+                        {(input.artifact?.preview_url || input.artifact?.file_url) ? (
                           <img
-                            src={input.artifact.preview_url}
+                            src={input.artifact.preview_url || input.artifact.file_url}
                             alt={input.label || 'Input'}
                             className="w-full h-40 object-cover rounded mb-3"
                           />

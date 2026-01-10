@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useJobs } from '@/hooks/useJobs';
+import { useFreelancerJobs } from '@/hooks/useJobs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -10,10 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ArrowLeft, Search } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import type { JobStatus, JobType } from '@/types/jobs';
+import type { JobStatus, JobType, UnifiedJob } from '@/types/jobs';
 
 export default function FreelancerJobList() {
-  const { user, isInternal } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
@@ -23,11 +23,16 @@ export default function FreelancerJobList() {
   );
   const [typeFilter, setTypeFilter] = useState<JobType | 'ALL'>('ALL');
 
-  const { data: jobs = [], isLoading } = useJobs({
-    assignedUserId: isInternal ? undefined : user?.id,
-  });
+  // Fetch claimable (open/unassigned) jobs + user's assigned jobs
+  const { data, isLoading } = useFreelancerJobs(user?.id);
+  const { assignedJobs = [], claimableJobs = [] } = data || {};
 
-  const filteredJobs = jobs.filter(job => {
+  // Combine all jobs for the list view
+  const allJobs = useMemo(() => {
+    return [...claimableJobs, ...assignedJobs];
+  }, [claimableJobs, assignedJobs]);
+
+  const filteredJobs = allJobs.filter(job => {
     if (statusFilter !== 'ALL' && job.status !== statusFilter) return false;
     if (typeFilter !== 'ALL' && job.type !== typeFilter) return false;
     if (search) {
@@ -61,7 +66,7 @@ export default function FreelancerJobList() {
     return <Badge className="bg-muted/50 text-muted-foreground text-xs">P2</Badge>;
   };
 
-  const getJobTitle = (job: typeof jobs[0]) => {
+  const getJobTitle = (job: UnifiedJob) => {
     return job.title || job.type.replace(/_/g, ' ');
   };
 
