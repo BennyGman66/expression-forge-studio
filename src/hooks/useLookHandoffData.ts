@@ -5,6 +5,7 @@ import {
   ViewHandoffStatus, 
   RequiredView, 
   REQUIRED_VIEWS,
+  MINIMUM_REQUIRED_VIEWS,
   HandoffSummary 
 } from '@/types/job-handoff';
 
@@ -120,14 +121,16 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
           };
         }
 
-        // Determine status
+        // Determine status based on minimum required views (full_front OR back)
+        const meetsMinimum = MINIMUM_REQUIRED_VIEWS.some(v => views[v].hasSelection);
+        
         let status: 'ready' | 'incomplete' | 'blocking';
-        if (readyCount === 4) {
-          status = 'ready';
-        } else if (readyCount === 0) {
+        if (readyCount === 0) {
           status = 'blocking'; // No views ready at all
+        } else if (meetsMinimum) {
+          status = 'ready'; // Has at least full_front OR back
         } else {
-          status = 'incomplete'; // Some but not all
+          status = 'incomplete'; // Has views but missing both required
         }
 
         return {
@@ -136,7 +139,7 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
           views,
           status,
           readyCount,
-          isIncluded: status === 'ready', // Auto-include ready looks
+          isIncluded: meetsMinimum, // Auto-include looks that meet minimum
         };
       });
 
@@ -156,7 +159,7 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
   const toggleLookInclusion = useCallback((lookId: string) => {
     setLooks(prev => 
       prev.map(look => 
-        look.id === lookId && look.status === 'ready'
+        look.id === lookId && look.status !== 'blocking'
           ? { ...look, isIncluded: !look.isIncluded }
           : look
       )
@@ -166,7 +169,7 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
   const selectAllLooks = useCallback(() => {
     setLooks(prev => 
       prev.map(look => 
-        look.status === 'ready' ? { ...look, isIncluded: true } : look
+        look.status !== 'blocking' ? { ...look, isIncluded: true } : look
       )
     );
   }, []);
@@ -183,7 +186,7 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
     readyLooks: looks.filter(l => l.status === 'ready').length,
     incompleteLooks: looks.filter(l => l.status === 'incomplete').length,
     blockingLooks: looks.filter(l => l.status === 'blocking').length,
-    totalJobs: looks.filter(l => l.isIncluded && l.status === 'ready').length,
+    totalJobs: looks.filter(l => l.isIncluded).length, // Any included look counts
   };
 
   return {

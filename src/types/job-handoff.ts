@@ -3,6 +3,9 @@
 export const REQUIRED_VIEWS = ['full_front', 'cropped_front', 'back', 'detail'] as const;
 export type RequiredView = typeof REQUIRED_VIEWS[number];
 
+// Minimum views needed to send a look (at least one of these must have a selection)
+export const MINIMUM_REQUIRED_VIEWS: RequiredView[] = ['full_front', 'back'];
+
 export const VIEW_LABELS: Record<RequiredView, string> = {
   full_front: 'Full Front',
   cropped_front: 'Cropped Front',
