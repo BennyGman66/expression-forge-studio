@@ -171,7 +171,7 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
       <AIApplyActionsPanel
         look={currentLook}
         talentName={talentInfo?.name || null}
-        talentImageUrl={talentInfo?.front_face_url || null}
+        talentImageUrl={currentViewStatus?.pairing?.headRender?.url || null}
         bodyImageUrl={bodyImageUrl}
         selectedView={selectedView}
         onRunView={handleRunView}

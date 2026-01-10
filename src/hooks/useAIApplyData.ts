@@ -339,12 +339,21 @@ export function useAIApplyData({ projectId }: UseAIApplyDataOptions) {
       };
     });
 
-    // Only include looks that have at least one selected head render
-    const looksWithHeads = aiApplyLooks.filter(look => 
-      headRenders.some(h => h.lookId === look.id)
-    );
+    // Only include looks that have both head renders AND runnable views
+    const readyLooks = aiApplyLooks.filter(look => {
+      // Must have at least one selected head render
+      const hasHead = headRenders.some(h => h.lookId === look.id);
+      if (!hasHead) return false;
+      
+      // Must have at least one view that can run (has both body and head)
+      const hasRunnableView = VIEW_TYPES.some(v => 
+        look.views[v]?.pairing?.canRun === true
+      );
+      
+      return hasRunnableView;
+    });
 
-    setLooks(looksWithHeads);
+    setLooks(readyLooks);
     setIsLoading(false);
   }, [projectId, calculatePairing, calculateViewStatus]);
 
