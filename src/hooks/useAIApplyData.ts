@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { VIEW_TYPES, ViewType } from '@/types/face-application';
 import type { 
-  AIApplyJob, 
   AIApplyOutput, 
   AIApplyLook, 
   AIApplyViewStatus,
@@ -317,14 +315,19 @@ export function useAIApplyData({ projectId }: UseAIApplyDataOptions) {
       const views: Record<string, AIApplyViewStatus> = {};
       const allWarnings: string[] = [];
 
-      for (const viewType of VIEW_TYPES) {
+      // Only include views that have selected head renders for this look
+      const lookHeadRenders = headRenders.filter(h => h.lookId === lookId);
+      const availableViews = [...new Set(lookHeadRenders.map(h => h.view))];
+
+      for (const viewType of availableViews) {
         const pairing = calculatePairing(lookId, viewType, srcImages || [], headRenders);
         views[viewType] = calculateViewStatus(outputs, viewType, pairing);
         allWarnings.push(...pairing.warnings);
       }
 
-      const isReady = VIEW_TYPES.every(v => views[v]?.hasSelection);
-      const isComplete = VIEW_TYPES.every(v => 
+      const viewKeys = Object.keys(views);
+      const isReady = viewKeys.length > 0 && viewKeys.every(v => views[v]?.hasSelection);
+      const isComplete = viewKeys.length > 0 && viewKeys.every(v => 
         views[v]?.status === 'completed' || views[v]?.status === 'needs_selection'
       );
 
@@ -339,19 +342,10 @@ export function useAIApplyData({ projectId }: UseAIApplyDataOptions) {
       };
     });
 
-    // Only include looks that have both head renders AND runnable views
-    const readyLooks = aiApplyLooks.filter(look => {
-      // Must have at least one selected head render
-      const hasHead = headRenders.some(h => h.lookId === look.id);
-      if (!hasHead) return false;
-      
-      // Must have at least one view that can run (has both body and head)
-      const hasRunnableView = VIEW_TYPES.some(v => 
-        look.views[v]?.pairing?.canRun === true
-      );
-      
-      return hasRunnableView;
-    });
+    // Only include looks that have at least one view (meaning they have selected head renders)
+    const readyLooks = aiApplyLooks.filter(look => 
+      Object.keys(look.views).length > 0
+    );
 
     setLooks(readyLooks);
     setIsLoading(false);

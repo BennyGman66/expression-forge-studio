@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { VIEW_TYPES, VIEW_LABELS, ViewType } from "@/types/face-application";
+import { VIEW_LABELS } from "@/types/face-application";
 import { DEFAULT_AI_APPLY_SETTINGS } from "@/types/ai-apply";
 import { useAIApplyData } from "@/hooks/useAIApplyData";
 import { useAIApplyQueue } from "@/hooks/useAIApplyQueue";
@@ -56,7 +56,7 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
     
     const added = addToQueue('run', currentLook.id, currentLook.name, selectedView, DEFAULT_AI_APPLY_SETTINGS.attemptsPerView);
     if (added) {
-      toast({ title: "Started", description: `${VIEW_LABELS[selectedView as ViewType]} generation started` });
+      toast({ title: "Started", description: `${VIEW_LABELS[selectedView] || selectedView} generation started` });
     } else {
       toast({ title: "Already Running", description: "This view is already in the queue", variant: "destructive" });
     }
@@ -66,7 +66,8 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
   const handleRunAll = useCallback(() => {
     if (!currentLook) return;
 
-    const viewsToRun = VIEW_TYPES.filter(v => 
+    // Get available views from the look's views object (dynamic, not hardcoded)
+    const viewsToRun = Object.keys(currentLook.views).filter(v => 
       currentLook.views[v]?.pairing?.canRun && 
       currentLook.views[v]?.status === 'not_started'
     );
@@ -141,8 +142,10 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
 
   // Auto-select first look if none selected
   if (!selectedLookId && looks.length > 0) {
-    setSelectedLookId(looks[0].id);
-    setSelectedView(VIEW_TYPES[0]);
+    const firstLook = looks[0];
+    const firstView = Object.keys(firstLook.views)[0] || null;
+    setSelectedLookId(firstLook.id);
+    setSelectedView(firstView);
   }
 
   return (

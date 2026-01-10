@@ -7,7 +7,7 @@ import {
   ChevronDown,
   ChevronRight 
 } from "lucide-react";
-import { VIEW_TYPES, VIEW_LABELS, ViewType } from "@/types/face-application";
+import { VIEW_LABELS } from "@/types/face-application";
 import type { AIApplyLook, AIApplyViewStatus } from "@/types/ai-apply";
 import { useState } from "react";
 
@@ -71,8 +71,9 @@ export function AIApplyLooksList({
   };
 
   const getLookProgress = (look: AIApplyLook) => {
-    const selectedCount = VIEW_TYPES.filter(v => look.views[v]?.hasSelection).length;
-    return `${selectedCount}/${VIEW_TYPES.length}`;
+    const allViews = Object.keys(look.views);
+    const selectedCount = allViews.filter(v => look.views[v]?.hasSelection).length;
+    return `${selectedCount}/${allViews.length}`;
   };
 
   return (
@@ -111,11 +112,10 @@ export function AIApplyLooksList({
                 </Badge>
               </button>
 
-              {/* View list */}
+              {/* View list - only show views with selected heads */}
               {expandedLooks.has(look.id) && (
                 <div className="ml-5 pl-3 border-l border-border/50 space-y-0.5 pb-2">
-                  {VIEW_TYPES.map(viewType => {
-                    const viewStatus = look.views[viewType];
+                  {Object.entries(look.views).map(([viewType, viewStatus]) => {
                     const isSelected = selectedLookId === look.id && selectedView === viewType;
 
                     return (
@@ -129,7 +129,7 @@ export function AIApplyLooksList({
                         )}
                       >
                         <span className="truncate text-left">
-                          {VIEW_LABELS[viewType as ViewType] || viewType}
+                          {VIEW_LABELS[viewType] || viewType}
                         </span>
                         <ViewStatusBadge 
                           status={viewStatus?.status || 'not_started'} 
