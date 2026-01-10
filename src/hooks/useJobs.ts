@@ -290,3 +290,47 @@ export function useDeleteJob() {
     },
   });
 }
+
+// Hook for freelancer dashboard: fetches claimable open jobs + user's assigned jobs
+export function useFreelancerJobs(userId: string | undefined) {
+  return useQuery({
+    queryKey: ["freelancer-jobs", userId],
+    queryFn: async () => {
+      if (!userId) return { assignedJobs: [], claimableJobs: [] };
+
+      // Get jobs assigned to this user (any status)
+      const { data: assignedJobs, error: assignedError } = await supabase
+        .from("unified_jobs")
+        .select(`
+          *,
+          assigned_user:users!unified_jobs_assigned_user_id_fkey(id, display_name, email),
+          created_by_user:users!unified_jobs_created_by_fkey(id, display_name, email)
+        `)
+        .eq("assigned_user_id", userId)
+        .order("created_at", { ascending: false });
+
+      if (assignedError) throw assignedError;
+
+      // Get all OPEN jobs without assignment (claimable by any freelancer)
+      const { data: claimableJobs, error: claimableError } = await supabase
+        .from("unified_jobs")
+        .select(`
+          *,
+          assigned_user:users!unified_jobs_assigned_user_id_fkey(id, display_name, email),
+          created_by_user:users!unified_jobs_created_by_fkey(id, display_name, email)
+        `)
+        .eq("status", "OPEN")
+        .is("assigned_user_id", null)
+        .order("priority", { ascending: true })
+        .order("created_at", { ascending: false });
+
+      if (claimableError) throw claimableError;
+
+      return {
+        assignedJobs: (assignedJobs || []) as UnifiedJob[],
+        claimableJobs: (claimableJobs || []) as UnifiedJob[],
+      };
+    },
+    enabled: !!userId,
+  });
+}

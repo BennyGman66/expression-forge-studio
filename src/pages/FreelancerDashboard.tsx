@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useJobs, useDeleteJob } from '@/hooks/useJobs';
+import { useFreelancerJobs, useDeleteJob } from '@/hooks/useJobs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Briefcase, Clock, CheckCircle, ArrowRight, AlertCircle, AlertTriangle, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
+import type { UnifiedJob } from '@/types/jobs';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,10 +25,9 @@ export default function FreelancerDashboard() {
   const deleteJob = useDeleteJob();
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
   
-  // Freelancers see their assigned jobs, internals see all
-  const { data: jobs = [], isLoading } = useJobs({
-    assignedUserId: isInternal ? undefined : user?.id,
-  });
+  // Fetch claimable (open/unassigned) jobs + user's assigned jobs
+  const { data, isLoading } = useFreelancerJobs(user?.id);
+  const { assignedJobs = [], claimableJobs = [] } = data || {};
 
   // Redirect non-freelancers - using useEffect-like check but let the page render
   if (!isFreelancer && !isInternal && !isLoading) {
@@ -35,11 +35,13 @@ export default function FreelancerDashboard() {
     return null;
   }
 
-  const openJobs = jobs.filter(j => j.status === 'OPEN' || j.status === 'ASSIGNED');
-  const inProgressJobs = jobs.filter(j => j.status === 'IN_PROGRESS');
-  const needsChangesJobs = jobs.filter(j => j.status === 'NEEDS_CHANGES');
-  const submittedJobs = jobs.filter(j => j.status === 'SUBMITTED');
-  const completedJobs = jobs.filter(j => j.status === 'APPROVED' || j.status === 'CLOSED');
+  // Claimable jobs are "Open Jobs" that any freelancer can start
+  const openJobs = claimableJobs;
+  // Filter assigned jobs by status
+  const inProgressJobs = assignedJobs.filter(j => j.status === 'IN_PROGRESS');
+  const needsChangesJobs = assignedJobs.filter(j => j.status === 'NEEDS_CHANGES');
+  const submittedJobs = assignedJobs.filter(j => j.status === 'SUBMITTED');
+  const completedJobs = assignedJobs.filter(j => j.status === 'APPROVED' || j.status === 'CLOSED');
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -60,7 +62,7 @@ export default function FreelancerDashboard() {
     return null;
   };
 
-  const getJobTitle = (job: typeof jobs[0]) => {
+  const getJobTitle = (job: UnifiedJob) => {
     if (job.title) {
       // Shorten long titles like "XM0XM07279ZGY - jas - Face Replace" to "jas - Face Replace"
       const parts = job.title.split(' - ');
@@ -77,7 +79,7 @@ export default function FreelancerDashboard() {
     setJobToDelete(jobId);
   };
 
-  const renderJobRow = (job: typeof jobs[0], variant: 'default' | 'orange' = 'default') => {
+  const renderJobRow = (job: UnifiedJob, variant: 'default' | 'orange' = 'default') => {
     const bgClass = variant === 'orange' 
       ? 'bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20'
       : 'bg-muted/50 hover:bg-muted';
