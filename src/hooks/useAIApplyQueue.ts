@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import type { AIApplyQueueItem, AIApplySettings, DEFAULT_AI_APPLY_SETTINGS } from '@/types/ai-apply';
+import type { AIApplyQueueItem } from '@/types/ai-apply';
+import { DEFAULT_AI_APPLY_SETTINGS } from '@/types/ai-apply';
 
 interface UseAIApplyQueueOptions {
   projectId: string;
@@ -10,11 +11,6 @@ interface UseAIApplyQueueOptions {
 export function useAIApplyQueue({ projectId, onComplete }: UseAIApplyQueueOptions) {
   const [queue, setQueue] = useState<AIApplyQueueItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [settings, setSettings] = useState<AIApplySettings>({
-    attemptsPerView: 4,
-    strictness: 'high',
-    model: 'google/gemini-2.5-flash-image-preview',
-  });
 
   // Process queue items one at a time
   useEffect(() => {
@@ -33,9 +29,9 @@ export function useAIApplyQueue({ projectId, onComplete }: UseAIApplyQueueOption
             lookId: pendingItem.lookId,
             view: pendingItem.view,
             type: pendingItem.type,
-            attemptsPerView: pendingItem.attemptsRequested || settings.attemptsPerView,
-            model: settings.model,
-            strictness: settings.strictness,
+            attemptsPerView: pendingItem.attemptsRequested || DEFAULT_AI_APPLY_SETTINGS.attemptsPerView,
+            model: DEFAULT_AI_APPLY_SETTINGS.model,
+            strictness: DEFAULT_AI_APPLY_SETTINGS.strictness,
           },
         });
 
@@ -52,7 +48,7 @@ export function useAIApplyQueue({ projectId, onComplete }: UseAIApplyQueueOption
     };
 
     processNext();
-  }, [queue, isProcessing, projectId, settings, onComplete]);
+  }, [queue, isProcessing, projectId, onComplete]);
 
   const updateItemStatus = useCallback((
     id: string, 
@@ -92,12 +88,12 @@ export function useAIApplyQueue({ projectId, onComplete }: UseAIApplyQueueOption
       view,
       type,
       status: 'queued',
-      attemptsRequested: attemptsRequested || settings.attemptsPerView,
+      attemptsRequested: attemptsRequested || DEFAULT_AI_APPLY_SETTINGS.attemptsPerView,
     };
 
     setQueue(prev => [...prev, newItem]);
     return true;
-  }, [queue, settings.attemptsPerView]);
+  }, [queue]);
 
   // Add multiple looks to queue at once
   const addBulkToQueue = useCallback((
@@ -142,8 +138,6 @@ export function useAIApplyQueue({ projectId, onComplete }: UseAIApplyQueueOption
   return {
     queue,
     isProcessing,
-    settings,
-    setSettings,
     addToQueue,
     addBulkToQueue,
     removeFromQueue,

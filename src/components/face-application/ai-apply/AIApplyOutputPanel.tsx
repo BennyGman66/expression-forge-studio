@@ -4,18 +4,13 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { 
   Play, 
-  Plus, 
-  RotateCcw, 
-  XCircle, 
   Check, 
   Loader2,
   ChevronLeft,
   ChevronRight,
-  Maximize2
 } from "lucide-react";
 import { VIEW_LABELS, ViewType } from "@/types/face-application";
 import type { AIApplyViewStatus, AIApplyOutput } from "@/types/ai-apply";
-import { PairingInspector } from "./PairingInspector";
 import { cn } from "@/lib/utils";
 
 interface AIApplyOutputPanelProps {
@@ -23,9 +18,6 @@ interface AIApplyOutputPanelProps {
   view: string | null;
   lookName: string;
   onRun: () => void;
-  onAddMore: () => void;
-  onRetryFailed: () => void;
-  onCancel: () => void;
   onSelectOutput: (outputId: string) => void;
   isRunning: boolean;
 }
@@ -35,18 +27,15 @@ export function AIApplyOutputPanel({
   view,
   lookName,
   onRun,
-  onAddMore,
-  onRetryFailed,
-  onCancel,
   onSelectOutput,
   isRunning,
 }: AIApplyOutputPanelProps) {
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
 
   if (!viewStatus || !view) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex-1 flex items-center justify-center p-8 bg-muted/20">
         <p className="text-muted-foreground">Select a look and view from the left panel</p>
       </div>
     );
@@ -57,19 +46,23 @@ export function AIApplyOutputPanel({
   const hasOutputs = viewStatus.totalAttempts > 0;
   const canRun = viewStatus.pairing?.canRun ?? false;
   const hasRunning = viewStatus.runningCount > 0;
-  const hasFailed = viewStatus.failedCount > 0;
 
-  const openLightbox = (index: number) => {
-    setLightboxIndex(index);
-    setLightboxOpen(true);
-  };
+  // Get current output to display
+  const currentOutput = completedOutputs[currentIndex] || null;
+  const selectedOutput = completedOutputs.find(o => o.is_selected);
 
   const handlePrevious = () => {
-    setLightboxIndex(prev => (prev > 0 ? prev - 1 : completedOutputs.length - 1));
+    setCurrentIndex(prev => (prev > 0 ? prev - 1 : completedOutputs.length - 1));
   };
 
   const handleNext = () => {
-    setLightboxIndex(prev => (prev < completedOutputs.length - 1 ? prev + 1 : 0));
+    setCurrentIndex(prev => (prev < completedOutputs.length - 1 ? prev + 1 : 0));
+  };
+
+  const handleSelectBest = () => {
+    if (currentOutput) {
+      onSelectOutput(currentOutput.id);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -77,149 +70,215 @@ export function AIApplyOutputPanel({
     else if (e.key === 'ArrowRight') handleNext();
     else if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
-      if (completedOutputs[lightboxIndex]) {
-        onSelectOutput(completedOutputs[lightboxIndex].id);
-      }
+      handleSelectBest();
     }
   };
 
+  const getStatusBadge = () => {
+    if (hasRunning) return { variant: 'secondary' as const, text: 'Running' };
+    if (viewStatus.status === 'completed') return { variant: 'default' as const, text: 'Complete' };
+    if (viewStatus.status === 'needs_selection') return { variant: 'outline' as const, text: 'Needs Selection' };
+    if (viewStatus.status === 'failed') return { variant: 'destructive' as const, text: 'Failed' };
+    return { variant: 'secondary' as const, text: 'Not Started' };
+  };
+
+  const statusBadge = getStatusBadge();
+
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 flex flex-col overflow-hidden bg-background" onKeyDown={handleKeyDown} tabIndex={0}>
       {/* Header */}
-      <div className="p-4 border-b border-border flex items-center justify-between">
+      <div className="px-6 py-4 border-b border-border flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-medium">{lookName}</h3>
-          <p className="text-xs text-muted-foreground">{viewLabel}</p>
+          <h3 className="text-lg font-semibold">{lookName}</h3>
+          <p className="text-sm text-muted-foreground">{viewLabel}</p>
         </div>
-        <Badge variant={
-          viewStatus.status === 'completed' ? 'default' :
-          viewStatus.status === 'running' ? 'secondary' :
-          viewStatus.status === 'failed' ? 'destructive' :
-          viewStatus.status === 'needs_selection' ? 'outline' : 'secondary'
-        }>
-          {viewStatus.status === 'completed' ? 'Selected' :
-           viewStatus.status === 'running' ? 'Running' :
-           viewStatus.status === 'failed' ? 'Failed' :
-           viewStatus.status === 'needs_selection' ? 'Needs Selection' : 'Not Started'}
-        </Badge>
+        <Badge variant={statusBadge.variant}>{statusBadge.text}</Badge>
       </div>
 
-      {/* Pairing section */}
-      <div className="p-4 border-b border-border">
-        <PairingInspector pairing={viewStatus.pairing} view={view} />
-      </div>
-
-      {/* Outputs grid */}
-      <div className="flex-1 overflow-auto p-4">
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
         {!hasOutputs ? (
-          <div className="h-full flex flex-col items-center justify-center gap-4">
-            <p className="text-muted-foreground text-sm">No AI outputs yet</p>
+          /* Empty State - Run Button */
+          <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8">
+            <div className="text-center space-y-2">
+              <p className="text-muted-foreground">No outputs generated yet</p>
+              {!canRun && viewStatus.pairing?.missingRequirements[0] && (
+                <p className="text-sm text-destructive">
+                  {viewStatus.pairing.missingRequirements[0]}
+                </p>
+              )}
+            </div>
             <Button 
+              size="lg"
               onClick={onRun} 
               disabled={!canRun || isRunning}
               className="gap-2"
             >
-              {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {isRunning ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />}
               Run 4 Attempts
             </Button>
-            {!canRun && viewStatus.pairing?.missingRequirements.length > 0 && (
-              <p className="text-xs text-destructive text-center max-w-xs">
-                Cannot run: {viewStatus.pairing.missingRequirements[0]}
-              </p>
-            )}
+          </div>
+        ) : hasRunning && completedOutputs.length === 0 ? (
+          /* Running State */
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
+            <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
+            <p className="text-muted-foreground">Generating {viewStatus.runningCount} attempts...</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {/* Controls */}
-            <div className="flex items-center gap-2">
-              {hasRunning ? (
-                <Button variant="destructive" size="sm" onClick={onCancel} className="gap-1">
-                  <XCircle className="h-3.5 w-3.5" />
-                  Cancel
-                </Button>
-              ) : (
+          /* Large Image Viewer + Attempt Strip */
+          <>
+            {/* Large Image Viewer */}
+            <div 
+              className="flex-1 relative bg-muted/30 flex items-center justify-center cursor-pointer"
+              onClick={() => currentOutput && setLightboxOpen(true)}
+            >
+              {currentOutput ? (
                 <>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={onAddMore}
-                    disabled={viewStatus.totalAttempts >= 8 || !canRun}
-                    className="gap-1"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add 2 More
-                  </Button>
-                  {hasFailed && (
-                    <Button variant="outline" size="sm" onClick={onRetryFailed} className="gap-1">
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      Retry Failed
-                    </Button>
+                  <img 
+                    src={currentOutput.stored_url!}
+                    alt={`Attempt ${currentIndex + 1}`}
+                    className="max-h-full max-w-full object-contain"
+                  />
+                  
+                  {/* Navigation arrows (only show if multiple outputs) */}
+                  {completedOutputs.length > 1 && (
+                    <>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handlePrevious(); }}
+                        className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-background/80 hover:bg-background shadow-lg transition-colors"
+                      >
+                        <ChevronLeft className="h-6 w-6" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleNext(); }}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-background/80 hover:bg-background shadow-lg transition-colors"
+                      >
+                        <ChevronRight className="h-6 w-6" />
+                      </button>
+                    </>
+                  )}
+
+                  {/* Selection indicator on image */}
+                  {currentOutput.is_selected && (
+                    <div className="absolute top-4 right-4 bg-primary text-primary-foreground rounded-full p-2 shadow-lg">
+                      <Check className="h-5 w-5" />
+                    </div>
                   )}
                 </>
+              ) : (
+                <p className="text-muted-foreground">No completed outputs yet</p>
               )}
             </div>
 
-            {/* Output grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {viewStatus.outputs.map((output, index) => (
-                <OutputCard
-                  key={output.id}
-                  output={output}
-                  index={index}
-                  onSelect={() => onSelectOutput(output.id)}
-                  onOpenLightbox={() => {
-                    const completedIndex = completedOutputs.findIndex(o => o.id === output.id);
-                    if (completedIndex >= 0) openLightbox(completedIndex);
-                  }}
-                />
-              ))}
+            {/* Horizontal Attempt Strip */}
+            <div className="border-t border-border p-4">
+              <div className="flex items-center gap-3 justify-center mb-4">
+                {completedOutputs.map((output, index) => (
+                  <button
+                    key={output.id}
+                    onClick={() => setCurrentIndex(index)}
+                    className={cn(
+                      "relative w-16 h-20 rounded-lg overflow-hidden border-2 transition-all",
+                      index === currentIndex 
+                        ? "border-primary ring-2 ring-primary/20" 
+                        : "border-transparent hover:border-muted-foreground/30",
+                      output.is_selected && "ring-2 ring-green-500"
+                    )}
+                  >
+                    <img 
+                      src={output.stored_url!}
+                      alt={`#${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                    <Badge 
+                      variant="secondary"
+                      className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] px-1 py-0"
+                    >
+                      #{index + 1}
+                    </Badge>
+                    {output.is_selected && (
+                      <div className="absolute top-1 right-1 bg-green-500 text-white rounded-full p-0.5">
+                        <Check className="h-2.5 w-2.5" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+                
+                {/* Show running indicators */}
+                {Array.from({ length: viewStatus.runningCount }).map((_, i) => (
+                  <div 
+                    key={`running-${i}`}
+                    className="w-16 h-20 rounded-lg border-2 border-dashed border-muted-foreground/30 flex items-center justify-center bg-muted/30"
+                  >
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ))}
+              </div>
+
+              {/* Select Best Button */}
+              <div className="flex justify-center">
+                <Button 
+                  size="lg"
+                  onClick={handleSelectBest}
+                  disabled={!currentOutput}
+                  variant={currentOutput?.is_selected ? "default" : "outline"}
+                  className="gap-2 min-w-48"
+                >
+                  <Check className="h-5 w-5" />
+                  {currentOutput?.is_selected ? 'Selected' : 'Select Best'}
+                </Button>
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
 
-      {/* Lightbox */}
+      {/* Full-screen Lightbox */}
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
         <DialogContent 
-          className="max-w-4xl p-0 overflow-hidden"
+          className="max-w-[95vw] max-h-[95vh] p-0 overflow-hidden"
           onKeyDown={handleKeyDown}
         >
-          {completedOutputs[lightboxIndex] && (
-            <div className="relative">
+          {currentOutput && (
+            <div className="relative bg-black">
               <img 
-                src={completedOutputs[lightboxIndex].stored_url!}
-                alt={`Output ${lightboxIndex + 1}`}
-                className="w-full h-auto max-h-[80vh] object-contain bg-black"
+                src={currentOutput.stored_url!}
+                alt={`Output ${currentIndex + 1}`}
+                className="w-full h-auto max-h-[90vh] object-contain"
               />
               
               {/* Navigation */}
-              <button
-                onClick={handlePrevious}
-                className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/70"
-              >
-                <ChevronLeft className="h-6 w-6" />
-              </button>
-              <button
-                onClick={handleNext}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/70"
-              >
-                <ChevronRight className="h-6 w-6" />
-              </button>
+              {completedOutputs.length > 1 && (
+                <>
+                  <button
+                    onClick={handlePrevious}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+                  >
+                    <ChevronLeft className="h-8 w-8" />
+                  </button>
+                  <button
+                    onClick={handleNext}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+                  >
+                    <ChevronRight className="h-8 w-8" />
+                  </button>
+                </>
+              )}
 
               {/* Bottom bar */}
-              <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/70 to-transparent">
+              <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent">
                 <div className="flex items-center justify-between">
-                  <span className="text-white text-sm">
-                    {lightboxIndex + 1} / {completedOutputs.length}
+                  <span className="text-white text-lg font-medium">
+                    {currentIndex + 1} / {completedOutputs.length}
                   </span>
                   <Button
-                    variant={completedOutputs[lightboxIndex].is_selected ? "default" : "secondary"}
-                    size="sm"
-                    onClick={() => onSelectOutput(completedOutputs[lightboxIndex].id)}
+                    variant={currentOutput.is_selected ? "default" : "secondary"}
+                    size="lg"
+                    onClick={handleSelectBest}
                     className="gap-2"
                   >
-                    <Check className="h-4 w-4" />
-                    {completedOutputs[lightboxIndex].is_selected ? 'Selected' : 'Select'}
+                    <Check className="h-5 w-5" />
+                    {currentOutput.is_selected ? 'Selected' : 'Select Best'}
                   </Button>
                 </div>
               </div>
@@ -227,93 +286,6 @@ export function AIApplyOutputPanel({
           )}
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-interface OutputCardProps {
-  output: AIApplyOutput;
-  index: number;
-  onSelect: () => void;
-  onOpenLightbox: () => void;
-}
-
-function OutputCard({ output, index, onSelect, onOpenLightbox }: OutputCardProps) {
-  const isCompleted = output.status === 'completed' && output.stored_url;
-  const isFailed = output.status === 'failed';
-  const isRunning = output.status === 'pending' || output.status === 'generating';
-
-  return (
-    <div 
-      className={cn(
-        "relative aspect-[3/4] rounded-lg border overflow-hidden group",
-        output.is_selected && "ring-2 ring-primary ring-offset-2",
-        isFailed && "border-destructive/50 bg-destructive/5"
-      )}
-    >
-      {isCompleted ? (
-        <>
-          <img 
-            src={output.stored_url!}
-            alt={`Attempt ${index + 1}`}
-            className="w-full h-full object-cover"
-          />
-          
-          {/* Hover overlay */}
-          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
-            <Button
-              size="icon"
-              variant="secondary"
-              className="h-8 w-8"
-              onClick={(e) => { e.stopPropagation(); onOpenLightbox(); }}
-            >
-              <Maximize2 className="h-4 w-4" />
-            </Button>
-            <Button
-              size="icon"
-              variant={output.is_selected ? "default" : "secondary"}
-              className="h-8 w-8"
-              onClick={(e) => { e.stopPropagation(); onSelect(); }}
-            >
-              <Check className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {/* Selection indicator */}
-          {output.is_selected && (
-            <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1">
-              <Check className="h-3 w-3" />
-            </div>
-          )}
-        </>
-      ) : isRunning ? (
-        <div className="w-full h-full flex flex-col items-center justify-center bg-muted/50">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          <span className="text-xs text-muted-foreground mt-2">Generating...</span>
-        </div>
-      ) : isFailed ? (
-        <div className="w-full h-full flex flex-col items-center justify-center bg-destructive/5">
-          <XCircle className="h-6 w-6 text-destructive" />
-          <span className="text-xs text-destructive mt-2">Failed</span>
-          {output.error_message && (
-            <span className="text-[10px] text-muted-foreground mt-1 px-2 text-center line-clamp-2">
-              {output.error_message}
-            </span>
-          )}
-        </div>
-      ) : (
-        <div className="w-full h-full flex items-center justify-center bg-muted/30">
-          <span className="text-xs text-muted-foreground">Pending</span>
-        </div>
-      )}
-
-      {/* Attempt number badge */}
-      <Badge 
-        variant="secondary" 
-        className="absolute bottom-2 left-2 text-[10px] px-1.5 py-0"
-      >
-        #{index + 1}
-      </Badge>
     </div>
   );
 }

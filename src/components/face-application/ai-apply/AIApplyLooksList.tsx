@@ -3,10 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { 
   Check, 
-  Circle, 
   Loader2, 
-  AlertCircle, 
-  AlertTriangle,
   ChevronDown,
   ChevronRight 
 } from "lucide-react";
@@ -21,19 +18,36 @@ interface AIApplyLooksListProps {
   onSelectView: (lookId: string, view: string) => void;
 }
 
-function ViewStatusIcon({ status }: { status: AIApplyViewStatus['status'] }) {
-  switch (status) {
-    case 'completed':
-      return <Check className="h-3.5 w-3.5 text-green-500" />;
-    case 'running':
-      return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-    case 'failed':
-      return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
-    case 'needs_selection':
-      return <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />;
-    default:
-      return <Circle className="h-3.5 w-3.5 text-muted-foreground/40" />;
+function ViewStatusBadge({ status, attemptCount }: { status: AIApplyViewStatus['status']; attemptCount: number }) {
+  if (status === 'running') {
+    return (
+      <div className="flex items-center gap-1">
+        <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+      </div>
+    );
   }
+  
+  if (status === 'completed') {
+    return <Check className="h-3.5 w-3.5 text-green-500" />;
+  }
+  
+  if (status === 'needs_selection' && attemptCount > 0) {
+    return (
+      <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4">
+        {attemptCount}
+      </Badge>
+    );
+  }
+  
+  if (attemptCount > 0) {
+    return (
+      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
+        {attemptCount}
+      </Badge>
+    );
+  }
+  
+  return <span className="text-[10px] text-muted-foreground">—</span>;
 }
 
 export function AIApplyLooksList({
@@ -63,10 +77,10 @@ export function AIApplyLooksList({
 
   return (
     <div className="h-full flex flex-col border-r border-border bg-muted/30">
-      <div className="p-3 border-b border-border">
-        <h3 className="text-sm font-medium">Looks</h3>
+      <div className="p-4 border-b border-border">
+        <h3 className="text-sm font-semibold">Looks</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
-          {looks.length} looks ready for AI Apply
+          {looks.length} ready for AI Apply
         </p>
       </div>
 
@@ -78,7 +92,7 @@ export function AIApplyLooksList({
               <button
                 onClick={() => toggleLook(look.id)}
                 className={cn(
-                  "w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md",
+                  "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md",
                   "hover:bg-accent/50 transition-colors",
                   selectedLookId === look.id && "bg-accent"
                 )}
@@ -95,39 +109,32 @@ export function AIApplyLooksList({
                 >
                   {getLookProgress(look)}
                 </Badge>
-                {look.hasWarnings && (
-                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
-                )}
               </button>
 
               {/* View list */}
               {expandedLooks.has(look.id) && (
-                <div className="ml-4 pl-2 border-l border-border/50 space-y-0.5 pb-1">
+                <div className="ml-5 pl-3 border-l border-border/50 space-y-0.5 pb-2">
                   {VIEW_TYPES.map(viewType => {
                     const viewStatus = look.views[viewType];
                     const isSelected = selectedLookId === look.id && selectedView === viewType;
-                    const canRun = viewStatus?.pairing?.canRun ?? false;
 
                     return (
                       <button
                         key={viewType}
                         onClick={() => onSelectView(look.id, viewType)}
                         className={cn(
-                          "w-full flex items-center gap-2 px-2 py-1 text-xs rounded-md",
+                          "w-full flex items-center justify-between gap-2 px-3 py-1.5 text-xs rounded-md",
                           "hover:bg-accent/50 transition-colors",
-                          isSelected && "bg-primary/10 text-primary",
-                          !canRun && "opacity-50"
+                          isSelected && "bg-primary/10 text-primary font-medium"
                         )}
                       >
-                        <ViewStatusIcon status={viewStatus?.status || 'not_started'} />
-                        <span className="truncate flex-1 text-left">
+                        <span className="truncate text-left">
                           {VIEW_LABELS[viewType as ViewType] || viewType}
                         </span>
-                        {viewStatus?.totalAttempts > 0 && (
-                          <span className="text-muted-foreground">
-                            {viewStatus.completedCount}/{viewStatus.totalAttempts}
-                          </span>
-                        )}
+                        <ViewStatusBadge 
+                          status={viewStatus?.status || 'not_started'} 
+                          attemptCount={viewStatus?.completedCount || 0}
+                        />
                       </button>
                     );
                   })}
