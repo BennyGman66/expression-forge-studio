@@ -1,10 +1,11 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { 
-  Check, Loader2, RefreshCw, AlertCircle, Briefcase, Save, Download
+  Check, Loader2, RefreshCw, AlertCircle, Save, Download
 } from "lucide-react";
 import { LookWithViews, VIEW_TYPES, VIEW_LABELS, ViewType, ViewStatus } from "@/types/face-application";
+import { GenerationQueuePanel } from "./GenerationQueuePanel";
+import { QueueItem } from "@/hooks/useGenerationQueue";
 
 interface StatusRecoveryPanelProps {
   look: LookWithViews | null;
@@ -17,6 +18,10 @@ interface StatusRecoveryPanelProps {
   onDownloadSelected: () => void;
   isResuming: boolean;
   isSaving: boolean;
+  queue: QueueItem[];
+  onRemoveFromQueue: (id: string) => void;
+  onClearQueue: () => void;
+  onClearCompleted: () => void;
 }
 
 export function StatusRecoveryPanel({
@@ -30,6 +35,10 @@ export function StatusRecoveryPanel({
   onDownloadSelected,
   isResuming,
   isSaving,
+  queue,
+  onRemoveFromQueue,
+  onClearQueue,
+  onClearCompleted,
 }: StatusRecoveryPanelProps) {
   if (!look) {
     return (
@@ -48,9 +57,19 @@ export function StatusRecoveryPanel({
   const viewsRunning = VIEW_TYPES.filter(v => look.views[v]?.status === 'running').length;
 
   return (
-    <div className="w-72 border-l flex flex-col">
+    <div className="w-72 border-l flex flex-col overflow-hidden">
+      {/* Generation Queue */}
+      <div className="p-3 border-b flex-shrink-0">
+        <GenerationQueuePanel
+          queue={queue}
+          onRemove={onRemoveFromQueue}
+          onClear={onClearQueue}
+          onClearCompleted={onClearCompleted}
+        />
+      </div>
+
       {/* Talent Info */}
-      <div className="p-4 border-b">
+      <div className="p-4 border-b flex-shrink-0">
         <div className="text-xs text-muted-foreground mb-2">Digital Talent</div>
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-full overflow-hidden bg-muted">

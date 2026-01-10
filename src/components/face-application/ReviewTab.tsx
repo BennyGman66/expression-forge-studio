@@ -2,8 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle, Loader2, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 import { 
   FaceApplicationOutput, 
   LookWithViews, 
@@ -15,6 +14,7 @@ import {
 import { LookOverviewPanel } from "./review/LookOverviewPanel";
 import { ViewReviewPanel } from "./review/ViewReviewPanel";
 import { StatusRecoveryPanel } from "./review/StatusRecoveryPanel";
+import { useGenerationQueue } from "@/hooks/useGenerationQueue";
 
 interface ReviewTabProps {
   projectId: string;
@@ -88,11 +88,23 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
   const [talentInfo, setTalentInfo] = useState<TalentInfo | null>(null);
   const [sourceImages, setSourceImages] = useState<SourceImageInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isRegenerating, setIsRegenerating] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+
+  // Generation queue hook
+  const {
+    queue,
+    pendingCount,
+    addToQueue,
+    removeFromQueue,
+    clearQueue,
+    clearCompleted,
+  } = useGenerationQueue({ 
+    projectId, 
+    onComplete: () => fetchData() 
+  });
 
   // Fetch all data
   const fetchData = useCallback(async () => {
@@ -254,23 +266,33 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
     fetchData();
   };
 
-  // Handle regenerate view
-  const handleRegenerateView = async () => {
-    if (!currentViewStatus || currentViewStatus.outputs.length === 0) return;
+  // Handle regenerate view - add to queue
+  const handleRegenerateView = () => {
+    if (!currentLook || !selectedView || !currentViewStatus || currentViewStatus.outputs.length === 0) return;
 
-    setIsRegenerating(true);
+    // Get job ID from existing job
+    const outputIds = currentViewStatus.outputs.map(o => o.id);
     
-    try {
-      for (const output of currentViewStatus.outputs) {
-        await supabase.functions.invoke("regenerate-face-output", {
-          body: { outputId: output.id },
-        });
-      }
-      toast({ title: "Regenerating", description: `Regenerating ${currentViewStatus.outputs.length} attempts` });
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } finally {
-      setIsRegenerating(false);
+    const added = addToQueue(
+      'regenerate',
+      currentLook.id,
+      currentLook.name,
+      selectedView,
+      undefined,
+      outputIds
+    );
+
+    if (added) {
+      toast({ 
+        title: "Added to Queue", 
+        description: `${VIEW_LABELS[selectedView as ViewType] || selectedView} regeneration queued` 
+      });
+    } else {
+      toast({ 
+        title: "Already Queued", 
+        description: "This view is already in the queue",
+        variant: "destructive"
+      });
     }
   };
 
@@ -329,85 +351,28 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
   }
 };
 
-// Handle initial generation for a view with no attempts
-const [isGenerating, setIsGenerating] = useState(false);
+// Handle initial generation for a view with no attempts - add to queue
+const handleGenerateView = () => {
+  if (!currentLook || !selectedView || !currentSourceImage) return;
 
-const handleGenerateView = async () => {
-  if (!selectedLookId || !selectedView || !currentSourceImage) return;
+  const added = addToQueue(
+    'generate',
+    currentLook.id,
+    currentLook.name,
+    selectedView
+  );
 
-  setIsGenerating(true);
-
-  try {
-    // Find an existing job for this look or create one
-    let jobId: string;
-    
-    const { data: existingJob } = await supabase
-      .from("face_application_jobs")
-      .select("id, digital_talent_id")
-      .eq("look_id", selectedLookId)
-      .eq("project_id", projectId)
-      .limit(1)
-      .maybeSingle();
-
-    if (existingJob) {
-      jobId = existingJob.id;
-    } else {
-      // Need to create a job - get digital_talent_id from source image or talent info
-      const { data: srcImg } = await supabase
-        .from("look_source_images")
-        .select("digital_talent_id")
-        .eq("look_id", selectedLookId)
-        .not("digital_talent_id", "is", null)
-        .limit(1)
-        .maybeSingle();
-
-      const talentId = srcImg?.digital_talent_id;
-      if (!talentId) {
-        toast({ title: "Error", description: "No talent assigned to this look", variant: "destructive" });
-        setIsGenerating(false);
-        return;
-      }
-
-      const { data: newJob, error: jobError } = await supabase
-        .from("face_application_jobs")
-        .insert({
-          project_id: projectId,
-          look_id: selectedLookId,
-          digital_talent_id: talentId,
-          status: "pending",
-          attempts_per_view: 4,
-          progress: 0,
-          total: 4, // Single view generation
-        })
-        .select("id")
-        .single();
-
-      if (jobError || !newJob) {
-        throw new Error(jobError?.message || "Failed to create job");
-      }
-      jobId = newJob.id;
-    }
-
-    // Call edge function with single view mode
-    const { error: invokeError } = await supabase.functions.invoke("generate-face-application", {
-      body: {
-        jobId,
-        singleView: selectedView,
-        attemptsPerView: 4,
-        outfitDescriptions: {},
-      },
+  if (added) {
+    toast({ 
+      title: "Added to Queue", 
+      description: `${VIEW_LABELS[selectedView as ViewType] || selectedView} generation queued` 
     });
-
-    if (invokeError) {
-      throw invokeError;
-    }
-
-    toast({ title: "Generating", description: `Starting ${VIEW_LABELS[selectedView as ViewType] || selectedView} generation` });
-    fetchData();
-  } catch (error: any) {
-    toast({ title: "Error", description: error.message, variant: "destructive" });
-  } finally {
-    setIsGenerating(false);
+  } else {
+    toast({ 
+      title: "Already Queued", 
+      description: "This view is already in the queue",
+      variant: "destructive"
+    });
   }
 };
 
@@ -524,9 +489,8 @@ const handleGenerateView = async () => {
         onRegenerateView={handleRegenerateView}
         onCancelView={handleCancelView}
         onGenerateView={handleGenerateView}
-        isRegenerating={isRegenerating}
         isCanceling={isCanceling}
-        isGenerating={isGenerating}
+        pendingCount={pendingCount}
       />
 
       {/* RIGHT: Status & Recovery */}
@@ -541,6 +505,10 @@ const handleGenerateView = async () => {
         onDownloadSelected={handleDownloadSelected}
         isResuming={isResuming}
         isSaving={isSaving}
+        queue={queue}
+        onRemoveFromQueue={removeFromQueue}
+        onClearQueue={clearQueue}
+        onClearCompleted={clearCompleted}
       />
     </div>
   );
