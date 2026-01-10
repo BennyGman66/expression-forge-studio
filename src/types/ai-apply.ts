@@ -104,23 +104,9 @@ export interface AIApplyQueueItem {
   error?: string;
 }
 
-// Settings for AI Apply generation
-export interface AIApplySettings {
-  attemptsPerView: number;
-  strictness: 'high' | 'medium' | 'low';
-  model: string;
-}
-
-export const DEFAULT_AI_APPLY_SETTINGS: AIApplySettings = {
+// Default settings (used internally, not exposed in UI)
+export const DEFAULT_AI_APPLY_SETTINGS = {
   attemptsPerView: 4,
-  strictness: 'high',
+  strictness: 'high' as const,
   model: 'google/gemini-2.5-flash-image-preview',
-};
-
-// View-specific prompt instructions
-export const VIEW_PROMPT_INSTRUCTIONS: Record<string, string> = {
-  full_front: 'The subject is facing forward in a full-body shot.',
-  cropped_front: 'The subject is facing forward in a cropped/close-up shot.',
-  back: 'The subject is facing away from the camera in a back view shot. Ensure the head placement appears natural from behind.',
-  detail: 'This is a detail/side angle shot focusing on specific product features.',
 };
