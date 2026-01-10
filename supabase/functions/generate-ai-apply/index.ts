@@ -32,6 +32,52 @@ interface RequestBody {
   strictness?: 'high' | 'medium' | 'low';
 }
 
+// Helper to upload base64 image to storage
+async function uploadToStorage(
+  supabase: any,
+  base64Data: string,
+  jobId: string,
+  view: string,
+  attemptIndex: number
+): Promise<string | null> {
+  try {
+    // Remove data:image/xxx;base64, prefix if present
+    const base64Content = base64Data.includes(',') 
+      ? base64Data.split(',')[1] 
+      : base64Data;
+    
+    // Decode base64 to binary
+    const binaryString = atob(base64Content);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    const fileName = `ai-apply/${jobId}/${view}-${attemptIndex}-${Date.now()}.png`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("images")
+      .upload(fileName, bytes, { 
+        contentType: "image/png", 
+        upsert: true 
+      });
+
+    if (uploadError) {
+      console.error("[AI Apply] Upload error:", uploadError);
+      return null;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from("images")
+      .getPublicUrl(fileName);
+
+    return publicUrl;
+  } catch (err) {
+    console.error("[AI Apply] Upload exception:", err);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -40,7 +86,12 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    if (!lovableApiKey) {
+      throw new Error("LOVABLE_API_KEY is not configured");
+    }
 
     const body: RequestBody = await req.json();
     const { 
@@ -252,59 +303,89 @@ serve(async (req) => {
 
           console.log(`[AI Apply] Generating output ${output.id} for ${currentView}`);
 
-          // Call Lovable AI
+          // Call Lovable AI Gateway directly
           const aiResponse = await fetch(
-            `${supabaseUrl}/functions/v1/generate-face-application`,
+            "https://ai.gateway.lovable.dev/v1/chat/completions",
             {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${supabaseKey}`,
+                'Authorization': `Bearer ${lovableApiKey}`,
               },
               body: JSON.stringify({
-                headImageUrl: output.head_image_url,
-                bodyImageUrl: output.body_image_url,
-                prompt: finalPrompt,
-                model,
+                model: model,
+                messages: [
+                  {
+                    role: 'user',
+                    content: [
+                      { type: 'text', text: finalPrompt },
+                      { type: 'image_url', image_url: { url: output.head_image_url } },
+                      { type: 'image_url', image_url: { url: output.body_image_url } },
+                    ],
+                  },
+                ],
+                modalities: ['image', 'text'],
               }),
             }
           );
 
           if (!aiResponse.ok) {
             const errorText = await aiResponse.text();
-            throw new Error(`AI generation failed: ${errorText}`);
+            console.error(`[AI Apply] AI API error: ${aiResponse.status}`, errorText);
+            throw new Error(`AI generation failed: ${aiResponse.status} - ${errorText}`);
           }
 
           const aiResult = await aiResponse.json();
+          console.log(`[AI Apply] AI response received for ${output.id}`);
 
-          if (aiResult.imageUrl) {
-            // Update output with result
-            await supabase
-              .from('ai_apply_outputs')
-              .update({
-                stored_url: aiResult.imageUrl,
-                status: 'completed',
-                final_prompt: finalPrompt,
-              })
-              .eq('id', output.id);
+          // Extract the image from the response
+          const imageData = aiResult.choices?.[0]?.message?.images?.[0]?.image_url?.url;
 
-            // Update job progress
-            const { data: completedOutputs } = await supabase
-              .from('ai_apply_outputs')
-              .select('id')
-              .eq('job_id', jobId)
-              .eq('status', 'completed');
+          if (imageData) {
+            // Upload to Supabase Storage
+            const storedUrl = await uploadToStorage(
+              supabase,
+              imageData,
+              jobId,
+              currentView,
+              output.attempt_index
+            );
 
-            await supabase
-              .from('ai_apply_jobs')
-              .update({ 
-                progress: completedOutputs?.length || 0,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', jobId);
+            if (storedUrl) {
+              // Update output with result
+              await supabase
+                .from('ai_apply_outputs')
+                .update({
+                  stored_url: storedUrl,
+                  status: 'completed',
+                  final_prompt: finalPrompt,
+                })
+                .eq('id', output.id);
+
+              console.log(`[AI Apply] Successfully saved output ${output.id}`);
+            } else {
+              throw new Error('Failed to upload image to storage');
+            }
           } else {
-            throw new Error('No image URL in response');
+            console.error(`[AI Apply] No image in response:`, JSON.stringify(aiResult).slice(0, 500));
+            throw new Error('No image in AI response');
           }
+
+          // Update job progress
+          const { data: completedOutputs } = await supabase
+            .from('ai_apply_outputs')
+            .select('id')
+            .eq('job_id', jobId)
+            .eq('status', 'completed');
+
+          await supabase
+            .from('ai_apply_jobs')
+            .update({ 
+              progress: completedOutputs?.length || 0,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', jobId);
+
         } catch (error: any) {
           console.error(`[AI Apply] Error generating output ${output.id}:`, error);
           
