@@ -29,9 +29,9 @@ serve(async (req) => {
   }
 
   try {
-    const { jobId, outfitDescriptions } = await req.json();
+    const { jobId, outfitDescriptions, resume } = await req.json();
 
-    console.log(`Starting face application job: ${jobId}`);
+    console.log(`Starting face application job: ${jobId}${resume ? " (RESUME)" : ""}`);
 
     // Initialize clients
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -43,13 +43,7 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY not configured");
     }
 
-    // Update job status
-    await supabase
-      .from("face_application_jobs")
-      .update({ status: "running" })
-      .eq("id", jobId);
-
-    // Get job details
+    // Get job details first
     const { data: job } = await supabase
       .from("face_application_jobs")
       .select("*")
@@ -59,6 +53,26 @@ serve(async (req) => {
     if (!job) {
       throw new Error("Job not found");
     }
+
+    // Check for stalled job (running with no pending outputs but incomplete)
+    const { data: existingOutputs } = await supabase
+      .from("face_application_outputs")
+      .select("id, status")
+      .eq("job_id", jobId);
+
+    const pendingOutputs = existingOutputs?.filter(o => o.status === "pending" || o.status === "generating") || [];
+    const completedOutputs = existingOutputs?.filter(o => o.status === "completed") || [];
+    const isStalled = job.status === "running" && pendingOutputs.length === 0 && completedOutputs.length < (job.total || 0);
+
+    if (isStalled || resume) {
+      console.log(`🔄 Job is stalled or resuming - completed: ${completedOutputs.length}, total: ${job.total}`);
+    }
+
+    // Update job status
+    await supabase
+      .from("face_application_jobs")
+      .update({ status: "running", updated_at: new Date().toISOString() })
+      .eq("id", jobId);
 
     // Get source images for this look (with head_cropped_url and digital_talent_id)
     const { data: sourceImages } = await supabase
@@ -104,7 +118,20 @@ async function processGeneration(
   apiKey: string,
   model: string
 ) {
-  let progress = 0;
+  // Get existing completed outputs to calculate resume progress
+  const { data: existingOutputs } = await supabase
+    .from("face_application_outputs")
+    .select("id, look_source_image_id, attempt_index, status")
+    .eq("job_id", job.id);
+
+  const completedSet = new Set(
+    (existingOutputs || [])
+      .filter((o: any) => o.status === "completed")
+      .map((o: any) => `${o.look_source_image_id}-${o.attempt_index}`)
+  );
+
+  let progress = completedSet.size;
+  console.log(`📊 Starting with ${progress} already completed outputs`);
 
   try {
     // Fetch all face foundations for the job's digital talent
@@ -169,6 +196,13 @@ async function processGeneration(
       }
 
       for (let attempt = 0; attempt < job.attempts_per_view; attempt++) {
+        // Skip if this source+attempt is already completed
+        const outputKey = `${sourceImage.id}-${attempt}`;
+        if (completedSet.has(outputKey)) {
+          console.log(`⏭️ Skipping ${view} attempt ${attempt + 1} - already completed`);
+          continue;
+        }
+
         console.log(`Generating ${view} attempt ${attempt + 1}/${job.attempts_per_view}`);
 
         // Create output record
