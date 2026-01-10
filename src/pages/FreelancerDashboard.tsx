@@ -1,28 +1,39 @@
-import { useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useJobs } from '@/hooks/useJobs';
+import { useJobs, useDeleteJob } from '@/hooks/useJobs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Briefcase, Clock, CheckCircle, ArrowRight, AlertCircle, AlertTriangle } from 'lucide-react';
+import { Briefcase, Clock, CheckCircle, ArrowRight, AlertCircle, AlertTriangle, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function FreelancerDashboard() {
-  const { user, profile, isFreelancer, isInternal } = useAuth();
+  const { user, profile, isFreelancer, isInternal, isAdmin } = useAuth();
   const navigate = useNavigate();
+  const deleteJob = useDeleteJob();
+  const [jobToDelete, setJobToDelete] = useState<string | null>(null);
   
   // Freelancers see their assigned jobs, internals see all
   const { data: jobs = [], isLoading } = useJobs({
     assignedUserId: isInternal ? undefined : user?.id,
   });
 
-  // Redirect non-freelancers
-  useEffect(() => {
-    if (!isFreelancer && !isInternal) {
-      navigate('/');
-    }
-  }, [isFreelancer, isInternal, navigate]);
+  // Redirect non-freelancers - using useEffect-like check but let the page render
+  if (!isFreelancer && !isInternal && !isLoading) {
+    navigate('/');
+    return null;
+  }
 
   const openJobs = jobs.filter(j => j.status === 'OPEN' || j.status === 'ASSIGNED');
   const inProgressJobs = jobs.filter(j => j.status === 'IN_PROGRESS');
@@ -50,7 +61,63 @@ export default function FreelancerDashboard() {
   };
 
   const getJobTitle = (job: typeof jobs[0]) => {
-    return job.title || job.type.replace(/_/g, ' ');
+    if (job.title) {
+      // Shorten long titles like "XM0XM07279ZGY - jas - Face Replace" to "jas - Face Replace"
+      const parts = job.title.split(' - ');
+      if (parts.length >= 3) {
+        return `${parts[1]} - ${parts[2]}`;
+      }
+      return job.title;
+    }
+    return job.type.replace(/_/g, ' ');
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent, jobId: string) => {
+    e.stopPropagation();
+    setJobToDelete(jobId);
+  };
+
+  const renderJobRow = (job: typeof jobs[0], variant: 'default' | 'orange' = 'default') => {
+    const bgClass = variant === 'orange' 
+      ? 'bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20'
+      : 'bg-muted/50 hover:bg-muted';
+
+    return (
+      <div
+        key={job.id}
+        className={`p-3 rounded-lg cursor-pointer transition-colors h-[56px] flex items-center ${bgClass}`}
+        onClick={() => navigate(`/freelancer/jobs/${job.id}`)}
+      >
+        <div className="flex items-center justify-between w-full gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-foreground flex items-center">
+              <span className="truncate">{getJobTitle(job)}</span>
+              {getPriorityBadge(job.priority)}
+            </p>
+            {job.due_date && (
+              <p className="text-xs text-muted-foreground">
+                Due: {format(new Date(job.due_date), 'MMM d')}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <Badge className={getStatusColor(job.status)}>
+              {variant === 'orange' ? 'REVIEW' : job.status}
+            </Badge>
+            {isAdmin && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                onClick={(e) => handleDeleteClick(e, job.id)}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -138,28 +205,7 @@ export default function FreelancerDashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {needsChangesJobs.slice(0, 5).map(job => (
-                  <div
-                    key={job.id}
-                    className="p-3 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 cursor-pointer transition-colors border border-orange-500/20"
-                    onClick={() => navigate(`/freelancer/jobs/${job.id}`)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-foreground flex items-center">
-                          {getJobTitle(job)}
-                          {getPriorityBadge(job.priority)}
-                        </p>
-                        {job.due_date && (
-                          <p className="text-xs text-muted-foreground">
-                            Due: {format(new Date(job.due_date), 'MMM d, yyyy')}
-                          </p>
-                        )}
-                      </div>
-                      <Badge className={getStatusColor(job.status)}>REVIEW</Badge>
-                    </div>
-                  </div>
-                ))}
+                {needsChangesJobs.slice(0, 5).map(job => renderJobRow(job, 'orange'))}
                 {needsChangesJobs.length > 5 && (
                   <Button variant="ghost" className="w-full" onClick={() => navigate('/freelancer/jobs?status=NEEDS_CHANGES')}>
                     View all {needsChangesJobs.length} jobs needing changes
@@ -183,28 +229,7 @@ export default function FreelancerDashboard() {
               ) : openJobs.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No open jobs assigned</p>
               ) : (
-                openJobs.slice(0, 5).map(job => (
-                  <div
-                    key={job.id}
-                    className="p-3 rounded-lg bg-muted/50 hover:bg-muted cursor-pointer transition-colors"
-                    onClick={() => navigate(`/freelancer/jobs/${job.id}`)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-foreground flex items-center">
-                          {getJobTitle(job)}
-                          {getPriorityBadge(job.priority)}
-                        </p>
-                        {job.due_date && (
-                          <p className="text-xs text-muted-foreground">
-                            Due: {format(new Date(job.due_date), 'MMM d, yyyy')}
-                          </p>
-                        )}
-                      </div>
-                      <Badge className={getStatusColor(job.status)}>{job.status}</Badge>
-                    </div>
-                  </div>
-                ))
+                openJobs.slice(0, 5).map(job => renderJobRow(job))
               )}
               {openJobs.length > 5 && (
                 <Button variant="ghost" className="w-full" onClick={() => navigate('/freelancer/jobs?status=OPEN')}>
@@ -228,28 +253,7 @@ export default function FreelancerDashboard() {
               ) : inProgressJobs.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No jobs in progress</p>
               ) : (
-                inProgressJobs.slice(0, 5).map(job => (
-                  <div
-                    key={job.id}
-                    className="p-3 rounded-lg bg-muted/50 hover:bg-muted cursor-pointer transition-colors"
-                    onClick={() => navigate(`/freelancer/jobs/${job.id}`)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-foreground flex items-center">
-                          {getJobTitle(job)}
-                          {getPriorityBadge(job.priority)}
-                        </p>
-                        {job.due_date && (
-                          <p className="text-xs text-muted-foreground">
-                            Due: {format(new Date(job.due_date), 'MMM d, yyyy')}
-                          </p>
-                        )}
-                      </div>
-                      <Badge className={getStatusColor(job.status)}>{job.status}</Badge>
-                    </div>
-                  </div>
-                ))
+                inProgressJobs.slice(0, 5).map(job => renderJobRow(job))
               )}
               {inProgressJobs.length > 5 && (
                 <Button variant="ghost" className="w-full" onClick={() => navigate('/freelancer/jobs?status=IN_PROGRESS')}>
@@ -260,6 +264,32 @@ export default function FreelancerDashboard() {
           </Card>
         </div>
       </main>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!jobToDelete} onOpenChange={() => setJobToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Job</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this job? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (jobToDelete) {
+                  deleteJob.mutate(jobToDelete);
+                  setJobToDelete(null);
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
