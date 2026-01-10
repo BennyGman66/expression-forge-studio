@@ -12,6 +12,7 @@ interface ViewReviewPanelProps {
   viewStatus: ViewStatus | null;
   bodyImageUrl: string | null;
   headReferenceUrl: string | null;
+  hasHeadCrop?: boolean;
   onSelectAttempt: (outputId: string) => void;
   onRegenerateView: () => void;
   onCancelView: () => void;
@@ -26,6 +27,7 @@ export function ViewReviewPanel({
   viewStatus,
   bodyImageUrl,
   headReferenceUrl,
+  hasHeadCrop = true,
   onSelectAttempt,
   onRegenerateView,
   onCancelView,
@@ -103,9 +105,11 @@ export function ViewReviewPanel({
             <Button
               size="sm"
               onClick={onGenerateView}
+              disabled={!hasHeadCrop}
+              title={!hasHeadCrop ? "Head crop required - crop in Head Crop tab first" : undefined}
             >
               <Play className="h-4 w-4 mr-2" />
-              {pendingCount > 0 ? "Add to Queue" : "Generate View"}
+              {!hasHeadCrop ? "Needs Head Crop" : pendingCount > 0 ? "Add to Queue" : "Generate View"}
             </Button>
           ) : (
             <Button

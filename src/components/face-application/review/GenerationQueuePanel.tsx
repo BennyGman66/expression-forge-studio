@@ -90,9 +90,12 @@ export function GenerationQueuePanel({
                 {item.status === 'failed' && (
                   <AlertCircle className="h-3 w-3 text-red-500 flex-shrink-0" />
                 )}
-                <span className="truncate">
+                <span className="truncate" title={item.error || undefined}>
                   <span className="font-medium">{item.lookName}</span>
                   <span className="text-muted-foreground"> / {item.viewLabel}</span>
+                  {item.status === 'failed' && item.error && (
+                    <span className="text-red-500 ml-1">— {item.error}</span>
+                  )}
                 </span>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
