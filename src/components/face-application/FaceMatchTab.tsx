@@ -134,16 +134,22 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
 
         setFaceFoundations(foundations);
 
-        // Auto-match by view angle for all looks
-        const allSourceImages = looks.flatMap((l) => l.sourceImages);
+        // Auto-match by view angle, filtered by each look's assigned talent
         const autoMatches: Record<string, string> = {};
-        allSourceImages.forEach((img) => {
-          const matchingFace = foundations.find((f) => f.view === img.view);
-          if (matchingFace) {
-            autoMatches[img.id] = matchingFace.stored_url;
-          } else if (foundations.length > 0) {
-            autoMatches[img.id] = foundations[0].stored_url;
-          }
+        looks.forEach((look) => {
+          // Filter foundations to only those belonging to THIS look's talent
+          const talentFoundations = foundations.filter(
+            (f) => f.digital_talent_id === look.digital_talent_id
+          );
+          
+          look.sourceImages.forEach((img) => {
+            const matchingFace = talentFoundations.find((f) => f.view === img.view);
+            if (matchingFace) {
+              autoMatches[img.id] = matchingFace.stored_url;
+            } else if (talentFoundations.length > 0) {
+              autoMatches[img.id] = talentFoundations[0].stored_url;
+            }
+          });
         });
         setMatches(autoMatches);
       }
@@ -244,68 +250,75 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
               <CardTitle className="text-base">{look.name}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {look.sourceImages.map((img) => (
-                <div
-                  key={img.id}
-                  className="grid grid-cols-[140px_1fr] gap-4 p-3 border rounded-lg bg-muted/30"
-                >
-                  {/* Look Image */}
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium capitalize text-muted-foreground">
-                      {img.view} View
-                    </p>
-                    <img
-                      src={img.head_cropped_url ? `${img.head_cropped_url}?t=${Date.now()}` : img.source_url}
-                      alt={img.view}
-                      className="w-full aspect-square object-cover rounded-lg"
-                    />
-                  </div>
-
-                  {/* Face Selection */}
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      Select {viewToAngle(img.view)} face:
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {faceFoundations.map((face) => (
-                        <button
-                          key={face.id}
-                          onClick={() => handleSelectFace(img.id, face.stored_url)}
-                          className={`
-                            relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all
-                            ${matches[img.id] === face.stored_url
-                              ? "border-primary ring-2 ring-primary/30"
-                              : "border-transparent hover:border-muted-foreground/50"
-                            }
-                          `}
-                        >
-                          <img
-                            src={face.stored_url}
-                            alt={face.view}
-                            className="w-full h-full object-cover"
-                          />
-                          {matches[img.id] === face.stored_url && (
-                            <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
-                              <Check className="h-5 w-5 text-primary" />
-                            </div>
-                          )}
-                          <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] py-0.5 text-center capitalize">
-                            {face.view}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    {faceFoundations.length === 0 && (
-                      <p className="text-xs text-yellow-600">
-                        No face foundations found. Create them in Talent Face Library first.
+              {look.sourceImages.map((img) => {
+                // Filter foundations to only show those for THIS look's assigned talent
+                const talentFoundations = faceFoundations.filter(
+                  (f) => f.digital_talent_id === look.digital_talent_id
+                );
+                
+                return (
+                  <div
+                    key={img.id}
+                    className="grid grid-cols-[140px_1fr] gap-4 p-3 border rounded-lg bg-muted/30"
+                  >
+                    {/* Look Image */}
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium capitalize text-muted-foreground">
+                        {img.view} View
                       </p>
-                    )}
-                    {!matches[img.id] && faceFoundations.length > 0 && (
-                      <p className="text-xs text-muted-foreground italic">No face selected</p>
-                    )}
+                      <img
+                        src={img.head_cropped_url ? `${img.head_cropped_url}?t=${Date.now()}` : img.source_url}
+                        alt={img.view}
+                        className="w-full aspect-square object-cover rounded-lg"
+                      />
+                    </div>
+
+                    {/* Face Selection */}
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Select {viewToAngle(img.view)} face:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {talentFoundations.map((face) => (
+                          <button
+                            key={face.id}
+                            onClick={() => handleSelectFace(img.id, face.stored_url)}
+                            className={`
+                              relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all
+                              ${matches[img.id] === face.stored_url
+                                ? "border-primary ring-2 ring-primary/30"
+                                : "border-transparent hover:border-muted-foreground/50"
+                              }
+                            `}
+                          >
+                            <img
+                              src={face.stored_url}
+                              alt={face.view}
+                              className="w-full h-full object-cover"
+                            />
+                            {matches[img.id] === face.stored_url && (
+                              <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                                <Check className="h-5 w-5 text-primary" />
+                              </div>
+                            )}
+                            <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] py-0.5 text-center capitalize">
+                              {face.view}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                      {talentFoundations.length === 0 && (
+                        <p className="text-xs text-yellow-600">
+                          No face foundations found for this talent. Create them in Talent Face Library first.
+                        </p>
+                      )}
+                      {!matches[img.id] && talentFoundations.length > 0 && (
+                        <p className="text-xs text-muted-foreground italic">No face selected</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </CardContent>
           </Card>
         ))}
