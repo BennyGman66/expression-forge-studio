@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { 
   FaceApplicationOutput, 
   LookWithViews, 
-  VIEW_TYPES, 
+  VIEW_TYPES,
+  VIEW_LABELS,
   ViewStatus,
   ViewType 
 } from "@/types/face-application";
@@ -34,9 +35,22 @@ interface SourceImageInfo {
   head_cropped_url: string | null;
 }
 
-// Calculate view status from outputs
+// Map legacy view names to new 4-view system
+function mapLegacyView(newView: string): string[] {
+  const mapping: Record<string, string[]> = {
+    'full_front': ['full_front', 'front'],
+    'cropped_front': ['cropped_front', 'side'],
+    'back': ['back'],
+    'detail': ['detail'],
+  };
+  return mapping[newView] || [newView];
+}
+
+// Calculate view status from outputs (handles legacy view names)
 function calculateViewStatus(outputs: FaceApplicationOutput[], view: string): ViewStatus {
-  const viewOutputs = outputs.filter(o => o.view === view);
+  // Match outputs with legacy view name support
+  const legacyViews = mapLegacyView(view);
+  const viewOutputs = outputs.filter(o => legacyViews.includes(o.view));
   const completed = viewOutputs.filter(o => o.status === 'completed' && o.stored_url);
   const failed = viewOutputs.filter(o => o.status === 'failed');
   const running = viewOutputs.filter(o => o.status === 'pending' || o.status === 'generating');
@@ -212,9 +226,10 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
     ? currentLook.views[selectedView] 
     : null;
 
-  // Get source image for current view
+  // Get source image for current view (with legacy view mapping)
   const currentSourceImage = sourceImages.find(
-    s => s.look_id === selectedLookId && s.view === selectedView
+    s => s.look_id === selectedLookId && 
+         mapLegacyView(selectedView || '').includes(s.view)
   );
 
   // Handle view selection from left panel
@@ -310,11 +325,93 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
-      setIsResuming(false);
-    }
-  };
+    setIsResuming(false);
+  }
+};
 
-  // Handle save to look
+// Handle initial generation for a view with no attempts
+const [isGenerating, setIsGenerating] = useState(false);
+
+const handleGenerateView = async () => {
+  if (!selectedLookId || !selectedView || !currentSourceImage) return;
+
+  setIsGenerating(true);
+
+  try {
+    // Find an existing job for this look or create one
+    let jobId: string;
+    
+    const { data: existingJob } = await supabase
+      .from("face_application_jobs")
+      .select("id, digital_talent_id")
+      .eq("look_id", selectedLookId)
+      .eq("project_id", projectId)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingJob) {
+      jobId = existingJob.id;
+    } else {
+      // Need to create a job - get digital_talent_id from source image or talent info
+      const { data: srcImg } = await supabase
+        .from("look_source_images")
+        .select("digital_talent_id")
+        .eq("look_id", selectedLookId)
+        .not("digital_talent_id", "is", null)
+        .limit(1)
+        .maybeSingle();
+
+      const talentId = srcImg?.digital_talent_id;
+      if (!talentId) {
+        toast({ title: "Error", description: "No talent assigned to this look", variant: "destructive" });
+        setIsGenerating(false);
+        return;
+      }
+
+      const { data: newJob, error: jobError } = await supabase
+        .from("face_application_jobs")
+        .insert({
+          project_id: projectId,
+          look_id: selectedLookId,
+          digital_talent_id: talentId,
+          status: "pending",
+          attempts_per_view: 4,
+          progress: 0,
+          total: 4, // Single view generation
+        })
+        .select("id")
+        .single();
+
+      if (jobError || !newJob) {
+        throw new Error(jobError?.message || "Failed to create job");
+      }
+      jobId = newJob.id;
+    }
+
+    // Call edge function with single view mode
+    const { error: invokeError } = await supabase.functions.invoke("generate-face-application", {
+      body: {
+        jobId,
+        singleView: selectedView,
+        attemptsPerView: 4,
+        outfitDescriptions: {},
+      },
+    });
+
+    if (invokeError) {
+      throw invokeError;
+    }
+
+    toast({ title: "Generating", description: `Starting ${VIEW_LABELS[selectedView as ViewType] || selectedView} generation` });
+    fetchData();
+  } catch (error: any) {
+    toast({ title: "Error", description: error.message, variant: "destructive" });
+  } finally {
+    setIsGenerating(false);
+  }
+};
+
+// Handle save to look
   const handleSaveToLook = async () => {
     if (!currentLook || !currentLook.isReady) return;
 
@@ -426,8 +523,10 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
         onSelectAttempt={handleSelectAttempt}
         onRegenerateView={handleRegenerateView}
         onCancelView={handleCancelView}
+        onGenerateView={handleGenerateView}
         isRegenerating={isRegenerating}
         isCanceling={isCanceling}
+        isGenerating={isGenerating}
       />
 
       {/* RIGHT: Status & Recovery */}

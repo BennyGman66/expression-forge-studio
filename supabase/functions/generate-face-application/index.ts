@@ -44,9 +44,9 @@ serve(async (req) => {
   }
 
   try {
-    const { jobId, outfitDescriptions, resume } = await req.json();
+    const { jobId, outfitDescriptions, resume, singleView, attemptsPerView } = await req.json();
 
-    console.log(`Starting face application job: ${jobId}${resume ? " (RESUME)" : ""}`);
+    console.log(`Starting face application job: ${jobId}${resume ? " (RESUME)" : ""}${singleView ? ` (SINGLE VIEW: ${singleView})` : ""}`);
 
     // Initialize clients
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -90,17 +90,32 @@ serve(async (req) => {
       .eq("id", jobId);
 
     // Get source images for this look (with head_cropped_url and digital_talent_id)
-    const { data: sourceImages } = await supabase
+    let sourceQuery = supabase
       .from("look_source_images")
       .select("*")
       .eq("look_id", job.look_id)
       .not("head_cropped_url", "is", null);
 
-    if (!sourceImages || sourceImages.length === 0) {
-      throw new Error("No source images found");
+    // Filter to specific view if single view mode
+    if (singleView) {
+      // Map new view name to legacy if needed
+      const viewMapping: Record<string, string[]> = {
+        'full_front': ['full_front', 'front'],
+        'cropped_front': ['cropped_front', 'side'],
+        'back': ['back'],
+        'detail': ['detail'],
+      };
+      const viewsToMatch = viewMapping[singleView] || [singleView];
+      sourceQuery = sourceQuery.in("view", viewsToMatch);
     }
 
-    console.log(`Processing ${sourceImages.length} source images with ${job.attempts_per_view} attempts each`);
+    const { data: sourceImages } = await sourceQuery;
+
+    if (!sourceImages || sourceImages.length === 0) {
+      throw new Error(`No source images found${singleView ? ` for view: ${singleView}` : ""}`);
+    }
+
+    console.log(`Processing ${sourceImages.length} source images with ${attemptsPerView || job.attempts_per_view} attempts each`);
 
     // Get model from job (or use default)
     const model = job.model || "google/gemini-2.5-flash-image-preview";
@@ -108,7 +123,16 @@ serve(async (req) => {
 
     // Process in background using setTimeout (Deno pattern)
     setTimeout(() => {
-      processGeneration(supabase, job, sourceImages, outfitDescriptions, LOVABLE_API_KEY, model);
+      processGeneration(
+        supabase, 
+        job, 
+        sourceImages, 
+        outfitDescriptions || {}, 
+        LOVABLE_API_KEY, 
+        model,
+        attemptsPerView || job.attempts_per_view,
+        singleView
+      );
     }, 0);
 
     return new Response(
@@ -131,7 +155,9 @@ async function processGeneration(
   sourceImages: any[],
   outfitDescriptions: Record<string, string>,
   apiKey: string,
-  model: string
+  model: string,
+  attemptsPerView: number,
+  singleView?: string
 ) {
   // Get existing completed outputs to calculate resume progress
   const { data: existingOutputs } = await supabase
@@ -210,15 +236,14 @@ async function processGeneration(
         continue;
       }
 
-      for (let attempt = 0; attempt < job.attempts_per_view; attempt++) {
+      for (let attempt = 0; attempt < attemptsPerView; attempt++) {
         // Skip if this source+attempt is already completed
         const outputKey = `${sourceImage.id}-${attempt}`;
         if (completedSet.has(outputKey)) {
           console.log(`⏭️ Skipping ${view} attempt ${attempt + 1} - already completed`);
           continue;
         }
-
-        console.log(`Generating ${view} attempt ${attempt + 1}/${job.attempts_per_view}`);
+        console.log(`Generating ${view} attempt ${attempt + 1}/${attemptsPerView}`);
 
         // Create output record
         const { data: output } = await supabase

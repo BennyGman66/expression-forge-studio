@@ -1,11 +1,9 @@
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { 
-  Check, Loader2, RefreshCw, AlertCircle, X, StopCircle 
+  Check, Loader2, RefreshCw, AlertCircle, StopCircle, Play 
 } from "lucide-react";
-import { FaceApplicationOutput, VIEW_LABELS, ViewType, ViewStatus } from "@/types/face-application";
+import { VIEW_LABELS, ViewType, ViewStatus } from "@/types/face-application";
 import { cn } from "@/lib/utils";
 
 interface ViewReviewPanelProps {
@@ -17,8 +15,10 @@ interface ViewReviewPanelProps {
   onSelectAttempt: (outputId: string) => void;
   onRegenerateView: () => void;
   onCancelView: () => void;
+  onGenerateView?: () => void;
   isRegenerating: boolean;
   isCanceling: boolean;
+  isGenerating?: boolean;
 }
 
 export function ViewReviewPanel({
@@ -30,8 +30,10 @@ export function ViewReviewPanel({
   onSelectAttempt,
   onRegenerateView,
   onCancelView,
+  onGenerateView,
   isRegenerating,
   isCanceling,
+  isGenerating,
 }: ViewReviewPanelProps) {
   const outputs = viewStatus?.outputs || [];
   const selectedOutput = outputs.find(o => o.is_selected);
@@ -99,19 +101,34 @@ export function ViewReviewPanel({
               Cancel
             </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onRegenerateView}
-            disabled={isRegenerating || isRunning}
-          >
-            {isRegenerating ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
-            )}
-            Regenerate View
-          </Button>
+          {outputs.length === 0 && onGenerateView ? (
+            <Button
+              size="sm"
+              onClick={onGenerateView}
+              disabled={isGenerating}
+            >
+              {isGenerating ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4 mr-2" />
+              )}
+              Generate View
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRegenerateView}
+              disabled={isRegenerating || isRunning || outputs.length === 0}
+            >
+              {isRegenerating ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Regenerate View
+            </Button>
+          )}
         </div>
       </div>
 
