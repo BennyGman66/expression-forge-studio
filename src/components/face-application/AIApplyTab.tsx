@@ -232,6 +232,7 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
         <ContextPreview
           hoveredView={hoveredView}
           looks={looks}
+          onRefetch={refetch}
         />
 
         {/* RIGHT: Queue Panel */}
