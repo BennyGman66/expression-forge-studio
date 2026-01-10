@@ -134,7 +134,7 @@ function LookRow({ look, isSelected, onSelect, onToggleInclusion }: LookRowProps
           checked={look.isIncluded}
           onCheckedChange={() => onToggleInclusion()}
           onClick={(e) => e.stopPropagation()}
-          disabled={look.status !== 'ready'}
+          disabled={look.status === 'blocking'}
           className="mt-0.5"
         />
 
