@@ -1,7 +1,9 @@
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { 
-  Check, Loader2, RefreshCw, AlertCircle, StopCircle, Play 
+  Check, Loader2, RefreshCw, AlertCircle, StopCircle, Play, X, ChevronLeft, ChevronRight 
 } from "lucide-react";
 import { VIEW_LABELS, ViewType, ViewStatus } from "@/types/face-application";
 import { cn } from "@/lib/utils";
@@ -41,6 +43,52 @@ export function ViewReviewPanel({
   const completedOutputs = outputs.filter(o => o.status === 'completed' && o.stored_url);
   const failedOutputs = outputs.filter(o => o.status === 'failed');
   const runningOutputs = outputs.filter(o => o.status === 'generating' || o.status === 'pending');
+
+  // Lightbox state
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  const openLightbox = (outputId: string) => {
+    const index = completedOutputs.findIndex(o => o.id === outputId);
+    if (index !== -1) {
+      setLightboxIndex(index);
+      setLightboxOpen(true);
+    }
+  };
+
+  const handlePrevious = useCallback(() => {
+    setLightboxIndex(prev => (prev > 0 ? prev - 1 : completedOutputs.length - 1));
+  }, [completedOutputs.length]);
+
+  const handleNext = useCallback(() => {
+    setLightboxIndex(prev => (prev < completedOutputs.length - 1 ? prev + 1 : 0));
+  }, [completedOutputs.length]);
+
+  // Keyboard navigation for lightbox
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handlePrevious();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNext();
+      } else if (e.key === 'Escape') {
+        setLightboxOpen(false);
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        const output = completedOutputs[lightboxIndex];
+        if (output) onSelectAttempt(output.id);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxOpen, lightboxIndex, handlePrevious, handleNext, completedOutputs, onSelectAttempt]);
+
+  const currentLightboxOutput = completedOutputs[lightboxIndex];
 
   const getStatusBadge = () => {
     if (!viewStatus) return null;
@@ -198,8 +246,8 @@ export function ViewReviewPanel({
                       <img
                         src={output.stored_url}
                         alt={`Attempt ${idx + 1}`}
-                        className="w-full h-full object-cover cursor-pointer"
-                        onClick={() => isComplete && onSelectAttempt(output.id)}
+                        className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                        onClick={() => openLightbox(output.id)}
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
@@ -220,16 +268,16 @@ export function ViewReviewPanel({
                     #{idx + 1}
                   </div>
 
-                  {/* Click to select overlay */}
-                  {isComplete && !isSelected && (
-                    <button
-                      onClick={() => onSelectAttempt(output.id)}
-                      className="absolute inset-0 bg-black/0 hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100"
+                  {/* Click to view hint on hover */}
+                  {isComplete && (
+                    <div
+                      className="absolute inset-0 bg-black/0 hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer"
+                      onClick={() => openLightbox(output.id)}
                     >
                       <span className="bg-background/90 text-foreground px-2 py-1 rounded text-xs font-medium">
-                        Select
+                        Click to view
                       </span>
-                    </button>
+                    </div>
                   )}
                 </div>
               );
@@ -237,6 +285,86 @@ export function ViewReviewPanel({
           </div>
         )}
       </div>
+
+      {/* Lightbox Dialog */}
+      <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+        <DialogContent className="max-w-5xl h-[90vh] p-0 bg-black/95 border-none [&>button]:hidden">
+          <div className="relative h-full flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 text-white">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium">Attempt #{lightboxIndex + 1}</span>
+                {currentLightboxOutput?.is_selected && (
+                  <Badge className="bg-primary text-primary-foreground">
+                    <Check className="h-3 w-3 mr-1" />
+                    Selected
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-white/70">
+                  {lightboxIndex + 1} / {completedOutputs.length}
+                </span>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  onClick={() => setLightboxOpen(false)}
+                  className="text-white hover:bg-white/10"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Main image area with navigation */}
+            <div className="flex-1 flex items-center justify-center relative px-16">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute left-4 text-white hover:bg-white/10 w-12 h-12"
+                onClick={handlePrevious}
+              >
+                <ChevronLeft className="w-8 h-8" />
+              </Button>
+
+              {currentLightboxOutput?.stored_url && (
+                <img
+                  src={currentLightboxOutput.stored_url}
+                  alt={`Attempt ${lightboxIndex + 1}`}
+                  className="max-h-full max-w-full object-contain"
+                />
+              )}
+
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute right-4 text-white hover:bg-white/10 w-12 h-12"
+                onClick={handleNext}
+              >
+                <ChevronRight className="w-8 h-8" />
+              </Button>
+            </div>
+
+            {/* Footer with selection toggle */}
+            <div className="p-4 flex items-center justify-center gap-4">
+              <Button
+                variant={currentLightboxOutput?.is_selected ? "default" : "outline"}
+                onClick={() => currentLightboxOutput && onSelectAttempt(currentLightboxOutput.id)}
+                className={cn(
+                  "gap-2",
+                  currentLightboxOutput?.is_selected
+                    ? "bg-primary text-primary-foreground"
+                    : "border-white/30 text-white hover:bg-white/10"
+                )}
+              >
+                <Check className="w-4 h-4" />
+                {currentLightboxOutput?.is_selected ? 'Deselect' : 'Select'}
+              </Button>
+              <span className="text-xs text-white/50">Space to toggle • Arrow keys to navigate</span>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
