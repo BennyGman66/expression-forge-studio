@@ -33,12 +33,55 @@ Respond with ONLY "VALID" or "INVALID" followed by a brief reason.
 Example: "VALID - Image is a monochrome grey clay sculpture"
 Example: "INVALID - Image contains colored clothing and skin tones"`;
 
+// Helper function to verify authentication
+async function verifyAuth(req: Request): Promise<{ userId: string | null; error: Response | null }> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return {
+      userId: null,
+      error: new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    };
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const token = authHeader.replace('Bearer ', '');
+  const { data, error } = await supabase.auth.getClaims(token);
+  
+  if (error || !data?.claims) {
+    return {
+      userId: null,
+      error: new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    };
+  }
+
+  return { userId: data.claims.sub as string, error: null };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // Verify authentication
+    const { userId, error: authError } = await verifyAuth(req);
+    if (authError) {
+      return authError;
+    }
+    console.log(`Authenticated user: ${userId}`);
+
     const { brandId, imageIds, model } = await req.json();
     const selectedModel = model || "google/gemini-2.5-flash-image-preview";
 
@@ -93,9 +136,8 @@ serve(async (req) => {
     );
   } catch (error) {
     console.error("Error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: "Service temporarily unavailable" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
@@ -164,8 +206,7 @@ async function generateClayImage(imageUrl: string, lovableApiKey: string, model:
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`AI API error:`, response.status, errorText);
+    console.error(`AI API error:`, response.status);
     
     if (response.status === 429) {
       throw new Error("RATE_LIMITED");
