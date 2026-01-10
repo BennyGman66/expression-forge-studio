@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Pencil, FolderOpen, CheckCircle2, Clock, AlertTriangle, Briefcase, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, FolderOpen, CheckCircle2, Clock, AlertTriangle, Briefcase, Trash2, UserX } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,10 +18,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ProductionProject } from "@/types/production-projects";
 import { UnifiedJob, JobStatus } from "@/types/jobs";
 import { useUpdateProductionProject } from "@/hooks/useProductionProjects";
-import { useDeleteJob } from "@/hooks/useJobs";
+import { useDeleteJob, useUnassignFreelancer } from "@/hooks/useJobs";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 
@@ -76,6 +81,7 @@ export function ProjectGroupRow({
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
   const updateProject = useUpdateProductionProject();
   const deleteJob = useDeleteJob();
+  const unassignFreelancer = useUnassignFreelancer();
 
   const openCount = jobs.filter(j => j.status === 'OPEN' || j.status === 'ASSIGNED').length;
   const inProgressCount = jobs.filter(j => j.status === 'IN_PROGRESS' || j.status === 'SUBMITTED').length;
@@ -226,13 +232,40 @@ export function ProjectGroupRow({
                       )}
                     </div>
                   </div>
-                  <span className="text-xs text-muted-foreground w-20 truncate">
-                    {job.assigned_user ? (
-                      job.assigned_user.display_name || job.assigned_user.email?.split('@')[0]
+                  <div className="flex items-center gap-1 w-28">
+                    {job.freelancer_identity ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center gap-1">
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-500/10 text-purple-400 border-purple-500/30 truncate max-w-[70px]">
+                              {job.freelancer_identity.display_name || `${job.freelancer_identity.first_name} ${job.freelancer_identity.last_name?.charAt(0)}.`}
+                            </Badge>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 text-muted-foreground hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                unassignFreelancer.mutate(job.id);
+                              }}
+                            >
+                              <UserX className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Claimed by {job.freelancer_identity.first_name} {job.freelancer_identity.last_name}</p>
+                          <p className="text-xs text-muted-foreground">Click X to unassign</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : job.assigned_user ? (
+                      <span className="text-xs text-muted-foreground truncate">
+                        {job.assigned_user.display_name || job.assigned_user.email?.split('@')[0]}
+                      </span>
                     ) : (
-                      "—"
+                      <span className="text-xs text-muted-foreground">—</span>
                     )}
-                  </span>
+                  </div>
                   <span className="text-xs text-muted-foreground w-12">
                     {format(new Date(job.created_at), "M/d")}
                   </span>
@@ -316,6 +349,7 @@ export function UngroupedJobsRow({
   const [isOpen, setIsOpen] = useState(true);
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
   const deleteJob = useDeleteJob();
+  const unassignFreelancer = useUnassignFreelancer();
 
   if (jobs.length === 0) return null;
 
@@ -374,13 +408,40 @@ export function UngroupedJobsRow({
                       {statusLabels[job.status]}
                     </Badge>
                   </div>
-                  <span className="text-xs text-muted-foreground w-20 truncate">
-                    {job.assigned_user ? (
-                      job.assigned_user.display_name || job.assigned_user.email?.split('@')[0]
+                  <div className="flex items-center gap-1 w-28">
+                    {job.freelancer_identity ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center gap-1">
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-500/10 text-purple-400 border-purple-500/30 truncate max-w-[70px]">
+                              {job.freelancer_identity.display_name || `${job.freelancer_identity.first_name} ${job.freelancer_identity.last_name?.charAt(0)}.`}
+                            </Badge>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-5 w-5 text-muted-foreground hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                unassignFreelancer.mutate(job.id);
+                              }}
+                            >
+                              <UserX className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Claimed by {job.freelancer_identity.first_name} {job.freelancer_identity.last_name}</p>
+                          <p className="text-xs text-muted-foreground">Click X to unassign</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : job.assigned_user ? (
+                      <span className="text-xs text-muted-foreground truncate">
+                        {job.assigned_user.display_name || job.assigned_user.email?.split('@')[0]}
+                      </span>
                     ) : (
-                      "—"
+                      <span className="text-xs text-muted-foreground">—</span>
                     )}
-                  </span>
+                  </div>
                   <span className="text-xs text-muted-foreground w-12">
                     {format(new Date(job.created_at), "M/d")}
                   </span>
