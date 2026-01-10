@@ -256,11 +256,24 @@ export function ViewReviewPanel({
                     )}
                   </div>
 
-                  {/* Selection indicator */}
-                  {isSelected && (
-                    <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1">
+                  {/* Clickable selection button - always visible for completed outputs */}
+                  {isComplete && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectAttempt(output.id);
+                      }}
+                      className={cn(
+                        "absolute top-2 right-2 rounded-full p-1.5 transition-all z-10",
+                        "hover:scale-110 active:scale-95",
+                        isSelected 
+                          ? "bg-primary text-primary-foreground shadow-md" 
+                          : "bg-background/80 backdrop-blur-sm text-muted-foreground hover:bg-background hover:text-foreground border border-border"
+                      )}
+                      title={isSelected ? "Click to deselect" : "Click to select"}
+                    >
                       <Check className="h-4 w-4" />
-                    </div>
+                    </button>
                   )}
 
                   {/* Attempt number */}
