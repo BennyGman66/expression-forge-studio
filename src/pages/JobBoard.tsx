@@ -35,12 +35,13 @@ import { useJobs, useDeleteJob } from "@/hooks/useJobs";
 import { useJobsReviewProgress } from "@/hooks/useReviewSystem";
 import { useProductionProjects } from "@/hooks/useProductionProjects";
 import { JobStatus, JobType } from "@/types/jobs";
-import { ArrowLeft, Plus, Search, Briefcase, Eye, CheckCircle, AlertTriangle, FolderOpen, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Search, Briefcase, Eye, CheckCircle, AlertTriangle, FolderOpen, Trash2, Link2 } from "lucide-react";
 import { format } from "date-fns";
 import { JobDetailPanel } from "@/components/jobs/JobDetailPanel";
 import { CreateJobDialog } from "@/components/jobs/CreateJobDialog";
 import { JobReviewPanel } from "@/components/review";
 import { ProjectGroupRow, UngroupedJobsRow } from "@/components/job-board/ProjectGroupRow";
+import { ShareJobButton } from "@/components/job-board/ShareJobButton";
 import { cn } from "@/lib/utils";
 
 const statusColors: Record<JobStatus, string> = {
@@ -398,6 +399,7 @@ export default function JobBoard() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
+                            <ShareJobButton jobId={job.id} accessToken={job.access_token || null} />
                             {canReview && (
                               <Button
                                 variant={needsReview ? "default" : "outline"}

@@ -26,6 +26,7 @@ import FreelancerJobList from "./pages/FreelancerJobList";
 import FreelancerJobDetail from "./pages/FreelancerJobDetail";
 import BrandPoseLibrary from "./pages/BrandPoseLibrary";
 import ReposeProduction from "./pages/ReposeProduction";
+import PublicJobWorkspace from "./pages/PublicJobWorkspace";
 
 const queryClient = new QueryClient();
 
@@ -45,7 +46,8 @@ const App = () => (
             {/* Client review - has its own password protection */}
             <Route path="/review/:reviewId" element={<ClientReview />} />
             
-            {/* Protected internal routes */}
+            {/* Public freelancer workspace - link-based access */}
+            <Route path="/work/:accessToken" element={<PublicJobWorkspace />} />
             <Route 
               path="/" 
               element={
