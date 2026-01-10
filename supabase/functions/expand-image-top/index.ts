@@ -38,18 +38,31 @@ serve(async (req) => {
     const image = await Image.decode(imageBytes);
     console.log(`Original dimensions: ${image.width}x${image.height}`);
 
-    // Calculate padding height (10% of original height by default)
-    const paddingHeight = Math.round(image.height * (paddingPercent / 100));
-    const newHeight = image.height + paddingHeight;
+    // Resize down if the image is too large to prevent memory issues
+    const MAX_DIMENSION = 2000;
+    let processImage = image;
+
+    if (image.width > MAX_DIMENSION || image.height > MAX_DIMENSION) {
+      if (image.width > image.height) {
+        processImage = image.resize(MAX_DIMENSION, Image.RESIZE_AUTO);
+      } else {
+        processImage = image.resize(Image.RESIZE_AUTO, MAX_DIMENSION);
+      }
+      console.log(`Resized to: ${processImage.width}x${processImage.height}`);
+    }
+
+    // Calculate padding height (10% of height by default)
+    const paddingHeight = Math.round(processImage.height * (paddingPercent / 100));
+    const newHeight = processImage.height + paddingHeight;
 
     console.log(`Adding ${paddingHeight}px white padding to top. New height: ${newHeight}`);
 
     // Create new expanded canvas with white background
-    const expandedImage = new Image(image.width, newHeight);
+    const expandedImage = new Image(processImage.width, newHeight);
     expandedImage.fill(0xFFFFFFFF); // Fill entire canvas with white efficiently
 
     // Composite original image at the bottom (below the white padding)
-    expandedImage.composite(image, 0, paddingHeight);
+    expandedImage.composite(processImage, 0, paddingHeight);
 
     console.log(`Expanded image: ${expandedImage.width}x${expandedImage.height}`);
 
