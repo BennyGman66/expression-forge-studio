@@ -2845,7 +2845,7 @@ export type Database = {
           config_json: Json | null
           created_at: string | null
           id: string
-          job_id: string
+          job_id: string | null
           project_id: string | null
           status: string
           updated_at: string | null
@@ -2855,7 +2855,7 @@ export type Database = {
           config_json?: Json | null
           created_at?: string | null
           id?: string
-          job_id: string
+          job_id?: string | null
           project_id?: string | null
           status?: string
           updated_at?: string | null
@@ -2865,7 +2865,7 @@ export type Database = {
           config_json?: Json | null
           created_at?: string | null
           id?: string
-          job_id?: string
+          job_id?: string | null
           project_id?: string | null
           status?: string
           updated_at?: string | null
