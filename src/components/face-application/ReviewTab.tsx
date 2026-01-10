@@ -250,19 +250,31 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
     setSelectedView(view);
   };
 
-  // Handle attempt selection
+  // Handle attempt selection (toggle behavior - click again to deselect)
   const handleSelectAttempt = async (outputId: string) => {
     if (!currentViewStatus) return;
 
-    // Deselect all in this view, select this one
+    const clickedOutput = currentViewStatus.outputs.find(o => o.id === outputId);
+    const isCurrentlySelected = clickedOutput?.is_selected;
+
+    // If already selected, deselect it; otherwise select this one and deselect others
     for (const output of currentViewStatus.outputs) {
+      const shouldBeSelected = isCurrentlySelected
+        ? false  // Deselect all when clicking the selected one
+        : output.id === outputId;  // Select only the clicked one
+      
       await supabase
         .from("face_application_outputs")
-        .update({ is_selected: output.id === outputId })
+        .update({ is_selected: shouldBeSelected })
         .eq("id", output.id);
     }
 
-    toast({ title: "Selected", description: "Attempt selected for this view" });
+    toast({ 
+      title: isCurrentlySelected ? "Deselected" : "Selected", 
+      description: isCurrentlySelected 
+        ? "Selection cleared for this view" 
+        : "Attempt selected for this view" 
+    });
     fetchData();
   };
 
