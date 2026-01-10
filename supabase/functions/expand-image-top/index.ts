@@ -46,13 +46,7 @@ serve(async (req) => {
 
     // Create new expanded canvas with white background
     const expandedImage = new Image(image.width, newHeight);
-
-    // Fill entire canvas with white
-    for (let py = 1; py <= newHeight; py++) {
-      for (let px = 1; px <= image.width; px++) {
-        expandedImage.setPixelAt(px, py, 0xFFFFFFFF); // White
-      }
-    }
+    expandedImage.fill(0xFFFFFFFF); // Fill entire canvas with white efficiently
 
     // Composite original image at the bottom (below the white padding)
     expandedImage.composite(image, 0, paddingHeight);
