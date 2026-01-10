@@ -44,12 +44,21 @@ function calculateOutputsStatus(outputs: FaceApplicationOutput[]): "completed" |
   return "completed";
 }
 
+interface StalledJob {
+  id: string;
+  lookName: string;
+  progress: number;
+  total: number;
+}
+
 export function ReviewTab({ projectId }: ReviewTabProps) {
   const [looks, setLooks] = useState<LookWithOutputs[]>([]);
   const [saving, setSaving] = useState(false);
   const [talentInfo, setTalentInfo] = useState<TalentInfo | null>(null);
   const [currentViewIndex, setCurrentViewIndex] = useState(0);
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
+  const [stalledJobs, setStalledJobs] = useState<StalledJob[]>([]);
+  const [resumingJobIds, setResumingJobIds] = useState<Set<string>>(new Set());
   const { toast } = useToast();
 
   // Fetch all jobs and outputs for this project
@@ -60,7 +69,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
       // Get ALL jobs for this project
       const { data: jobsData } = await supabase
         .from("face_application_jobs")
-        .select("id, look_id, digital_talent_id")
+        .select("id, look_id, digital_talent_id, status, progress, total, updated_at")
         .eq("project_id", projectId);
 
       if (!jobsData || jobsData.length === 0) {
@@ -124,6 +133,33 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
       }));
 
       setLooks(looksWithOutputs);
+
+      // Detect stalled jobs (running but no progress for 5+ mins, or running with progress < total and no pending outputs)
+      const stalled: StalledJob[] = [];
+      for (const job of jobsData) {
+        if (job.status === "running" || job.status === "pending") {
+          const jobOutputs = outputsData?.filter((o: any) => o.job_id === job.id) || [];
+          const pendingCount = jobOutputs.filter((o: any) => o.status === "pending" || o.status === "generating").length;
+          const completedCount = jobOutputs.filter((o: any) => o.status === "completed").length;
+          
+          // Stalled if running with no pending outputs but not all completed
+          const isStalled = job.status === "running" && pendingCount === 0 && completedCount < (job.total || 0);
+          
+          // Also stalled if no update in 5 minutes
+          const updatedAt = new Date(job.updated_at || 0).getTime();
+          const stalledByTime = job.status === "running" && (Date.now() - updatedAt) > 5 * 60 * 1000;
+          
+          if (isStalled || stalledByTime) {
+            stalled.push({
+              id: job.id,
+              lookName: lookNameMap[job.look_id] || "Unknown",
+              progress: completedCount,
+              total: job.total || 0,
+            });
+          }
+        }
+      }
+      setStalledJobs(stalled);
     };
 
     fetchOutputs();
@@ -296,6 +332,38 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
     }
   };
 
+  const handleResumeJob = async (jobId: string) => {
+    setResumingJobIds(prev => new Set(prev).add(jobId));
+    
+    try {
+      const { error } = await supabase.functions.invoke("generate-face-application", {
+        body: { jobId, outfitDescriptions: {}, resume: true },
+      });
+
+      if (error) throw error;
+      
+      toast({ title: "Resuming...", description: "Generation will continue from where it left off" });
+      
+      // Remove from stalled list after a short delay
+      setTimeout(() => {
+        setStalledJobs(prev => prev.filter(j => j.id !== jobId));
+        setResumingJobIds(prev => {
+          const next = new Set(prev);
+          next.delete(jobId);
+          return next;
+        });
+      }, 3000);
+      
+    } catch (error: any) {
+      setResumingJobIds(prev => {
+        const next = new Set(prev);
+        next.delete(jobId);
+        return next;
+      });
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
+
   const handleSaveToLook = async () => {
     setSaving(true);
 
@@ -376,6 +444,42 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
     <div className="flex gap-6">
       {/* Main review area */}
       <div className="flex-1 space-y-6">
+        {/* Stalled jobs alert */}
+        {stalledJobs.length > 0 && (
+          <Card className="border-yellow-500/50 bg-yellow-500/10">
+            <CardContent className="py-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="font-medium text-yellow-700">Stalled Generation Jobs</h3>
+                  <p className="text-sm text-yellow-600 mb-3">
+                    Some jobs stopped due to credit issues or timeouts. Resume to continue from where they left off.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {stalledJobs.map(job => (
+                      <Button
+                        key={job.id}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleResumeJob(job.id)}
+                        disabled={resumingJobIds.has(job.id)}
+                        className="bg-background"
+                      >
+                        {resumingJobIds.has(job.id) ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                        )}
+                        Resume {job.lookName} ({job.progress}/{job.total})
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Progress indicator */}
         <div className="flex items-center justify-between">
           <div className="space-y-1">
