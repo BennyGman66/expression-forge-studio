@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -74,6 +74,7 @@ const reviewableStatuses: JobStatus[] = ["SUBMITTED", "NEEDS_CHANGES", "APPROVED
 
 export default function JobBoard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [reviewJobId, setReviewJobId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -82,7 +83,23 @@ export default function JobBoard() {
   const [typeFilter, setTypeFilter] = useState<JobType | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [groupByProject, setGroupByProject] = useState(true);
+  const [groupFilter, setGroupFilter] = useState<string | null>(null);
   const deleteJob = useDeleteJob();
+
+  // Handle group filter from URL
+  useEffect(() => {
+    const groupParam = searchParams.get('group');
+    if (groupParam) {
+      setGroupFilter(groupParam);
+    }
+  }, [searchParams]);
+
+  // Clear group filter handler
+  const clearGroupFilter = () => {
+    setGroupFilter(null);
+    searchParams.delete('group');
+    setSearchParams(searchParams);
+  };
 
   const { data: jobs, isLoading: jobsLoading } = useJobs({
     status: statusFilter !== "all" ? statusFilter : undefined,
@@ -94,6 +111,10 @@ export default function JobBoard() {
 
   const filteredJobs = useMemo(() => {
     return jobs?.filter((job) => {
+      // Filter by group if specified
+      if (groupFilter && job.job_group_id !== groupFilter) return false;
+      
+      // Filter by search query
       if (!searchQuery) return true;
       const searchLower = searchQuery.toLowerCase();
       return (
@@ -103,7 +124,7 @@ export default function JobBoard() {
         job.assigned_user?.email?.toLowerCase().includes(searchLower)
       );
     }) || [];
-  }, [jobs, searchQuery]);
+  }, [jobs, searchQuery, groupFilter]);
 
   // Group jobs by project
   const { groupedJobs, ungroupedJobs } = useMemo(() => {
@@ -155,6 +176,22 @@ export default function JobBoard() {
             Create Job
           </Button>
         </div>
+
+        {/* Group Filter Banner */}
+        {groupFilter && (
+          <div className="flex items-center gap-3 mb-4 p-3 bg-primary/10 border border-primary/20 rounded-lg">
+            <span className="text-sm">
+              Showing jobs from the batch you just created
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearGroupFilter}
+            >
+              Show All Jobs
+            </Button>
+          </div>
+        )}
 
         {/* Filters */}
         <div className="flex gap-4 mb-6 flex-wrap items-center">

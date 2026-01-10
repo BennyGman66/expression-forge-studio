@@ -29,6 +29,7 @@ export interface UnifiedJob {
   id: string;
   project_id: string | null;
   look_id: string | null;
+  job_group_id: string | null;
   type: JobType;
   status: JobStatus;
   assigned_user_id: string | null;
