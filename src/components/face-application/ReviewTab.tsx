@@ -1,18 +1,19 @@
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Check, Download, Save, ChevronLeft, ChevronRight, User, Trash2, MoreVertical, RefreshCw, AlertCircle, Loader2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { FaceApplicationOutput } from "@/types/face-application";
-import { Badge } from "@/components/ui/badge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { LooksSummaryTable } from "./LooksSummaryTable";
+import { Card, CardContent } from "@/components/ui/card";
+import { AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { 
+  FaceApplicationOutput, 
+  LookWithViews, 
+  VIEW_TYPES, 
+  ViewStatus,
+  ViewType 
+} from "@/types/face-application";
+import { LookOverviewPanel } from "./review/LookOverviewPanel";
+import { ViewReviewPanel } from "./review/ViewReviewPanel";
+import { StatusRecoveryPanel } from "./review/StatusRecoveryPanel";
 
 interface ReviewTabProps {
   projectId: string;
@@ -20,360 +21,314 @@ interface ReviewTabProps {
   talentId: string | null;
 }
 
-interface LookWithOutputs {
-  id: string;
-  name: string;
-  outputs: FaceApplicationOutput[];
-}
-
 interface TalentInfo {
   name: string;
   front_face_url: string | null;
 }
 
-// Calculate actual status from outputs, not stale job.status
-function calculateOutputsStatus(outputs: FaceApplicationOutput[]): "completed" | "running" | "pending" | "failed" {
-  if (outputs.length === 0) return "pending";
-  
-  const hasPending = outputs.some(o => o.status === "pending" || o.status === "generating" || !o.stored_url);
-  const hasFailed = outputs.some(o => o.status === "failed");
-  const allCompleted = outputs.every(o => o.status === "completed" && o.stored_url);
-  
-  if (hasPending) return "running";
-  if (hasFailed && !allCompleted) return "failed";
-  return "completed";
+interface SourceImageInfo {
+  id: string;
+  look_id: string;
+  view: string;
+  source_url: string;
+  head_cropped_url: string | null;
 }
 
-interface StalledJob {
-  id: string;
-  lookName: string;
-  progress: number;
-  total: number;
+// Calculate view status from outputs
+function calculateViewStatus(outputs: FaceApplicationOutput[], view: string): ViewStatus {
+  const viewOutputs = outputs.filter(o => o.view === view);
+  const completed = viewOutputs.filter(o => o.status === 'completed' && o.stored_url);
+  const failed = viewOutputs.filter(o => o.status === 'failed');
+  const running = viewOutputs.filter(o => o.status === 'pending' || o.status === 'generating');
+  const hasSelection = viewOutputs.some(o => o.is_selected);
+
+  let status: ViewStatus['status'] = 'not_started';
+  if (viewOutputs.length === 0) {
+    status = 'not_started';
+  } else if (running.length > 0) {
+    status = 'running';
+  } else if (failed.length > 0 && completed.length === 0) {
+    status = 'failed';
+  } else if (completed.length > 0 && !hasSelection) {
+    status = 'needs_selection';
+  } else if (completed.length > 0) {
+    status = 'completed';
+  }
+
+  return {
+    view,
+    status,
+    hasSelection,
+    completedCount: completed.length,
+    failedCount: failed.length,
+    runningCount: running.length,
+    totalAttempts: viewOutputs.length,
+    outputs: viewOutputs,
+  };
 }
 
 export function ReviewTab({ projectId }: ReviewTabProps) {
-  const [looks, setLooks] = useState<LookWithOutputs[]>([]);
-  const [saving, setSaving] = useState(false);
+  const [looks, setLooks] = useState<LookWithViews[]>([]);
+  const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
+  const [selectedView, setSelectedView] = useState<string | null>(null);
   const [talentInfo, setTalentInfo] = useState<TalentInfo | null>(null);
-  const [currentViewIndex, setCurrentViewIndex] = useState(0);
-  const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set());
-  const [stalledJobs, setStalledJobs] = useState<StalledJob[]>([]);
-  const [resumingJobIds, setResumingJobIds] = useState<Set<string>>(new Set());
+  const [sourceImages, setSourceImages] = useState<SourceImageInfo[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
 
-  // Fetch all jobs and outputs for this project
-  useEffect(() => {
+  // Fetch all data
+  const fetchData = useCallback(async () => {
     if (!projectId) return;
 
-    const fetchOutputs = async () => {
-      // Get ALL jobs for this project
-      const { data: jobsData } = await supabase
-        .from("face_application_jobs")
-        .select("id, look_id, digital_talent_id, status, progress, total, updated_at")
-        .eq("project_id", projectId);
+    // Get ALL jobs for this project
+    const { data: jobsData } = await supabase
+      .from("face_application_jobs")
+      .select("id, look_id, digital_talent_id, status, progress, total, updated_at")
+      .eq("project_id", projectId);
 
-      if (!jobsData || jobsData.length === 0) {
-        setLooks([]);
-        return;
-      }
-
-      // Get talent info from first job
-      const firstTalentId = jobsData[0].digital_talent_id;
-      if (firstTalentId) {
-        const { data: talent } = await supabase
-          .from("digital_talents")
-          .select("name, front_face_url")
-          .eq("id", firstTalentId)
-          .single();
-        if (talent) setTalentInfo(talent);
-      }
-
-      // Get look names
-      const lookIds = [...new Set(jobsData.map(j => j.look_id))];
-      const { data: looksData } = await supabase
-        .from("talent_looks")
-        .select("id, name")
-        .in("id", lookIds);
-
-      const lookNameMap: Record<string, string> = {};
-      looksData?.forEach(l => { lookNameMap[l.id] = l.name; });
-
-      // Get all outputs for these jobs
-      const jobIds = jobsData.map(j => j.id);
-      const { data: outputsData } = await supabase
-        .from("face_application_outputs")
-        .select("*")
-        .in("job_id", jobIds)
-        .order("view")
-        .order("attempt_index");
-
-      // Group outputs by look
-      const outputsByLook: Record<string, FaceApplicationOutput[]> = {};
-      for (const job of jobsData) {
-        if (!outputsByLook[job.look_id]) {
-          outputsByLook[job.look_id] = [];
-        }
-      }
-
-      // Add outputs to their looks
-      if (outputsData) {
-        for (const output of outputsData) {
-          const job = jobsData.find(j => j.id === output.job_id);
-          if (job && outputsByLook[job.look_id]) {
-            outputsByLook[job.look_id].push(output as FaceApplicationOutput);
-          }
-        }
-      }
-
-      // Build looks array
-      const looksWithOutputs: LookWithOutputs[] = Object.entries(outputsByLook).map(([lookId, outputs]) => ({
-        id: lookId,
-        name: lookNameMap[lookId] || "Unknown Look",
-        outputs,
-      }));
-
-      setLooks(looksWithOutputs);
-
-      // Detect stalled jobs (running but no progress for 5+ mins, or running with progress < total and no pending outputs)
-      const stalled: StalledJob[] = [];
-      for (const job of jobsData) {
-        if (job.status === "running" || job.status === "pending") {
-          const jobOutputs = outputsData?.filter((o: any) => o.job_id === job.id) || [];
-          const pendingCount = jobOutputs.filter((o: any) => o.status === "pending" || o.status === "generating").length;
-          const completedCount = jobOutputs.filter((o: any) => o.status === "completed").length;
-          
-          // Stalled if running with no pending outputs but not all completed
-          const isStalled = job.status === "running" && pendingCount === 0 && completedCount < (job.total || 0);
-          
-          // Also stalled if no update in 5 minutes
-          const updatedAt = new Date(job.updated_at || 0).getTime();
-          const stalledByTime = job.status === "running" && (Date.now() - updatedAt) > 5 * 60 * 1000;
-          
-          if (isStalled || stalledByTime) {
-            stalled.push({
-              id: job.id,
-              lookName: lookNameMap[job.look_id] || "Unknown",
-              progress: completedCount,
-              total: job.total || 0,
-            });
-          }
-        }
-      }
-      setStalledJobs(stalled);
-    };
-
-    fetchOutputs();
-    
-    // Poll for updates
-    const interval = setInterval(fetchOutputs, 3000);
-    return () => clearInterval(interval);
-  }, [projectId]);
-
-  // Build view list for navigation - group by look + view
-  const allViews: { lookId: string; lookName: string; view: string; outputs: FaceApplicationOutput[] }[] = [];
-  looks.forEach(look => {
-    const viewGroups: Record<string, FaceApplicationOutput[]> = {};
-    look.outputs.forEach(o => {
-      if (!viewGroups[o.view]) viewGroups[o.view] = [];
-      viewGroups[o.view].push(o);
-    });
-    Object.entries(viewGroups).forEach(([view, outputs]) => {
-      allViews.push({ lookId: look.id, lookName: look.name, view, outputs });
-    });
-  });
-
-  const currentView = allViews[currentViewIndex];
-  const currentOutputs = currentView?.outputs || [];
-  const currentViewStatus = currentView ? calculateOutputsStatus(currentOutputs) : "pending";
-
-  const handleSelect = async (outputId: string) => {
-    if (!currentView) return;
-    
-    const clickedOutput = currentView.outputs.find(o => o.id === outputId);
-    const isCurrentlySelected = clickedOutput?.is_selected;
-
-    if (isCurrentlySelected) {
-      // Deselect this one
-      await supabase
-        .from("face_application_outputs")
-        .update({ is_selected: false })
-        .eq("id", outputId);
-
-      setLooks(prev => prev.map(look => ({
-        ...look,
-        outputs: look.outputs.map(o => 
-          o.id === outputId ? { ...o, is_selected: false } : o
-        ),
-      })));
-    } else {
-      // Deselect all in this view, select this one
-      for (const output of currentView.outputs) {
-        await supabase
-          .from("face_application_outputs")
-          .update({ is_selected: output.id === outputId })
-          .eq("id", output.id);
-      }
-
-      setLooks(prev => prev.map(look => ({
-        ...look,
-        outputs: look.outputs.map(o => 
-          currentView.outputs.some(cv => cv.id === o.id)
-            ? { ...o, is_selected: o.id === outputId }
-            : o
-        ),
-      })));
-
-      // Auto-advance to next view only when selecting
-      if (currentViewIndex < allViews.length - 1) {
-        setTimeout(() => setCurrentViewIndex(i => i + 1), 300);
-      }
-    }
-  };
-
-  const handleDelete = async (outputId: string) => {
-    const { error } = await supabase
-      .from("face_application_outputs")
-      .delete()
-      .eq("id", outputId);
-
-    if (error) {
-      toast({ title: "Error", description: "Failed to delete output", variant: "destructive" });
+    if (!jobsData || jobsData.length === 0) {
+      setLooks([]);
+      setIsLoading(false);
       return;
     }
 
-    setLooks(prev => prev.map(look => ({
-      ...look,
-      outputs: look.outputs.filter(o => o.id !== outputId),
-    })));
+    // Get talent info from first job
+    const firstTalentId = jobsData[0].digital_talent_id;
+    if (firstTalentId) {
+      const { data: talent } = await supabase
+        .from("digital_talents")
+        .select("name, front_face_url")
+        .eq("id", firstTalentId)
+        .single();
+      if (talent) setTalentInfo(talent);
+    }
 
-    toast({ title: "Deleted", description: "Output removed" });
+    // Get look names
+    const lookIds = [...new Set(jobsData.map(j => j.look_id))];
+    const { data: looksData } = await supabase
+      .from("talent_looks")
+      .select("id, name")
+      .in("id", lookIds);
+
+    const lookNameMap: Record<string, string> = {};
+    looksData?.forEach(l => { lookNameMap[l.id] = l.name; });
+
+    // Get all source images for these looks
+    const { data: srcImages } = await supabase
+      .from("look_source_images")
+      .select("id, look_id, view, source_url, head_cropped_url")
+      .in("look_id", lookIds);
+    
+    if (srcImages) {
+      setSourceImages(srcImages);
+    }
+
+    // Get all outputs for these jobs
+    const jobIds = jobsData.map(j => j.id);
+    const { data: outputsData } = await supabase
+      .from("face_application_outputs")
+      .select("*")
+      .in("job_id", jobIds)
+      .order("view")
+      .order("attempt_index");
+
+    // Group outputs by look
+    const outputsByLook: Record<string, FaceApplicationOutput[]> = {};
+    for (const job of jobsData) {
+      if (!outputsByLook[job.look_id]) {
+        outputsByLook[job.look_id] = [];
+      }
+    }
+
+    if (outputsData) {
+      for (const output of outputsData) {
+        const job = jobsData.find(j => j.id === output.job_id);
+        if (job && outputsByLook[job.look_id]) {
+          outputsByLook[job.look_id].push(output as FaceApplicationOutput);
+        }
+      }
+    }
+
+    // Build looks with view statuses
+    const looksWithViews: LookWithViews[] = Object.entries(outputsByLook).map(([lookId, outputs]) => {
+      const views: Record<string, ViewStatus> = {};
+      
+      // Calculate status for each view type
+      for (const viewType of VIEW_TYPES) {
+        views[viewType] = calculateViewStatus(outputs, viewType);
+      }
+
+      // Also check legacy views and map them
+      const legacyViews = ['front', 'side', 'back'];
+      for (const legacyView of legacyViews) {
+        if (!views[legacyView]) {
+          views[legacyView] = calculateViewStatus(outputs, legacyView);
+        }
+      }
+
+      // Check if all 4 required views have selections
+      const isReady = VIEW_TYPES.every(v => views[v]?.hasSelection);
+      const isComplete = VIEW_TYPES.every(v => 
+        views[v]?.status === 'completed' || views[v]?.status === 'needs_selection'
+      );
+
+      return {
+        id: lookId,
+        name: lookNameMap[lookId] || "Unknown Look",
+        views,
+        isReady,
+        isComplete,
+      };
+    });
+
+    setLooks(looksWithViews);
+    setIsLoading(false);
+
+    // Auto-select first look if none selected
+    if (!selectedLookId && looksWithViews.length > 0) {
+      setSelectedLookId(looksWithViews[0].id);
+      // Find first view with outputs or first view type
+      const firstLook = looksWithViews[0];
+      const firstViewWithOutputs = VIEW_TYPES.find(v => 
+        firstLook.views[v]?.totalAttempts > 0
+      );
+      setSelectedView(firstViewWithOutputs || VIEW_TYPES[0]);
+    }
+  }, [projectId, selectedLookId]);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 3000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  // Get current look and view status
+  const currentLook = looks.find(l => l.id === selectedLookId) || null;
+  const currentViewStatus = currentLook && selectedView 
+    ? currentLook.views[selectedView] 
+    : null;
+
+  // Get source image for current view
+  const currentSourceImage = sourceImages.find(
+    s => s.look_id === selectedLookId && s.view === selectedView
+  );
+
+  // Handle view selection from left panel
+  const handleSelectView = (lookId: string, view: string) => {
+    setSelectedLookId(lookId);
+    setSelectedView(view);
   };
 
-  const handleRegenerate = async (outputId: string) => {
-    setRegeneratingIds(prev => new Set(prev).add(outputId));
+  // Handle attempt selection
+  const handleSelectAttempt = async (outputId: string) => {
+    if (!currentViewStatus) return;
+
+    // Deselect all in this view, select this one
+    for (const output of currentViewStatus.outputs) {
+      await supabase
+        .from("face_application_outputs")
+        .update({ is_selected: output.id === outputId })
+        .eq("id", output.id);
+    }
+
+    toast({ title: "Selected", description: "Attempt selected for this view" });
+    fetchData();
+  };
+
+  // Handle regenerate view
+  const handleRegenerateView = async () => {
+    if (!currentViewStatus || currentViewStatus.outputs.length === 0) return;
+
+    setIsRegenerating(true);
     
     try {
-      const { error } = await supabase.functions.invoke("regenerate-face-output", {
-        body: { outputId },
-      });
-
-      if (error) throw error;
-      
-      toast({ title: "Regenerating...", description: "New image will appear shortly" });
-      
-      // Poll for completion
-      const pollInterval = setInterval(async () => {
-        const { data } = await supabase
-          .from("face_application_outputs")
-          .select("*")
-          .eq("id", outputId)
-          .single();
-        
-        if (data && data.status !== "pending") {
-          clearInterval(pollInterval);
-          setRegeneratingIds(prev => {
-            const next = new Set(prev);
-            next.delete(outputId);
-            return next;
-          });
-          
-          if (data.status === "completed") {
-            setLooks(prev => prev.map(look => ({
-              ...look,
-              outputs: look.outputs.map(o => o.id === outputId ? data as FaceApplicationOutput : o),
-            })));
-            toast({ title: "Done", description: "Image regenerated successfully" });
-          } else {
-            toast({ title: "Failed", description: "Regeneration failed", variant: "destructive" });
-          }
-        }
-      }, 2000);
-      
-      // Timeout after 60s
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        setRegeneratingIds(prev => {
-          const next = new Set(prev);
-          next.delete(outputId);
-          return next;
-        });
-      }, 60000);
-      
-    } catch (error: any) {
-      setRegeneratingIds(prev => {
-        const next = new Set(prev);
-        next.delete(outputId);
-        return next;
-      });
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    }
-  };
-
-  const handleRegenerateAll = async (lookId: string, view: string) => {
-    const viewOutputs = allViews
-      .find(v => v.lookId === lookId && v.view === view)
-      ?.outputs || [];
-    
-    if (viewOutputs.length === 0) return;
-    
-    const ids = viewOutputs.map(o => o.id);
-    setRegeneratingIds(prev => new Set([...prev, ...ids]));
-    
-    toast({ title: "Regenerating...", description: `Regenerating ${ids.length} images` });
-    
-    for (const output of viewOutputs) {
-      try {
+      for (const output of currentViewStatus.outputs) {
         await supabase.functions.invoke("regenerate-face-output", {
           body: { outputId: output.id },
         });
-      } catch (error) {
-        console.error("Regenerate error:", error);
       }
+      toast({ title: "Regenerating", description: `Regenerating ${currentViewStatus.outputs.length} attempts` });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setIsRegenerating(false);
     }
   };
 
-  const handleResumeJob = async (jobId: string) => {
-    setResumingJobIds(prev => new Set(prev).add(jobId));
+  // Handle cancel view
+  const handleCancelView = async () => {
+    if (!currentViewStatus) return;
+
+    setIsCanceling(true);
     
     try {
-      const { error } = await supabase.functions.invoke("generate-face-application", {
-        body: { jobId, outfitDescriptions: {}, resume: true },
-      });
-
-      if (error) throw error;
-      
-      toast({ title: "Resuming...", description: "Generation will continue from where it left off" });
-      
-      // Remove from stalled list after a short delay
-      setTimeout(() => {
-        setStalledJobs(prev => prev.filter(j => j.id !== jobId));
-        setResumingJobIds(prev => {
-          const next = new Set(prev);
-          next.delete(jobId);
-          return next;
-        });
-      }, 3000);
-      
+      // Mark pending/generating outputs as failed
+      for (const output of currentViewStatus.outputs) {
+        if (output.status === 'pending' || output.status === 'generating') {
+          await supabase
+            .from("face_application_outputs")
+            .update({ status: 'failed' })
+            .eq("id", output.id);
+        }
+      }
+      toast({ title: "Canceled", description: "View generation canceled" });
+      fetchData();
     } catch (error: any) {
-      setResumingJobIds(prev => {
-        const next = new Set(prev);
-        next.delete(jobId);
-        return next;
-      });
       toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setIsCanceling(false);
     }
   };
 
-  const handleSaveToLook = async () => {
-    setSaving(true);
+  // Handle resume/retry failed
+  const handleResumeView = async () => {
+    if (!currentViewStatus) return;
 
+    setIsResuming(true);
+    
     try {
-      const allOutputs = looks.flatMap(l => l.outputs);
-      const selectedOutputs = allOutputs.filter(o => o.is_selected);
+      // Delete failed outputs and regenerate
+      const failedIds = currentViewStatus.outputs
+        .filter(o => o.status === 'failed')
+        .map(o => o.id);
+      
+      for (const id of failedIds) {
+        await supabase
+          .from("face_application_outputs")
+          .delete()
+          .eq("id", id);
+      }
+      
+      // Trigger regeneration via job resume
+      // This will detect missing outputs and regenerate them
+      toast({ title: "Retrying", description: "Failed attempts will be regenerated" });
+      fetchData();
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setIsResuming(false);
+    }
+  };
 
-      if (selectedOutputs.length === 0) {
-        toast({ title: "No selections", description: "Select at least one output per view.", variant: "destructive" });
-        return;
+  // Handle save to look
+  const handleSaveToLook = async () => {
+    if (!currentLook || !currentLook.isReady) return;
+
+    setIsSaving(true);
+    
+    try {
+      // Get selected outputs for each view
+      const selectedOutputs: FaceApplicationOutput[] = [];
+      for (const viewType of VIEW_TYPES) {
+        const viewStatus = currentLook.views[viewType];
+        const selected = viewStatus?.outputs.find(o => o.is_selected);
+        if (selected) {
+          selectedOutputs.push(selected);
+        }
       }
 
       // Get a talent_id from talents table for legacy compatibility
@@ -388,45 +343,54 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
         return;
       }
 
-      // Find look_id for each output
+      // Insert into talent_images
       for (const output of selectedOutputs) {
-        const look = looks.find(l => l.outputs.some(o => o.id === output.id));
-        if (look) {
-          await supabase.from("talent_images").insert({
-            talent_id: talentData.id,
-            look_id: look.id,
-            view: output.view,
-            stored_url: output.stored_url,
-          });
-        }
+        await supabase.from("talent_images").insert({
+          talent_id: talentData.id,
+          look_id: currentLook.id,
+          view: output.view,
+          stored_url: output.stored_url,
+        });
       }
 
-      toast({ title: "Saved to Look", description: "Selected outputs have been saved and are now available in Avatar Repose." });
+      toast({ 
+        title: "Saved", 
+        description: `${selectedOutputs.length} views saved to look. Available in Avatar Repose.` 
+      });
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
-      setSaving(false);
+      setIsSaving(false);
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "completed":
-        return <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/30"><Check className="h-3 w-3 mr-1" />Completed</Badge>;
-      case "running":
-        return <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/30"><Loader2 className="h-3 w-3 mr-1 animate-spin" />Running</Badge>;
-      case "pending":
-        return <Badge variant="outline" className="bg-yellow-500/10 text-yellow-600 border-yellow-500/30"><Loader2 className="h-3 w-3 mr-1" />Pending</Badge>;
-      case "failed":
-        return <Badge variant="outline" className="bg-red-500/10 text-red-600 border-red-500/30"><AlertCircle className="h-3 w-3 mr-1" />Failed</Badge>;
-      default:
-        return null;
+  // Handle download selected
+  const handleDownloadSelected = async () => {
+    if (!currentLook) return;
+
+    const selectedUrls: string[] = [];
+    for (const viewType of VIEW_TYPES) {
+      const viewStatus = currentLook.views[viewType];
+      const selected = viewStatus?.outputs.find(o => o.is_selected);
+      if (selected?.stored_url) {
+        selectedUrls.push(selected.stored_url);
+      }
+    }
+
+    for (const url of selectedUrls) {
+      window.open(url, '_blank');
     }
   };
 
-  const allOutputs = looks.flatMap(l => l.outputs);
-  const selectedCount = allOutputs.filter(o => o.is_selected).length;
-  const totalViews = allViews.length;
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="py-12 flex items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (looks.length === 0) {
     return (
@@ -441,285 +405,44 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
   }
 
   return (
-    <div className="flex gap-6">
-      {/* Main review area */}
-      <div className="flex-1 space-y-6">
-        {/* Stalled jobs alert */}
-        {stalledJobs.length > 0 && (
-          <Card className="border-yellow-500/50 bg-yellow-500/10">
-            <CardContent className="py-4">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="font-medium text-yellow-700">Stalled Generation Jobs</h3>
-                  <p className="text-sm text-yellow-600 mb-3">
-                    Some jobs stopped due to credit issues or timeouts. Resume to continue from where they left off.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {stalledJobs.map(job => (
-                      <Button
-                        key={job.id}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleResumeJob(job.id)}
-                        disabled={resumingJobIds.has(job.id)}
-                        className="bg-background"
-                      >
-                        {resumingJobIds.has(job.id) ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                        )}
-                        Resume {job.lookName} ({job.progress}/{job.total})
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Progress indicator */}
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <h2 className="text-xl font-semibold">Review & Select</h2>
-            <p className="text-sm text-muted-foreground">
-              {selectedCount} of {totalViews} views selected
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={currentViewIndex === 0}
-              onClick={() => setCurrentViewIndex(i => i - 1)}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-medium px-2">
-              {currentViewIndex + 1} / {totalViews}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={currentViewIndex >= totalViews - 1}
-              onClick={() => setCurrentViewIndex(i => i + 1)}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Per-Look Summary Table */}
-        <LooksSummaryTable looks={looks} projectId={projectId} />
-
-        {/* Current view - GRID STYLE */}
-        {currentView && (
-          <Card>
-            <CardHeader className="py-3 flex-row items-center justify-between">
-              <div className="flex items-center gap-3">
-                <CardTitle className="text-base">
-                  {currentView.lookName} — <span className="capitalize">{currentView.view}</span> View
-                </CardTitle>
-                {getStatusBadge(currentViewStatus)}
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-muted-foreground">{currentOutputs.length} options</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleRegenerateAll(currentView.lookId, currentView.view)}
-                  disabled={currentOutputs.length === 0}
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Regenerate All
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {currentOutputs.length > 0 ? (
-                <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                  {currentOutputs.map((output, idx) => (
-                    <div key={output.id} className="relative group">
-                      {/* Image */}
-                      <div
-                        className={`
-                          aspect-square rounded-lg overflow-hidden border-4 transition-all cursor-pointer
-                          ${output.is_selected
-                            ? "border-primary ring-4 ring-primary/30"
-                            : "border-transparent hover:border-muted-foreground/50"
-                          }
-                        `}
-                      >
-                        {regeneratingIds.has(output.id) || output.status === "pending" || output.status === "generating" ? (
-                          <div className="w-full h-full bg-muted flex flex-col items-center justify-center">
-                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                          </div>
-                        ) : output.stored_url ? (
-                          <img
-                            src={output.stored_url}
-                            alt={`Option ${idx + 1}`}
-                            loading="lazy"
-                            decoding="async"
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-muted flex items-center justify-center">
-                            <span className="text-xs text-muted-foreground">No image</span>
-                          </div>
-                        )}
-                        {output.is_selected && (
-                          <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full p-1.5">
-                            <Check className="h-4 w-4" />
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Quick action buttons below each image */}
-                      <div className="flex justify-center gap-1.5 mt-2">
-                        <Button
-                          variant={output.is_selected ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => handleSelect(output.id)}
-                          className={`h-8 w-8 p-0 ${output.is_selected ? "bg-primary hover:bg-primary/90" : ""}`}
-                          disabled={regeneratingIds.has(output.id) || output.status === "pending" || output.status === "generating"}
-                        >
-                          <Check className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDelete(output.id)}
-                          className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          disabled={regeneratingIds.has(output.id)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="center">
-                            <DropdownMenuItem onClick={() => handleRegenerate(output.id)}>
-                              <RefreshCw className="h-4 w-4 mr-2" />
-                              Regenerate
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-center text-muted-foreground py-8">
-                  No outputs for this view yet.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* All views summary with status */}
-        <Card>
-          <CardHeader className="py-3">
-            <CardTitle className="text-sm">All Views Overview</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {allViews.map((v, idx) => {
-                const hasSelection = v.outputs.some(o => o.is_selected);
-                const viewStatus = calculateOutputsStatus(v.outputs);
-                const isRunning = viewStatus === "running";
-                const isFailed = viewStatus === "failed";
-                
-                return (
-                  <button
-                    key={`${v.lookId}-${v.view}`}
-                    onClick={() => setCurrentViewIndex(idx)}
-                    className={`
-                      px-3 py-1.5 rounded-full text-xs font-medium border transition-colors flex items-center gap-1
-                      ${idx === currentViewIndex
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : isFailed
-                          ? "bg-red-500/10 text-red-600 border-red-500/30"
-                          : isRunning
-                            ? "bg-blue-500/10 text-blue-600 border-blue-500/30"
-                            : hasSelection
-                              ? "bg-primary/10 text-primary border-primary/30"
-                              : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
-                      }
-                    `}
-                  >
-                    {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
-                    {isFailed && <AlertCircle className="h-3 w-3" />}
-                    {v.lookName} - {v.view}
-                    {hasSelection && <Check className="h-3 w-3" />}
-                  </button>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Actions - simplified, job creation is now per-look in the summary table */}
-        <div className="flex justify-end gap-3">
-          <Button variant="outline" size="lg">
-            <Download className="h-4 w-4 mr-2" />
-            Download Selected
-          </Button>
-          <Button
-            size="lg"
-            onClick={handleSaveToLook}
-            disabled={selectedCount === 0 || saving}
-          >
-            <Save className="h-4 w-4 mr-2" />
-            {saving ? "Saving..." : "Save to Look"}
-          </Button>
-        </div>
+    <div className="flex h-[calc(100vh-200px)] min-h-[600px] rounded-lg border bg-card overflow-hidden">
+      {/* LEFT: Look Overview */}
+      <div className="w-64 flex-shrink-0">
+        <LookOverviewPanel
+          looks={looks}
+          selectedLookId={selectedLookId}
+          selectedView={selectedView}
+          onSelectView={handleSelectView}
+        />
       </div>
 
-      {/* Talent reference sidebar */}
-      <div className="w-48 flex-shrink-0">
-        <div className="sticky top-4">
-          <Card>
-            <CardHeader className="py-3">
-              <CardTitle className="text-sm">Talent Reference</CardTitle>
-            </CardHeader>
-            <CardContent className="pb-4">
-              {talentInfo?.front_face_url ? (
-                <img
-                  src={talentInfo.front_face_url}
-                  alt={talentInfo.name}
-                  className="w-full aspect-square object-cover rounded-lg"
-                />
-              ) : (
-                <div className="w-full aspect-square bg-muted rounded-lg flex items-center justify-center">
-                  <User className="w-8 h-8 text-muted-foreground" />
-                </div>
-              )}
-              <p className="text-center text-sm font-medium mt-2">
-                {talentInfo?.name || "Unknown"}
-              </p>
-            </CardContent>
-          </Card>
+      {/* CENTER: View Review */}
+      <ViewReviewPanel
+        lookName={currentLook?.name || ''}
+        view={selectedView || ''}
+        viewStatus={currentViewStatus}
+        bodyImageUrl={currentSourceImage?.source_url || null}
+        headReferenceUrl={currentSourceImage?.head_cropped_url || talentInfo?.front_face_url || null}
+        onSelectAttempt={handleSelectAttempt}
+        onRegenerateView={handleRegenerateView}
+        onCancelView={handleCancelView}
+        isRegenerating={isRegenerating}
+        isCanceling={isCanceling}
+      />
 
-          {/* Original look reference */}
-          {currentView && (
-            <Card className="mt-4">
-              <CardHeader className="py-3">
-                <CardTitle className="text-sm">Original Look</CardTitle>
-              </CardHeader>
-              <CardContent className="pb-4">
-                <p className="text-xs text-muted-foreground mb-2">{currentView.lookName}</p>
-                <p className="text-xs font-medium capitalize">{currentView.view} View</p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+      {/* RIGHT: Status & Recovery */}
+      <StatusRecoveryPanel
+        look={currentLook}
+        selectedView={selectedView}
+        viewStatus={currentViewStatus}
+        talentName={talentInfo?.name || null}
+        talentImageUrl={talentInfo?.front_face_url || null}
+        onResumeView={handleResumeView}
+        onSaveToLook={handleSaveToLook}
+        onDownloadSelected={handleDownloadSelected}
+        isResuming={isResuming}
+        isSaving={isSaving}
+      />
     </div>
   );
 }

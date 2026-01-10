@@ -6,8 +6,19 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Standard 4-view system
+const VIEW_TYPES = ['full_front', 'cropped_front', 'back', 'detail'] as const;
+
 // View-specific pose and framing instructions
 const VIEW_PROMPTS: Record<string, string> = {
+  full_front: `Full-length front-facing portrait showing the complete outfit from head to toe. Model standing upright with head held straight and aligned with the torso. Eyes looking directly at the camera with a calm, steady gaze. Brows in a soft, neutral resting position. Mouth closed with an extremely subtle smile.
+
+Keep face and lighting consistent from image 2, make sure to keep freckles intact.`,
+
+  cropped_front: `Close-up front-facing portrait cropped at chest level, focusing on the face and upper body. Head held upright and aligned with the torso, showing no noticeable tilt left or right. Chin is neutral and level. Eyes looking directly at the camera with a calm, steady gaze.
+
+Keep face and lighting consistent from image 2, make sure to keep freckles intact.`,
+
   front: `Front-facing portrait with the head held upright and aligned with the torso, showing no noticeable tilt left or right. Chin is neutral and level, giving a centred, composed posture. Eyes looking directly at the camera with a calm, steady gaze. Eyelids moderately open — relaxed and natural, not widened, creating a serene, attentive expression. Brows in a soft, neutral resting position. Mouth closed with an extremely subtle, low-intensity smile: the lips rest naturally with only a faint softening, no upward corner lift.
 
 Keep face and lighting consistent from image 2, make sure to keep freckles intact.`,
@@ -17,6 +28,10 @@ Keep face and lighting consistent from image 2, make sure to keep freckles intac
 Keep face and lighting consistent from image 2. Keep freckles consistent.`,
 
   back: `Back-facing pose with shoulders squared to the camera. Head is rotated slightly to her left (camera right), creating a soft partial profile. Chin is neutral and level. The face is visible only in side view, with the cheek, jawline, and nose seen in gentle profile while the eyes are turned away from the camera. Overall posture is upright, calm, and centered.
+
+Keep face and lighting consistent from image 2.`,
+
+  detail: `Close-up detail shot focusing on a specific feature of the outfit (collar, cuff, pocket, or texture). Frame tightly on the detail while keeping the model's face partially visible at the edge of frame for context.
 
 Keep face and lighting consistent from image 2.`,
 };
