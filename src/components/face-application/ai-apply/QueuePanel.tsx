@@ -1,6 +1,7 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { 
   X, 
   Loader2, 
@@ -22,15 +23,14 @@ import type { AIApplyQueueItem } from "@/types/ai-apply";
 
 interface QueuePanelProps {
   queue: AIApplyQueueItem[];
-  selectedViews: Set<string>; // Show what's selected before running
+  selectedViews: Set<string>;
+  prompt: string;
+  onPromptChange: (prompt: string) => void;
   onRemoveFromQueue: (id: string) => void;
   onRetryItem: (item: AIApplyQueueItem) => void;
   onCancelBatch: () => void;
   onSendToJobBoard: () => void;
 }
-
-// Read-only prompt preview
-const PROMPT_PREVIEW = `Apply the provided head/face to the body while maintaining exact clothing, pose, and proportions. Preserve facial identity precisely. Output should be photorealistic and seamless.`;
 
 function QueueItemStatus({ status }: { status: AIApplyQueueItem['status'] }) {
   switch (status) {
@@ -67,6 +67,8 @@ function QueueItemStatus({ status }: { status: AIApplyQueueItem['status'] }) {
 export function QueuePanel({
   queue,
   selectedViews,
+  prompt,
+  onPromptChange,
   onRemoveFromQueue,
   onRetryItem,
   onCancelBatch,
@@ -150,18 +152,21 @@ export function QueuePanel({
         </div>
       </ScrollArea>
 
-      {/* Prompt preview */}
+      {/* Prompt editor */}
       <div className="border-t border-border">
         <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
           <CollapsibleTrigger className="flex items-center justify-between w-full px-4 py-3 text-xs text-muted-foreground font-medium hover:text-foreground transition-colors">
-            <span>PROMPT (read-only)</span>
+            <span>PROMPT</span>
             <ChevronDown className={cn("h-4 w-4 transition-transform", promptOpen && "rotate-180")} />
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="px-4 pb-4">
-              <div className="p-3 bg-muted rounded-lg text-xs text-muted-foreground leading-relaxed">
-                {PROMPT_PREVIEW}
-              </div>
+              <Textarea
+                value={prompt}
+                onChange={(e) => onPromptChange(e.target.value)}
+                placeholder="Enter your generation prompt..."
+                className="text-xs min-h-[100px] resize-none bg-muted border-0 focus-visible:ring-1"
+              />
             </div>
           </CollapsibleContent>
         </Collapsible>

@@ -15,11 +15,15 @@ interface AIApplyTabProps {
 }
 
 export function AIApplyTab({ projectId }: AIApplyTabProps) {
+  // Default prompt
+  const DEFAULT_PROMPT = `Apply the provided head/face to the body while maintaining exact clothing, pose, and proportions. Preserve facial identity precisely. Output should be photorealistic and seamless.`;
+
   // Batch selection state
   const [selectedViews, setSelectedViews] = useState<Set<string>>(new Set());
   const [hoveredView, setHoveredView] = useState<{ lookId: string; view: string } | null>(null);
   const [attemptsPerView, setAttemptsPerView] = useState(DEFAULT_AI_APPLY_SETTINGS.attemptsPerView);
   const [model, setModel] = useState(DEFAULT_AI_APPLY_SETTINGS.model);
+  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
 
   const { toast } = useToast();
 
@@ -234,6 +238,8 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
         <QueuePanel
           queue={queue}
           selectedViews={selectedViews}
+          prompt={prompt}
+          onPromptChange={setPrompt}
           onRemoveFromQueue={removeFromQueue}
           onRetryItem={handleRetryItem}
           onCancelBatch={handleCancelBatch}
