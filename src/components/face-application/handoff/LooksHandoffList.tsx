@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, Minus, AlertTriangle } from 'lucide-react';
+import { Check, Minus, AlertTriangle, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -172,16 +172,27 @@ function LookRow({ look, isSelected, onSelect, onToggleInclusion }: LookRowProps
             })}
           </div>
 
-          {/* Status badge */}
-          <Badge 
-            variant="outline" 
-            className={cn("text-[10px] px-1.5 py-0 h-4", config.className)}
-          >
-            {look.status === 'blocking' && (
-              <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+          {/* Status badges */}
+          <div className="flex items-center gap-1">
+            <Badge 
+              variant="outline" 
+              className={cn("text-[10px] px-1.5 py-0 h-4", config.className)}
+            >
+              {look.status === 'blocking' && (
+                <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+              )}
+              {config.label}
+            </Badge>
+            {look.hasSentJob && (
+              <Badge 
+                variant="outline" 
+                className="text-[10px] px-1.5 py-0 h-4 bg-blue-500/10 text-blue-600 border-blue-500/30"
+              >
+                <Send className="h-2 w-2 mr-0.5" />
+                Sent
+              </Badge>
             )}
-            {config.label}
-          </Badge>
+          </div>
         </div>
       </div>
     </div>

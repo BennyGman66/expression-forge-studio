@@ -64,6 +64,17 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
 
       if (jobsError) throw jobsError;
 
+      // 4. Fetch existing unified_jobs linked to these looks (already sent to Job Board)
+      const { data: existingJobs, error: existingJobsError } = await supabase
+        .from('unified_jobs')
+        .select('look_id')
+        .in('look_id', lookIds);
+
+      if (existingJobsError) throw existingJobsError;
+
+      // Create a Set of look IDs that have been sent to Job Board
+      const sentLookIds = new Set(existingJobs?.map(j => j.look_id).filter(Boolean) || []);
+
       const jobIds = jobs?.map(j => j.id) || [];
       
       let selectedOutputs: Array<{
@@ -133,13 +144,16 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
           status = 'incomplete'; // Has views but missing both required
         }
 
+        const hasSentJob = sentLookIds.has(look.id);
+
         return {
           id: look.id,
           name: look.name,
           views,
           status,
           readyCount,
-          isIncluded: meetsMinimum, // Auto-include looks that meet minimum
+          isIncluded: meetsMinimum && !hasSentJob, // Don't auto-include if already sent
+          hasSentJob,
         };
       });
 

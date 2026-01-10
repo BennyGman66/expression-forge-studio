@@ -29,6 +29,7 @@ export interface LookHandoffStatus {
   status: 'ready' | 'incomplete' | 'blocking';
   readyCount: number;
   isIncluded: boolean; // For bulk selection
+  hasSentJob: boolean; // Whether a job already exists on the Job Board
 }
 
 export interface JobGroup {
