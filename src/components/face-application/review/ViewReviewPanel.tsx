@@ -16,9 +16,8 @@ interface ViewReviewPanelProps {
   onRegenerateView: () => void;
   onCancelView: () => void;
   onGenerateView?: () => void;
-  isRegenerating: boolean;
   isCanceling: boolean;
-  isGenerating?: boolean;
+  pendingCount?: number;
 }
 
 export function ViewReviewPanel({
@@ -31,9 +30,8 @@ export function ViewReviewPanel({
   onRegenerateView,
   onCancelView,
   onGenerateView,
-  isRegenerating,
   isCanceling,
-  isGenerating,
+  pendingCount = 0,
 }: ViewReviewPanelProps) {
   const outputs = viewStatus?.outputs || [];
   const selectedOutput = outputs.find(o => o.is_selected);
@@ -105,28 +103,19 @@ export function ViewReviewPanel({
             <Button
               size="sm"
               onClick={onGenerateView}
-              disabled={isGenerating}
             >
-              {isGenerating ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4 mr-2" />
-              )}
-              Generate View
+              <Play className="h-4 w-4 mr-2" />
+              {pendingCount > 0 ? "Add to Queue" : "Generate View"}
             </Button>
           ) : (
             <Button
               variant="outline"
               size="sm"
               onClick={onRegenerateView}
-              disabled={isRegenerating || isRunning || outputs.length === 0}
+              disabled={isRunning || outputs.length === 0}
             >
-              {isRegenerating ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4 mr-2" />
-              )}
-              Regenerate View
+              <RefreshCw className="h-4 w-4 mr-2" />
+              {pendingCount > 0 ? "Add to Queue" : "Regenerate View"}
             </Button>
           )}
         </div>
