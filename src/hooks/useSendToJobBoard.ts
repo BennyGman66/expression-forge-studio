@@ -78,6 +78,14 @@ export function useSendToJobBoard() {
         jobIds.push(job.id);
 
         // 3. Create artifacts and inputs for all views that have any data
+        // Map view keys to valid artifact types
+        const sourceTypeMap: Record<string, string> = {
+          'full_front': 'LOOK_ORIGINAL_FRONT',
+          'cropped_front': 'LOOK_ORIGINAL_FRONT',
+          'back': 'LOOK_ORIGINAL_BACK',
+          'detail': 'LOOK_ORIGINAL_SIDE',
+        };
+        
         for (const viewKey of REQUIRED_VIEWS) {
           const viewData = look.views[viewKey];
           
@@ -86,12 +94,14 @@ export function useSendToJobBoard() {
           
           // Create artifact for source image (original fit model photo)
           if (viewData.sourceUrl) {
+            const sourceType = sourceTypeMap[viewKey] || 'LOOK_ORIGINAL';
+            
             const { data: sourceArtifact, error: sourceArtifactError } = await supabase
               .from('unified_artifacts')
               .insert({
                 project_id: projectId,
                 look_id: look.id,
-                type: `LOOK_ORIGINAL_${viewKey.toUpperCase()}` as any,
+                type: sourceType as any,
                 file_url: viewData.sourceUrl,
                 metadata: { view: viewKey },
               })
