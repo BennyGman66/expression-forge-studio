@@ -355,6 +355,16 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
 const handleGenerateView = () => {
   if (!currentLook || !selectedView || !currentSourceImage) return;
 
+  // Validate head crop exists
+  if (!currentSourceImage.head_cropped_url) {
+    toast({ 
+      title: "Cannot Generate", 
+      description: "Head crop is required for this view. Please crop the head first in the Head Crop tab.",
+      variant: "destructive"
+    });
+    return;
+  }
+
   const added = addToQueue(
     'generate',
     currentLook.id,
@@ -485,6 +495,7 @@ const handleGenerateView = () => {
         viewStatus={currentViewStatus}
         bodyImageUrl={currentSourceImage?.source_url || null}
         headReferenceUrl={currentSourceImage?.head_cropped_url || talentInfo?.front_face_url || null}
+        hasHeadCrop={!!currentSourceImage?.head_cropped_url}
         onSelectAttempt={handleSelectAttempt}
         onRegenerateView={handleRegenerateView}
         onCancelView={handleCancelView}

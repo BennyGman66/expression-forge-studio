@@ -116,7 +116,17 @@ export function useGenerationQueue({ projectId, onComplete }: UseGenerationQueue
       updateItemStatus(item.id, 'completed');
       onComplete?.();
     } catch (error: any) {
-      updateItemStatus(item.id, 'failed', error.message);
+      // Provide friendlier error messages
+      const errorMessage = error.message || 'Unknown error';
+      let friendlyMessage = errorMessage;
+      
+      if (errorMessage.includes('No source images')) {
+        friendlyMessage = 'Missing head crop for this view';
+      } else if (errorMessage.includes('No talent assigned')) {
+        friendlyMessage = 'No talent assigned to this look';
+      }
+      
+      updateItemStatus(item.id, 'failed', friendlyMessage);
     } finally {
       setIsProcessing(false);
     }
