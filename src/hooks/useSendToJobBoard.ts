@@ -77,14 +77,12 @@ export function useSendToJobBoard() {
         if (jobError) throw jobError;
         jobIds.push(job.id);
 
-        // 3. Create artifacts and inputs only for views with complete pairs
-        const viewsToSend = REQUIRED_VIEWS.filter(view => {
-          const viewData = look.views[view];
-          return viewData.sourceUrl && viewData.selectedUrl;
-        });
-
-        for (const viewKey of viewsToSend) {
+        // 3. Create artifacts and inputs for all views that have any data
+        for (const viewKey of REQUIRED_VIEWS) {
           const viewData = look.views[viewKey];
+          
+          // Skip if neither source nor render exists
+          if (!viewData.sourceUrl && !viewData.selectedUrl) continue;
           
           // Create artifact for source image (original fit model photo)
           if (viewData.sourceUrl) {

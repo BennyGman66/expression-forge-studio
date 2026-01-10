@@ -70,7 +70,7 @@ export default function FreelancerJobDetail() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [pendingReplacements, setPendingReplacements] = useState<Map<string, { file: File; preview: string }>>(new Map());
 
-  // Group inputs by view (Front, Side, Back) for Foundation Face Replace
+  // Group inputs by view for Foundation Face Replace (supports 4-view system)
   const groupedInputs = useMemo(() => {
     if (job?.type !== 'FOUNDATION_FACE_REPLACE') return null;
     
@@ -81,8 +81,12 @@ export default function FreelancerJobDetail() {
       let view = '';
       let isHead = false;
       
-      if (label.includes('front')) view = 'Front';
-      else if (label.includes('side')) view = 'Side';
+      // Support both legacy and new 4-view system
+      if (label.includes('full_front') || label.includes('full front')) view = 'Front';
+      else if (label.includes('cropped_front') || label.includes('cropped front')) view = 'Cropped Front';
+      else if (label.includes('front')) view = 'Front'; // Legacy fallback
+      else if (label.includes('detail')) view = 'Detail';
+      else if (label.includes('side')) view = 'Detail'; // Legacy: side → detail
       else if (label.includes('back')) view = 'Back';
       
       if (label.includes('head') || label.includes('render')) isHead = true;
@@ -99,10 +103,11 @@ export default function FreelancerJobDetail() {
       }
     });
     
-    return Object.values(groups).sort((a, b) => {
-      const order = { Front: 0, Side: 1, Back: 2 };
-      return (order[a.view as keyof typeof order] || 0) - (order[b.view as keyof typeof order] || 0);
-    });
+    // Sort in display order
+    const viewOrder: Record<string, number> = { 'Front': 0, 'Cropped Front': 1, 'Back': 2, 'Detail': 3 };
+    return Object.values(groups).sort((a, b) => 
+      (viewOrder[a.view] ?? 99) - (viewOrder[b.view] ?? 99)
+    );
   }, [inputs, job?.type]);
 
   // Expected outputs for Foundation Face Replace
