@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, MoreVertical, Trash2, FolderOpen, Users, Image } from "lucide-react";
+import { Plus, MoreVertical, Trash2, FolderOpen, Users, Image, Send } from "lucide-react";
 import { FaceApplicationProject } from "@/hooks/useFaceApplicationProjects";
 import { format } from "date-fns";
 
@@ -118,6 +118,12 @@ export function FaceAppProjectsGrid({
                     <Users className="h-4 w-4" />
                     <span>{project.talent_count || 0} talents</span>
                   </div>
+                  {(project.job_count || 0) > 0 && (
+                    <div className="flex items-center gap-1 text-blue-600">
+                      <Send className="h-4 w-4" />
+                      <span>{project.job_count} jobs</span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

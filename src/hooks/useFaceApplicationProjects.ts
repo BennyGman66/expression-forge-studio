@@ -10,6 +10,7 @@ export interface FaceApplicationProject {
   updated_at: string;
   look_count?: number;
   talent_count?: number;
+  job_count?: number;
 }
 
 export function useFaceApplicationProjects() {
@@ -30,7 +31,7 @@ export function useFaceApplicationProjects() {
       return;
     }
 
-    // Get look counts and talent counts for each project
+    // Get look counts, talent counts, and job counts for each project
     const projectsWithStats = await Promise.all(
       (data || []).map(async (project) => {
         const { data: looks } = await supabase
@@ -40,10 +41,17 @@ export function useFaceApplicationProjects() {
 
         const uniqueTalents = new Set((looks || []).map((l) => l.digital_talent_id).filter(Boolean));
 
+        // Get job count for this project
+        const { count: jobCount } = await supabase
+          .from("unified_jobs")
+          .select("id", { count: "exact", head: true })
+          .eq("project_id", project.id);
+
         return {
           ...project,
           look_count: looks?.length || 0,
           talent_count: uniqueTalents.size,
+          job_count: jobCount || 0,
         };
       })
     );
