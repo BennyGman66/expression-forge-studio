@@ -28,6 +28,42 @@ interface CreateJobRequest {
   aiModel?: string;
 }
 
+// Helper function to verify authentication
+async function verifyAuth(req: Request): Promise<{ userId: string | null; error: Response | null }> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return {
+      userId: null,
+      error: new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    };
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const token = authHeader.replace('Bearer ', '');
+  const { data, error } = await supabase.auth.getClaims(token);
+  
+  if (error || !data?.claims) {
+    return {
+      userId: null,
+      error: new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    };
+  }
+
+  return { userId: data.claims.sub as string, error: null };
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -35,11 +71,18 @@ serve(async (req) => {
   }
 
   try {
+    // Verify authentication
+    const { userId, error: authError } = await verifyAuth(req);
+    if (authError) {
+      return authError;
+    }
+    console.log(`Authenticated user: ${userId}`);
+
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
-      console.error("LOVABLE_API_KEY not configured");
+      console.error("API configuration error");
       return new Response(
-        JSON.stringify({ error: "AI service not configured" }),
+        JSON.stringify({ error: "Service temporarily unavailable" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -216,7 +259,7 @@ serve(async (req) => {
           recipe_id: prompt.recipeId,
           prompt_used: prompt.fullPrompt,
           status: "failed",
-          metrics_json: { error: errorText },
+          metrics_json: { error: "Generation failed" },
         });
 
         const updatedLogs = [...logs, `❌ Failed: ${response.status}`];
@@ -227,7 +270,7 @@ serve(async (req) => {
         }).eq("id", jobId);
 
         return new Response(
-          JSON.stringify({ success: false, error: errorText }),
+          JSON.stringify({ success: false, error: "Generation failed" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -264,7 +307,7 @@ serve(async (req) => {
 
       if (uploadError) {
         console.error("Upload error:", uploadError);
-        const updatedLogs = [...logs, `❌ Upload failed: ${uploadError.message}`];
+        const updatedLogs = [...logs, `❌ Upload failed`];
         await supabase.from("jobs").update({ 
           progress: promptIndex + 1,
           logs: updatedLogs.slice(-50),
@@ -272,7 +315,7 @@ serve(async (req) => {
         }).eq("id", jobId);
 
         return new Response(
-          JSON.stringify({ success: false, error: uploadError.message }),
+          JSON.stringify({ success: false, error: "Upload failed" }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -321,7 +364,7 @@ serve(async (req) => {
       
       const logMessage = err instanceof Error && err.name === "AbortError" 
         ? "⏱ Timed out" 
-        : `❌ Error: ${errorMessage}`;
+        : `❌ Error occurred`;
       
       const updatedLogs = [...logs, logMessage];
       await supabase.from("jobs").update({
@@ -331,15 +374,14 @@ serve(async (req) => {
       }).eq("id", jobId);
 
       return new Response(
-        JSON.stringify({ success: false, error: errorMessage }),
+        JSON.stringify({ success: false, error: "Processing error" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("Generate images error:", error);
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: "Service temporarily unavailable" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
