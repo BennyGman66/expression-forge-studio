@@ -1,8 +1,19 @@
+// Standard 4-view system for face application
+export const VIEW_TYPES = ['full_front', 'cropped_front', 'back', 'detail'] as const;
+export type ViewType = typeof VIEW_TYPES[number];
+
+export const VIEW_LABELS: Record<ViewType, string> = {
+  full_front: 'Full Front',
+  cropped_front: 'Cropped Front',
+  back: 'Back',
+  detail: 'Detail',
+};
+
 export interface LookSourceImage {
   id: string;
   look_id: string;
   digital_talent_id: string | null;
-  view: 'front' | 'back' | 'side' | 'detail';
+  view: ViewType | 'front' | 'back' | 'side' | 'detail'; // Support legacy views
   source_url: string;
   head_crop_x: number | null;
   head_crop_y: number | null;
@@ -44,6 +55,27 @@ export interface FaceApplicationOutput {
 export interface FaceFoundation {
   id: string;
   stored_url: string;
-  view: 'front' | 'side' | 'back' | 'unknown';
+  view: ViewType | 'front' | 'side' | 'back' | 'unknown';
   digital_talent_id: string;
+}
+
+// View status for tracking per-view completion
+export interface ViewStatus {
+  view: string;
+  status: 'not_started' | 'running' | 'completed' | 'failed' | 'needs_selection';
+  hasSelection: boolean;
+  completedCount: number;
+  failedCount: number;
+  runningCount: number;
+  totalAttempts: number;
+  outputs: FaceApplicationOutput[];
+}
+
+// Look with all view statuses
+export interface LookWithViews {
+  id: string;
+  name: string;
+  views: Record<string, ViewStatus>;
+  isReady: boolean; // All 4 views have selections
+  isComplete: boolean; // All views have completed generation
 }

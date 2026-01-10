@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Check, AlertCircle, Loader2, Briefcase, ExternalLink, CheckCircle2 } from "lucide-react";
-import { FaceApplicationOutput } from "@/types/face-application";
+import { FaceApplicationOutput, VIEW_TYPES, VIEW_LABELS, ViewType } from "@/types/face-application";
 import { CreateFoundationFaceReplaceJobDialog } from "@/components/jobs/CreateFoundationFaceReplaceJobDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
@@ -17,11 +17,7 @@ import {
 interface LookSummary {
   id: string;
   name: string;
-  views: {
-    front: { hasSelection: boolean; isGenerating: boolean; outputCount: number };
-    side: { hasSelection: boolean; isGenerating: boolean; outputCount: number };
-    back: { hasSelection: boolean; isGenerating: boolean; outputCount: number };
-  };
+  views: Record<string, { hasSelection: boolean; isGenerating: boolean; outputCount: number }>;
   isReady: boolean;
   isGenerating: boolean;
 }
@@ -88,21 +84,26 @@ export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) 
 
   // Build summary data for each look
   const lookSummaries: LookSummary[] = looks.map(look => {
-    const frontStatus = calculateViewStatus(look.outputs, "front");
-    const sideStatus = calculateViewStatus(look.outputs, "side");
-    const backStatus = calculateViewStatus(look.outputs, "back");
+    const views: Record<string, { hasSelection: boolean; isGenerating: boolean; outputCount: number }> = {};
+    
+    // Calculate status for all 4 view types
+    for (const viewType of VIEW_TYPES) {
+      views[viewType] = calculateViewStatus(look.outputs, viewType);
+    }
 
-    const isReady = frontStatus.hasSelection && sideStatus.hasSelection && backStatus.hasSelection;
-    const isGenerating = frontStatus.isGenerating || sideStatus.isGenerating || backStatus.isGenerating;
+    // Also check legacy views
+    views.front = calculateViewStatus(look.outputs, "front");
+    views.side = calculateViewStatus(look.outputs, "side");
+    views.back = calculateViewStatus(look.outputs, "back");
+
+    // Ready when all 4 required views have selections
+    const isReady = VIEW_TYPES.every(v => views[v]?.hasSelection);
+    const isGenerating = Object.values(views).some(v => v.isGenerating);
 
     return {
       id: look.id,
       name: look.name,
-      views: {
-        front: frontStatus,
-        side: sideStatus,
-        back: backStatus,
-      },
+      views,
       isReady,
       isGenerating,
     };
@@ -147,9 +148,11 @@ export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) 
           <TableHeader>
             <TableRow>
               <TableHead className="w-[200px]">Product</TableHead>
-              <TableHead className="text-center w-[80px]">Front</TableHead>
-              <TableHead className="text-center w-[80px]">Side</TableHead>
-              <TableHead className="text-center w-[80px]">Back</TableHead>
+              {VIEW_TYPES.map(view => (
+                <TableHead key={view} className="text-center w-[80px]">
+                  {VIEW_LABELS[view].split(' ')[0]}
+                </TableHead>
+              ))}
               <TableHead className="text-center w-[120px]">Status</TableHead>
               <TableHead className="text-right w-[160px]">Action</TableHead>
             </TableRow>
@@ -165,21 +168,13 @@ export function LooksSummaryTable({ looks, projectId }: LooksSummaryTableProps) 
                   className={hasJob ? "bg-muted/30" : ""}
                 >
                   <TableCell className="font-medium">{look.name}</TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex justify-center">
-                      <ViewStatusIcon status={look.views.front} />
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex justify-center">
-                      <ViewStatusIcon status={look.views.side} />
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <div className="flex justify-center">
-                      <ViewStatusIcon status={look.views.back} />
-                    </div>
-                  </TableCell>
+                  {VIEW_TYPES.map(view => (
+                    <TableCell key={view} className="text-center">
+                      <div className="flex justify-center">
+                        <ViewStatusIcon status={look.views[view] || { hasSelection: false, isGenerating: false, outputCount: 0 }} />
+                      </div>
+                    </TableCell>
+                  ))}
                   <TableCell className="text-center">
                     {hasJob ? (
                       <span className="inline-flex items-center gap-1 text-xs text-primary">
