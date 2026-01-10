@@ -33,6 +33,7 @@ export interface UnifiedJob {
   type: JobType;
   status: JobStatus;
   assigned_user_id: string | null;
+  freelancer_identity_id: string | null;
   due_date: string | null;
   instructions: string | null;
   created_by: string | null;
@@ -51,6 +52,12 @@ export interface UnifiedJob {
     id: string;
     display_name: string | null;
     email: string;
+  };
+  freelancer_identity?: {
+    id: string;
+    display_name: string | null;
+    first_name: string;
+    last_name: string;
   };
   project?: {
     id: string;

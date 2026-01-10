@@ -19,7 +19,8 @@ export function useJobs(filters?: JobFilters) {
         .select(`
           *,
           assigned_user:users!unified_jobs_assigned_user_id_fkey(id, display_name, email),
-          created_by_user:users!unified_jobs_created_by_fkey(id, display_name, email)
+          created_by_user:users!unified_jobs_created_by_fkey(id, display_name, email),
+          freelancer_identity:freelancer_identities(id, display_name, first_name, last_name)
         `)
         .order("created_at", { ascending: false });
 
@@ -54,7 +55,8 @@ export function useJob(jobId: string | null) {
         .select(`
           *,
           assigned_user:users!unified_jobs_assigned_user_id_fkey(id, display_name, email),
-          created_by_user:users!unified_jobs_created_by_fkey(id, display_name, email)
+          created_by_user:users!unified_jobs_created_by_fkey(id, display_name, email),
+          freelancer_identity:freelancer_identities(id, display_name, first_name, last_name)
         `)
         .eq("id", jobId)
         .single();
@@ -228,6 +230,36 @@ export function useAssignJob() {
     },
     onError: (error) => {
       toast.error(`Failed to assign job: ${error.message}`);
+    },
+  });
+}
+
+export function useUnassignFreelancer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (jobId: string) => {
+      const { data, error } = await supabase
+        .from("unified_jobs")
+        .update({ 
+          freelancer_identity_id: null,
+          status: 'OPEN'
+        })
+        .eq("id", jobId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (_, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ["unified-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["unified-job", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["public-freelancer-jobs"] });
+      toast.success("Freelancer unassigned - job is now open");
+    },
+    onError: (error) => {
+      toast.error(`Failed to unassign: ${error.message}`);
     },
   });
 }

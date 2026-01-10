@@ -31,12 +31,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useJobs, useDeleteJob } from "@/hooks/useJobs";
+import { useJobs, useDeleteJob, useUnassignFreelancer } from "@/hooks/useJobs";
 import { useJobsReviewProgress } from "@/hooks/useReviewSystem";
 import { useProductionProjects } from "@/hooks/useProductionProjects";
 import { JobStatus, JobType } from "@/types/jobs";
-import { ArrowLeft, Plus, Search, Briefcase, Eye, CheckCircle, AlertTriangle, FolderOpen, Trash2, Link2 } from "lucide-react";
+import { ArrowLeft, Plus, Search, Briefcase, Eye, CheckCircle, AlertTriangle, FolderOpen, Trash2, Link2, Share2, Copy, Check } from "lucide-react";
 import { format } from "date-fns";
+import { toast } from "sonner";
 import { JobDetailPanel } from "@/components/jobs/JobDetailPanel";
 import { CreateJobDialog } from "@/components/jobs/CreateJobDialog";
 import { JobReviewPanel } from "@/components/review";
@@ -85,7 +86,9 @@ export default function JobBoard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [groupByProject, setGroupByProject] = useState(true);
   const [groupFilter, setGroupFilter] = useState<string | null>(null);
+  const [shareLinkCopied, setShareLinkCopied] = useState(false);
   const deleteJob = useDeleteJob();
+  const unassignFreelancer = useUnassignFreelancer();
 
   // Handle group filter from URL
   useEffect(() => {
@@ -172,10 +175,29 @@ export default function JobBoard() {
               </p>
             </div>
           </div>
-          <Button onClick={() => setCreateDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Job
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                const shareUrl = `${window.location.origin}/work`;
+                navigator.clipboard.writeText(shareUrl);
+                setShareLinkCopied(true);
+                toast.success('Freelancer link copied!');
+                setTimeout(() => setShareLinkCopied(false), 2000);
+              }}
+            >
+              {shareLinkCopied ? (
+                <Check className="h-4 w-4 mr-2 text-green-500" />
+              ) : (
+                <Share2 className="h-4 w-4 mr-2" />
+              )}
+              Share Board
+            </Button>
+            <Button onClick={() => setCreateDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create Job
+            </Button>
+          </div>
         </div>
 
         {/* Group Filter Banner */}
