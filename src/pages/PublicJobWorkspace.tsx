@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useFreelancerIdentity } from '@/hooks/useFreelancerIdentity';
-import { usePublicJob, usePublicJobInputs, usePublicJobOutputs, usePublicJobNotes, usePublicLatestSubmission } from '@/hooks/usePublicJob';
+import { usePublicJobById, usePublicJobInputs, usePublicJobOutputs, usePublicJobNotes, usePublicLatestSubmission } from '@/hooks/usePublicJob';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -13,7 +13,7 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { toast } from 'sonner';
-import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User } from 'lucide-react';
+import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft } from 'lucide-react';
 import { format } from 'date-fns';
 import { FreelancerNamePrompt } from '@/components/freelancer/FreelancerNamePrompt';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -46,16 +46,16 @@ interface GroupedInput {
 }
 
 export default function PublicJobWorkspace() {
-  const { accessToken } = useParams<{ accessToken: string }>();
+  const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   
   const { identity, setIdentity, hasIdentity, isLoading: identityLoading } = useFreelancerIdentity();
-  const { data: job, isLoading: jobLoading, error: jobError } = usePublicJob(accessToken);
-  const { data: inputs = [] } = usePublicJobInputs(job?.id);
-  const { data: outputs = [], refetch: refetchOutputs } = usePublicJobOutputs(job?.id);
-  const { data: notes = [] } = usePublicJobNotes(job?.id);
-  const { data: latestSubmission } = usePublicLatestSubmission(job?.id);
+  const { data: job, isLoading: jobLoading, error: jobError } = usePublicJobById(jobId);
+  const { data: inputs = [] } = usePublicJobInputs(jobId);
+  const { data: outputs = [], refetch: refetchOutputs } = usePublicJobOutputs(jobId);
+  const { data: notes = [] } = usePublicJobNotes(jobId);
+  const { data: latestSubmission } = usePublicLatestSubmission(jobId);
 
   const [noteText, setNoteText] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -111,7 +111,7 @@ export default function PublicJobWorkspace() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['public-job', accessToken] });
+      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
     },
   });
 
@@ -172,8 +172,8 @@ export default function PublicJobWorkspace() {
       return submission;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['public-job', accessToken] });
-      queryClient.invalidateQueries({ queryKey: ['public-latest-submission', job?.id] });
+      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['public-latest-submission', jobId] });
       toast.success('Job submitted for review!');
     },
   });
@@ -472,6 +472,10 @@ export default function PublicJobWorkspace() {
       <header className="border-b border-border bg-card">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between mb-2">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/work')} className="gap-1 -ml-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back to Job Board
+            </Button>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <User className="h-4 w-4" />
               <span>Working as <strong className="text-foreground">{identity?.displayName}</strong></span>

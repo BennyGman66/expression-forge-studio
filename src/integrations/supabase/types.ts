@@ -3248,6 +3248,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           due_date: string | null
+          freelancer_identity_id: string | null
           id: string
           instructions: string | null
           job_group_id: string | null
@@ -3267,6 +3268,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           due_date?: string | null
+          freelancer_identity_id?: string | null
           id?: string
           instructions?: string | null
           job_group_id?: string | null
@@ -3286,6 +3288,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           due_date?: string | null
+          freelancer_identity_id?: string | null
           id?: string
           instructions?: string | null
           job_group_id?: string | null
@@ -3311,6 +3314,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "unified_jobs_freelancer_identity_id_fkey"
+            columns: ["freelancer_identity_id"]
+            isOneToOne: false
+            referencedRelation: "freelancer_identities"
             referencedColumns: ["id"]
           },
           {
