@@ -13,6 +13,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   CheckCircle,
   XCircle,
   Loader2,
@@ -23,6 +28,7 @@ import {
   Upload,
   Edit2,
   Image as ImageIcon,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -50,13 +56,14 @@ interface TiffImportDialogProps {
   onComplete: (looks: { lookName: string; images: ImageWithView[] }[]) => void;
 }
 
-type ConversionStatus = "queued" | "converting" | "done" | "failed";
+type ConversionStatus = "queued" | "uploading" | "converting" | "done" | "failed";
 
 interface FileConversionState {
   file: ParsedFile;
   status: ConversionStatus;
   pngUrl: string | null;
   error: string | null;
+  tiffStoragePath: string | null;
 }
 
 type Step = "converting" | "grouping" | "committing";
@@ -86,6 +93,7 @@ export function TiffImportDialog({
           status: "queued",
           pngUrl: null,
           error: null,
+          tiffStoragePath: null,
         }))
       );
       setStep("converting");
@@ -97,72 +105,102 @@ export function TiffImportDialog({
   // Start conversion when dialog opens
   useEffect(() => {
     if (step === "converting" && conversionStates.length > 0) {
-      startConversion();
+      const hasQueued = conversionStates.some((s) => s.status === "queued");
+      if (hasQueued) {
+        startConversion();
+      }
     }
   }, [step, conversionStates.length]);
 
-  const startConversion = async () => {
-    const CONCURRENCY = 3; // Process 3 files at a time
-    const queue = [...conversionStates];
-    let currentIndex = 0;
+  // Upload TIFF to storage first (client-side, no memory issues)
+  const uploadTiffToStorage = async (file: File): Promise<string> => {
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(2, 8);
+    const path = `face-application/${projectId}/temp-tiff/${timestamp}-${randomId}-${file.name}`;
 
-    const processNext = async () => {
-      if (currentIndex >= queue.length) return;
-      
-      const index = currentIndex++;
-      const item = queue[index];
-      
-      // Update status to converting
-      setConversionStates((prev) =>
-        prev.map((s, i) => (i === index ? { ...s, status: "converting" } : s))
-      );
+    const { error } = await supabase.storage
+      .from("images")
+      .upload(path, file, { contentType: "image/tiff" });
 
-      try {
-        let pngUrl: string;
+    if (error) throw error;
+    return path;
+  };
 
-        if (isTiffFile(item.file.file)) {
-          // Convert TIFF to PNG via edge function
-          const base64 = await fileToBase64(item.file.file);
-          
-          const { data, error } = await supabase.functions.invoke("convert-tiff", {
-            body: {
-              fileBase64: base64,
-              originalFilename: item.file.originalFilename,
-              projectId,
-            },
-          });
+  // Convert single file (handles both TIFF and non-TIFF)
+  const convertSingleFile = async (index: number) => {
+    const item = conversionStates[index];
+    
+    try {
+      let pngUrl: string;
 
-          if (error) throw new Error(error.message);
-          if (!data?.pngUrl) throw new Error("No PNG URL returned");
-          
-          pngUrl = data.pngUrl;
-        } else {
-          // Upload non-TIFF files directly
-          pngUrl = await uploadDirectly(item.file.file);
-        }
-
+      if (isTiffFile(item.file.file)) {
+        // Step 1: Upload TIFF to storage first
         setConversionStates((prev) =>
-          prev.map((s, i) =>
-            i === index ? { ...s, status: "done", pngUrl } : s
-          )
+          prev.map((s, i) => (i === index ? { ...s, status: "uploading" } : s))
         );
-      } catch (error) {
-        console.error(`Failed to convert ${item.file.originalFilename}:`, error);
+
+        const tiffStoragePath = await uploadTiffToStorage(item.file.file);
+        
         setConversionStates((prev) =>
-          prev.map((s, i) =>
-            i === index
-              ? { ...s, status: "failed", error: String(error) }
-              : s
-          )
+          prev.map((s, i) => (i === index ? { ...s, tiffStoragePath, status: "converting" } : s))
         );
+
+        // Step 2: Call edge function with storage path (no base64!)
+        const { data, error } = await supabase.functions.invoke("convert-tiff", {
+          body: {
+            tiffStoragePath,
+            originalFilename: item.file.originalFilename,
+            projectId,
+          },
+        });
+
+        if (error) throw new Error(error.message);
+        if (!data?.pngUrl) throw new Error("No PNG URL returned");
+        
+        pngUrl = data.pngUrl;
+      } else {
+        // Upload non-TIFF files directly
+        setConversionStates((prev) =>
+          prev.map((s, i) => (i === index ? { ...s, status: "uploading" } : s))
+        );
+        pngUrl = await uploadDirectly(item.file.file);
       }
 
-      // Process next item
+      setConversionStates((prev) =>
+        prev.map((s, i) =>
+          i === index ? { ...s, status: "done", pngUrl, error: null } : s
+        )
+      );
+    } catch (error) {
+      console.error(`Failed to convert ${item.file.originalFilename}:`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setConversionStates((prev) =>
+        prev.map((s, i) =>
+          i === index
+            ? { ...s, status: "failed", error: errorMessage }
+            : s
+        )
+      );
+    }
+  };
+
+  const startConversion = async () => {
+    const CONCURRENCY = 3;
+    const queuedIndices = conversionStates
+      .map((s, i) => (s.status === "queued" ? i : -1))
+      .filter((i) => i >= 0);
+    
+    let currentQueueIndex = 0;
+
+    const processNext = async () => {
+      if (currentQueueIndex >= queuedIndices.length) return;
+      
+      const index = queuedIndices[currentQueueIndex++];
+      await convertSingleFile(index);
       await processNext();
     };
 
-    // Start concurrent processing
-    const workers = Array(Math.min(CONCURRENCY, queue.length))
+    const workers = Array(Math.min(CONCURRENCY, queuedIndices.length))
       .fill(null)
       .map(() => processNext());
 
@@ -184,27 +222,15 @@ export function TiffImportDialog({
     return data.publicUrl;
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        // Remove data URL prefix
-        const base64 = result.split(",")[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
-
   const completedCount = conversionStates.filter((s) => s.status === "done").length;
   const failedCount = conversionStates.filter((s) => s.status === "failed").length;
   const totalCount = conversionStates.length;
-  const allDone = completedCount + failedCount === totalCount;
+  const processingCount = conversionStates.filter(
+    (s) => s.status === "uploading" || s.status === "converting"
+  ).length;
+  const allDone = completedCount + failedCount === totalCount && processingCount === 0;
 
   const handleProceedToGrouping = () => {
-    // Create groups from successfully converted files
     const successfulFiles = conversionStates
       .filter((s) => s.status === "done" && s.pngUrl)
       .map((s) => ({
@@ -214,7 +240,6 @@ export function TiffImportDialog({
 
     const groups = groupFilesByLook(successfulFiles as unknown as ParsedFile[]);
     
-    // Attach pngUrl to each file in groups
     const groupsWithUrls = groups.map((g) => ({
       ...g,
       files: g.files.map((f) => {
@@ -230,62 +255,47 @@ export function TiffImportDialog({
     setStep("grouping");
   };
 
+  // Retry a single failed file
+  const handleRetrySingle = async (index: number) => {
+    setConversionStates((prev) =>
+      prev.map((s, i) =>
+        i === index ? { ...s, status: "queued", error: null, tiffStoragePath: null } : s
+      )
+    );
+    
+    // Small delay to ensure state is updated
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await convertSingleFile(index);
+  };
+
   const handleRetryFailed = async () => {
     const failedIndices = conversionStates
       .map((s, i) => (s.status === "failed" ? i : -1))
       .filter((i) => i >= 0);
 
-    // Reset failed to queued
+    // Reset all failed to queued
     setConversionStates((prev) =>
       prev.map((s, i) =>
-        failedIndices.includes(i) ? { ...s, status: "queued", error: null } : s
+        failedIndices.includes(i) ? { ...s, status: "queued", error: null, tiffStoragePath: null } : s
       )
     );
 
-    // Restart conversion for failed files
-    for (const index of failedIndices) {
-      const item = conversionStates[index];
-      
-      setConversionStates((prev) =>
-        prev.map((s, i) => (i === index ? { ...s, status: "converting" } : s))
-      );
+    // Process in parallel with concurrency limit
+    const CONCURRENCY = 3;
+    let currentIndex = 0;
 
-      try {
-        let pngUrl: string;
+    const processNext = async () => {
+      if (currentIndex >= failedIndices.length) return;
+      const idx = failedIndices[currentIndex++];
+      await convertSingleFile(idx);
+      await processNext();
+    };
 
-        if (isTiffFile(item.file.file)) {
-          const base64 = await fileToBase64(item.file.file);
-          const { data, error } = await supabase.functions.invoke("convert-tiff", {
-            body: {
-              fileBase64: base64,
-              originalFilename: item.file.originalFilename,
-              projectId,
-            },
-          });
+    const workers = Array(Math.min(CONCURRENCY, failedIndices.length))
+      .fill(null)
+      .map(() => processNext());
 
-          if (error) throw new Error(error.message);
-          if (!data?.pngUrl) throw new Error("No PNG URL returned");
-          
-          pngUrl = data.pngUrl;
-        } else {
-          pngUrl = await uploadDirectly(item.file.file);
-        }
-
-        setConversionStates((prev) =>
-          prev.map((s, i) =>
-            i === index ? { ...s, status: "done", pngUrl } : s
-          )
-        );
-      } catch (error) {
-        setConversionStates((prev) =>
-          prev.map((s, i) =>
-            i === index
-              ? { ...s, status: "failed", error: String(error) }
-              : s
-          )
-        );
-      }
-    }
+    await Promise.all(workers);
   };
 
   const handleRenameGroup = (lookKey: string, newName: string) => {
@@ -332,6 +342,15 @@ export function TiffImportDialog({
   };
 
   const selectedGroup = lookGroups.find((g) => g.lookKey === selectedGroupKey);
+
+  // Get status label for display
+  const getStatusLabel = (status: ConversionStatus) => {
+    switch (status) {
+      case "uploading": return "Uploading...";
+      case "converting": return "Converting...";
+      default: return null;
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -391,22 +410,52 @@ export function TiffImportDialog({
                     {state.status === "queued" && (
                       <div className="h-4 w-4 rounded-full bg-muted" />
                     )}
-                    {state.status === "converting" && (
+                    {(state.status === "uploading" || state.status === "converting") && (
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
                     )}
                     {state.status === "done" && (
                       <CheckCircle className="h-4 w-4 text-green-500" />
                     )}
                     {state.status === "failed" && (
-                      <XCircle className="h-4 w-4 text-destructive" />
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <XCircle className="h-4 w-4 text-destructive cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="max-w-xs">
+                          <p className="text-xs break-all">{state.error || "Unknown error"}</p>
+                        </TooltipContent>
+                      </Tooltip>
                     )}
+                    
                     <span className="text-sm truncate flex-1">
                       {state.file.originalFilename}
                     </span>
-                    {state.file.lookKey && (
+                    
+                    {getStatusLabel(state.status) && (
+                      <span className="text-xs text-muted-foreground">
+                        {getStatusLabel(state.status)}
+                      </span>
+                    )}
+                    
+                    {state.file.lookKey && state.status !== "failed" && (
                       <Badge variant="outline" className="text-xs">
                         {state.file.lookKey}
                       </Badge>
+                    )}
+                    
+                    {state.status === "failed" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs hover:bg-destructive/10"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRetrySingle(index);
+                        }}
+                      >
+                        <RefreshCw className="h-3 w-3 mr-1" />
+                        Retry
+                      </Button>
                     )}
                   </div>
                 ))}
@@ -419,7 +468,7 @@ export function TiffImportDialog({
               </Button>
               {failedCount > 0 && (
                 <Button variant="secondary" onClick={handleRetryFailed}>
-                  Retry Failed ({failedCount})
+                  Retry All Failed ({failedCount})
                 </Button>
               )}
               <Button
