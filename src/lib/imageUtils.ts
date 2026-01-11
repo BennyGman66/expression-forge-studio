@@ -8,7 +8,7 @@
  */
 export type ImageTier = 'tiny' | 'thumb' | 'preview' | 'full';
 
-const TIER_SIZES: Record<ImageTier, number> = {
+export const TIER_SIZES: Record<ImageTier, number> = {
   tiny: 120,
   thumb: 280,
   preview: 800,
@@ -16,14 +16,42 @@ const TIER_SIZES: Record<ImageTier, number> = {
 };
 
 /**
+ * Detects if a URL is a Supabase Storage URL.
+ */
+function isSupabaseStorageUrl(url: string): boolean {
+  return url.includes('.supabase.co/storage/v1/object/');
+}
+
+/**
+ * Converts a Supabase Storage URL to use the render/image endpoint for resizing.
+ * 
+ * Input: https://xxx.supabase.co/storage/v1/object/public/bucket/path/image.png
+ * Output: https://xxx.supabase.co/storage/v1/render/image/public/bucket/path/image.png?width=280&height=280&resize=cover
+ */
+function getSupabaseResizedUrl(url: string, size: number): string {
+  // Convert /object/ to /render/image/
+  const resizedUrl = url.replace(
+    '/storage/v1/object/',
+    '/storage/v1/render/image/'
+  );
+  
+  // Add resize parameters
+  const separator = resizedUrl.includes('?') ? '&' : '?';
+  return `${resizedUrl}${separator}width=${size}&height=${size}&resize=cover`;
+}
+
+/**
  * Converts an image URL to the specified tier size.
- * Handles Scene7 CDN URLs by replacing wid/hei parameters.
+ * Handles Scene7 CDN URLs and Supabase Storage URLs.
  */
 export function getImageUrl(
   url: string | null | undefined,
   tier: ImageTier = 'thumb'
 ): string {
   if (!url) return '';
+
+  // For full tier, return original URL
+  if (tier === 'full') return url;
 
   const size = TIER_SIZES[tier];
 
@@ -34,7 +62,12 @@ export function getImageUrl(
       .replace(/hei=\d+/, `hei=${size}`);
   }
 
-  // For Supabase storage URLs, return as-is (they're already optimized or can be resized)
+  // Supabase Storage URLs - use render/image endpoint
+  if (isSupabaseStorageUrl(url)) {
+    return getSupabaseResizedUrl(url, size);
+  }
+
+  // For other URLs, return as-is
   return url;
 }
 

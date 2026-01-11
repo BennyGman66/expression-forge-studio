@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { X, Image as ImageIcon, Check, Pencil } from "lucide-react";
 import { LookData, TalentOption } from "./LooksTable";
-
+import { OptimizedImage } from "@/components/shared/OptimizedImage";
 interface LookRowExpandedProps {
   look: LookData;
   talents: TalentOption[];
@@ -75,10 +75,10 @@ export function LookRowExpanded({
           {look.sourceImages.map((image) => (
             <div key={image.id} className="space-y-1.5">
               <div className="relative aspect-[3/4] rounded-lg overflow-hidden border group">
-                <img
+                <OptimizedImage
                   src={image.source_url}
-                  alt=""
-                  className="w-full h-full object-cover"
+                  tier="thumb"
+                  containerClassName="w-full h-full"
                 />
                 <Button
                   variant="destructive"
