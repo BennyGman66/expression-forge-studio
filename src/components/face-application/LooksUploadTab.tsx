@@ -49,6 +49,15 @@ export function LooksUploadTab({
   const [showTiffImport, setShowTiffImport] = useState(false);
   const { toast } = useToast();
 
+  // Handler to clear state when TIFF dialog closes
+  const handleTiffDialogClose = useCallback((open: boolean) => {
+    setShowTiffImport(open);
+    if (!open) {
+      // Clear files when dialog closes to prevent stale state on re-open
+      setTiffImportFiles([]);
+    }
+  }, []);
+
   // Fetch talents
   useEffect(() => {
     const fetchTalents = async () => {
@@ -470,7 +479,7 @@ export function LooksUploadTab({
 
         <TiffImportDialog
           open={showTiffImport}
-          onOpenChange={setShowTiffImport}
+          onOpenChange={handleTiffDialogClose}
           files={tiffImportFiles}
           projectId={projectId}
           onComplete={handleTiffImportComplete}
@@ -540,7 +549,7 @@ export function LooksUploadTab({
 
       <TiffImportDialog
         open={showTiffImport}
-        onOpenChange={setShowTiffImport}
+        onOpenChange={handleTiffDialogClose}
         files={tiffImportFiles}
         projectId={projectId}
         onComplete={handleTiffImportComplete}
