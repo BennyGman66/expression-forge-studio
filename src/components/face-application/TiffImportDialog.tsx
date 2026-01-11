@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,7 @@ import {
   Edit2,
   Image as ImageIcon,
   RefreshCw,
+  Play,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -82,6 +83,10 @@ export function TiffImportDialog({
   const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [isCommitting, setIsCommitting] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
+  
+  // Use ref to track if conversion has started to prevent double-triggering
+  const conversionStartedRef = useRef(false);
 
   // Initialize conversion states when files change
   useEffect(() => {
@@ -99,18 +104,28 @@ export function TiffImportDialog({
       setStep("converting");
       setLookGroups([]);
       setSelectedGroupKey(null);
+      // Reset the conversion started flag when dialog opens with new files
+      conversionStartedRef.current = false;
+      setIsConverting(false);
     }
   }, [open, files]);
 
-  // Start conversion when dialog opens
+  // Start conversion when dialog opens - use ref to prevent re-triggering
   useEffect(() => {
-    if (step === "converting" && conversionStates.length > 0) {
+    if (
+      step === "converting" && 
+      conversionStates.length > 0 && 
+      !conversionStartedRef.current &&
+      !isConverting
+    ) {
       const hasQueued = conversionStates.some((s) => s.status === "queued");
       if (hasQueued) {
+        console.log("[TiffImport] Starting conversion for", conversionStates.length, "files");
+        conversionStartedRef.current = true;
         startConversion();
       }
     }
-  }, [step, conversionStates.length]);
+  }, [step, conversionStates.length, isConverting]);
 
   // Upload TIFF to storage first (client-side, no memory issues)
   const uploadTiffToStorage = async (file: File): Promise<string> => {
@@ -184,28 +199,60 @@ export function TiffImportDialog({
     }
   };
 
-  const startConversion = async () => {
-    const CONCURRENCY = 3;
-    const queuedIndices = conversionStates
-      .map((s, i) => (s.status === "queued" ? i : -1))
-      .filter((i) => i >= 0);
+  const startConversion = useCallback(async () => {
+    if (isConverting) {
+      console.log("[TiffImport] Already converting, skipping");
+      return;
+    }
     
-    let currentQueueIndex = 0;
-
-    const processNext = async () => {
-      if (currentQueueIndex >= queuedIndices.length) return;
+    setIsConverting(true);
+    console.log("[TiffImport] startConversion called");
+    
+    try {
+      // Get fresh state snapshot at call time
+      const currentStates = await new Promise<FileConversionState[]>((resolve) => {
+        setConversionStates((prev) => {
+          resolve(prev);
+          return prev;
+        });
+      });
       
-      const index = queuedIndices[currentQueueIndex++];
-      await convertSingleFile(index);
-      await processNext();
-    };
+      const CONCURRENCY = 3;
+      const queuedIndices = currentStates
+        .map((s, i) => (s.status === "queued" ? i : -1))
+        .filter((i) => i >= 0);
+      
+      console.log("[TiffImport] Found", queuedIndices.length, "queued files");
+      
+      if (queuedIndices.length === 0) {
+        console.log("[TiffImport] No queued files to process");
+        setIsConverting(false);
+        return;
+      }
+      
+      let currentQueueIndex = 0;
 
-    const workers = Array(Math.min(CONCURRENCY, queuedIndices.length))
-      .fill(null)
-      .map(() => processNext());
+      const processNext = async () => {
+        if (currentQueueIndex >= queuedIndices.length) return;
+        
+        const index = queuedIndices[currentQueueIndex++];
+        await convertSingleFile(index);
+        await processNext();
+      };
 
-    await Promise.all(workers);
-  };
+      const workers = Array(Math.min(CONCURRENCY, queuedIndices.length))
+        .fill(null)
+        .map(() => processNext());
+
+      await Promise.all(workers);
+      console.log("[TiffImport] All conversions complete");
+    } catch (error) {
+      console.error("[TiffImport] Conversion batch error:", error);
+      toast.error("Some conversions failed. You can retry them individually.");
+    } finally {
+      setIsConverting(false);
+    }
+  }, [isConverting]);
 
   const uploadDirectly = async (file: File): Promise<string> => {
     const timestamp = Date.now();
@@ -387,17 +434,40 @@ export function TiffImportDialog({
           <div className="flex-1 overflow-hidden flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <div className="text-sm text-muted-foreground">
-                Converting {completedCount} of {totalCount} images
-                {failedCount > 0 && (
-                  <span className="text-destructive ml-2">
-                    ({failedCount} failed)
-                  </span>
+                {processingCount > 0 || completedCount > 0 ? (
+                  <>
+                    Converting {completedCount} of {totalCount} images
+                    {failedCount > 0 && (
+                      <span className="text-destructive ml-2">
+                        ({failedCount} failed)
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {totalCount} images ready to convert
+                  </>
                 )}
               </div>
-              <Progress
-                value={(completedCount / totalCount) * 100}
-                className="w-48"
-              />
+              <div className="flex items-center gap-2">
+                {processingCount === 0 && completedCount === 0 && failedCount === 0 && (
+                  <Button 
+                    size="sm" 
+                    onClick={() => {
+                      conversionStartedRef.current = true;
+                      startConversion();
+                    }}
+                    disabled={isConverting}
+                  >
+                    <Play className="h-4 w-4 mr-1" />
+                    Start Conversion
+                  </Button>
+                )}
+                <Progress
+                  value={(completedCount / totalCount) * 100}
+                  className="w-48"
+                />
+              </div>
             </div>
 
             <ScrollArea className="flex-1 border rounded-lg">
