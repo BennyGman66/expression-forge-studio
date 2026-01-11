@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { LookRowExpanded } from "./LookRowExpanded";
+import { OptimizedImage } from "@/components/shared/OptimizedImage";
 import { cn } from "@/lib/utils";
-
 export interface LookData {
   id: string;
   name: string;
@@ -44,7 +44,11 @@ function ViewThumbnail({ url, isRequired }: { url?: string; isRequired: boolean 
   if (url) {
     return (
       <div className="w-10 h-10 rounded overflow-hidden bg-muted">
-        <img src={url} alt="" className="w-full h-full object-cover" />
+        <OptimizedImage 
+          src={url} 
+          tier="tiny" 
+          containerClassName="w-full h-full"
+        />
       </div>
     );
   }
