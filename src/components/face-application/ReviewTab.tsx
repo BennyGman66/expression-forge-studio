@@ -15,6 +15,7 @@ import { LookOverviewPanel } from "./review/LookOverviewPanel";
 import { ViewReviewPanel } from "./review/ViewReviewPanel";
 import { StatusRecoveryPanel } from "./review/StatusRecoveryPanel";
 import { useGenerationQueue } from "@/hooks/useGenerationQueue";
+import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
 
 interface ReviewTabProps {
   projectId: string;
@@ -92,6 +93,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
   const [isResuming, setIsResuming] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+  const workflowState = useWorkflowStateContext();
 
   // Generation queue hook
   const {
@@ -252,7 +254,7 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
 
   // Handle attempt selection (toggle behavior - click again to deselect)
   const handleSelectAttempt = async (outputId: string) => {
-    if (!currentViewStatus) return;
+    if (!currentViewStatus || !selectedLookId || !selectedView) return;
 
     const clickedOutput = currentViewStatus.outputs.find(o => o.id === outputId);
     const isCurrentlySelected = clickedOutput?.is_selected;
@@ -267,6 +269,14 @@ export function ReviewTab({ projectId }: ReviewTabProps) {
         .from("face_application_outputs")
         .update({ is_selected: shouldBeSelected })
         .eq("id", output.id);
+    }
+
+    // Update workflow state
+    try {
+      const newStatus = isCurrentlySelected ? 'not_started' : 'completed';
+      await workflowState.updateViewState(selectedLookId, selectedView, 'review', newStatus as any);
+    } catch (e) {
+      console.error('Failed to update workflow state:', e);
     }
 
     toast({ 

@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArrowRight, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage, FaceFoundation } from "@/types/face-application";
+import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
 
 interface LookWithImages {
   id: string;
@@ -32,6 +33,7 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
   const [talentIds, setTalentIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+  const workflowState = useWorkflowStateContext();
 
   // Fetch ALL looks for this PROJECT with their source images
   useEffect(() => {
@@ -185,12 +187,22 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
         };
       });
 
-      // Update each source image with the matched talent
+      // Update each source image with the matched talent and update workflow state
       for (const update of updates) {
         await supabase
           .from("look_source_images")
           .update({ digital_talent_id: update.digital_talent_id })
           .eq("id", update.id);
+
+        // Find the source image to get look_id and view
+        const sourceImage = looks.flatMap(l => l.sourceImages).find(img => img.id === update.id);
+        if (sourceImage) {
+          try {
+            await workflowState.updateViewState(sourceImage.look_id, sourceImage.view, 'match', 'completed');
+          } catch (e) {
+            console.error('Failed to update workflow state:', e);
+          }
+        }
       }
 
       onContinue();
