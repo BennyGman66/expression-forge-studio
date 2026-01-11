@@ -87,32 +87,66 @@ export function TiffImportDialog({
   
   // Use ref to track if conversion has started to prevent double-triggering
   const conversionStartedRef = useRef(false);
+  // Track previous files to detect real changes
+  const prevFilesRef = useRef<File[]>([]);
+
+  // Reset all dialog state
+  const resetState = useCallback(() => {
+    setStep("converting");
+    setConversionStates([]);
+    setLookGroups([]);
+    setSelectedGroupKey(null);
+    setEditingGroupKey(null);
+    setEditingName("");
+    setIsCommitting(false);
+    setIsConverting(false);
+    conversionStartedRef.current = false;
+    prevFilesRef.current = [];
+  }, []);
+
+  // Reset state when dialog closes
+  useEffect(() => {
+    if (!open) {
+      resetState();
+    }
+  }, [open, resetState]);
 
   // Initialize conversion states when files change
   useEffect(() => {
     if (open && files.length > 0) {
-      const parsed = files.map(parseFile);
-      setConversionStates(
-        parsed.map((file) => ({
-          file,
-          status: "queued",
-          pngUrl: null,
-          error: null,
-          tiffStoragePath: null,
-        }))
-      );
-      setStep("converting");
-      setLookGroups([]);
-      setSelectedGroupKey(null);
-      // Reset the conversion started flag when dialog opens with new files
-      conversionStartedRef.current = false;
-      setIsConverting(false);
+      // Check if files actually changed
+      const filesChanged = 
+        files.length !== prevFilesRef.current.length ||
+        files.some((f, i) => f !== prevFilesRef.current[i]);
+      
+      if (filesChanged) {
+        console.log("[TiffImport] Files changed, initializing", files.length, "files");
+        prevFilesRef.current = files;
+        
+        const parsed = files.map(parseFile);
+        setConversionStates(
+          parsed.map((file) => ({
+            file,
+            status: "queued",
+            pngUrl: null,
+            error: null,
+            tiffStoragePath: null,
+          }))
+        );
+        setStep("converting");
+        setLookGroups([]);
+        setSelectedGroupKey(null);
+        // Reset the conversion started flag when dialog opens with new files
+        conversionStartedRef.current = false;
+        setIsConverting(false);
+      }
     }
   }, [open, files]);
 
   // Start conversion when dialog opens - use ref to prevent re-triggering
   useEffect(() => {
     if (
+      open &&
       step === "converting" && 
       conversionStates.length > 0 && 
       !conversionStartedRef.current &&
@@ -125,7 +159,7 @@ export function TiffImportDialog({
         startConversion();
       }
     }
-  }, [step, conversionStates.length, isConverting]);
+  }, [open, step, conversionStates.length, isConverting]);
 
   // Upload TIFF to storage first (client-side, no memory issues)
   const uploadTiffToStorage = async (file: File): Promise<string> => {
@@ -450,14 +484,23 @@ export function TiffImportDialog({
                 )}
               </div>
               <div className="flex items-center gap-2">
-                {processingCount === 0 && completedCount === 0 && failedCount === 0 && (
+                {/* Reset button for stuck states */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={resetState}
+                  title="Reset and start over"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+                {/* Show Start Conversion when there are queued files and not currently converting */}
+                {!isConverting && conversionStates.some(s => s.status === "queued") && (
                   <Button 
                     size="sm" 
                     onClick={() => {
                       conversionStartedRef.current = true;
                       startConversion();
                     }}
-                    disabled={isConverting}
                   >
                     <Play className="h-4 w-4 mr-1" />
                     Start Conversion
