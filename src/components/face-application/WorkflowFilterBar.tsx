@@ -1,4 +1,4 @@
-import { Filter, Eye, CheckCircle2 } from 'lucide-react';
+import { Filter, Eye, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -12,6 +12,8 @@ interface WorkflowFilterBarProps {
   totalCount: number;
   completeCount: number;
   currentTab: TabName;
+  isLoading?: boolean;
+  isSyncing?: boolean;
 }
 
 export function WorkflowFilterBar({
@@ -21,6 +23,8 @@ export function WorkflowFilterBar({
   totalCount,
   completeCount,
   currentTab,
+  isLoading,
+  isSyncing,
 }: WorkflowFilterBarProps) {
   const progressPercent = totalCount > 0 ? Math.round((completeCount / totalCount) * 100) : 0;
   
@@ -57,23 +61,32 @@ export function WorkflowFilterBar({
         
         {/* Progress Summary */}
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-sm">
-            <CheckCircle2 className={cn(
-              "h-4 w-4",
-              completeCount === totalCount ? "text-emerald-500" : "text-muted-foreground"
-            )} />
-            <span className="text-muted-foreground">
-              {completeCount} of {totalCount} views complete
-            </span>
-          </div>
-          
-          <div className="w-32">
-            <Progress value={progressPercent} className="h-2" />
-          </div>
-          
-          <span className="text-sm font-medium tabular-nums">
-            {progressPercent}%
-          </span>
+          {(isLoading || isSyncing) ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{isSyncing ? 'Analyzing project...' : 'Loading...'}</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 text-sm">
+                <CheckCircle2 className={cn(
+                  "h-4 w-4",
+                  completeCount === totalCount && totalCount > 0 ? "text-emerald-500" : "text-muted-foreground"
+                )} />
+                <span className="text-muted-foreground">
+                  {completeCount} of {totalCount} views complete
+                </span>
+              </div>
+              
+              <div className="w-32">
+                <Progress value={progressPercent} className="h-2" />
+              </div>
+              
+              <span className="text-sm font-medium tabular-nums">
+                {progressPercent}%
+              </span>
+            </>
+          )}
         </div>
       </div>
     </div>

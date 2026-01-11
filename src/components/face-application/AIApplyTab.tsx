@@ -10,6 +10,7 @@ import { ViewSelector } from "./ai-apply/ViewSelector";
 import { ContextPreview } from "./ai-apply/ContextPreview";
 import { QueuePanel } from "./ai-apply/QueuePanel";
 import { ReviewDialog } from "./ai-apply/ReviewDialog";
+import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
 
 interface AIApplyTabProps {
   projectId: string;
@@ -28,6 +29,7 @@ export function AIApplyTab({ projectId }: AIApplyTabProps) {
   const [isReviewOpen, setIsReviewOpen] = useState(false);
 
   const { toast } = useToast();
+  const workflowState = useWorkflowStateContext();
 
   // Data hook
   const { 

@@ -1,6 +1,6 @@
 import { createContext, useContext, ReactNode } from 'react';
 import { useWorkflowState } from '@/hooks/useWorkflowState';
-import type { WorkflowStateContextValue, FilterMode } from '@/types/workflow-state';
+import type { WorkflowStateContextValue } from '@/types/workflow-state';
 
 const defaultContext: WorkflowStateContextValue = {
   lookStates: new Map(),
@@ -15,6 +15,7 @@ const defaultContext: WorkflowStateContextValue = {
   getTabSummary: () => ({ needsAction: 0, total: 0, complete: 0 }),
   refetch: async () => {},
   isLoading: false,
+  isSyncing: false,
 };
 
 const WorkflowStateContext = createContext<WorkflowStateContextValue>(defaultContext);

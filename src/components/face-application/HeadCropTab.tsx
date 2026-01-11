@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage } from "@/types/face-application";
+import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
 
 interface HeadCropTabProps {
   projectId: string;
@@ -49,6 +50,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const { toast } = useToast();
+  const workflowState = useWorkflowStateContext();
 
   // Fetch all looks for the PROJECT (not just one talent)
   useEffect(() => {
@@ -366,6 +368,13 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
       );
 
       toast({ title: "Crop applied", description: `${currentImage.view} head cropped successfully.` });
+
+      // Update workflow state
+      try {
+        await workflowState.updateViewState(currentImage.look_id, currentImage.view, 'crop', 'completed');
+      } catch (e) {
+        console.error('Failed to update workflow state:', e);
+      }
 
       // Move to next image if available
       if (selectedIndex < sourceImages.length - 1) {

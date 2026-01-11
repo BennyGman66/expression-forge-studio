@@ -1,6 +1,6 @@
 // Utility functions for workflow state management
 
-import type { TabName, ViewStateStatus, LookViewState, LookWorkflowSummary, TabSummary, WORKFLOW_VIEWS } from '@/types/workflow-state';
+import type { TabName, ViewStateStatus, LookViewState, LookWorkflowSummary, TabSummary } from '@/types/workflow-state';
 
 export interface LookData {
   id: string;
@@ -9,6 +9,7 @@ export interface LookData {
     view: string;
     source_url: string;
     head_cropped_url: string | null;
+    digital_talent_id?: string | null;
   }>;
   outputs?: Array<{
     view: string;
@@ -30,7 +31,9 @@ export function inferViewState(
   look: LookData,
   view: string
 ): ViewStateStatus {
-  const sourceImage = look.sourceImages?.find(img => img.view === view);
+  // Find source images that match this view (handle both legacy and new view names)
+  const matchingViews = getMatchingViews(view);
+  const sourceImage = look.sourceImages?.find(img => matchingViews.includes(img.view));
   
   switch (tab) {
     case 'upload':
@@ -42,30 +45,30 @@ export function inferViewState(
       return sourceImage?.head_cropped_url ? 'completed' : 'not_started';
       
     case 'match':
-      // Match completion is tracked separately - check if has face foundation match
-      // For now, infer from whether there are outputs
-      return sourceImage?.head_cropped_url ? 'completed' : 'not_started';
+      // Completed if source image has digital_talent_id set (means it was matched)
+      if (!sourceImage?.head_cropped_url) return 'not_started';
+      return sourceImage?.digital_talent_id ? 'completed' : 'not_started';
       
     case 'generate':
       // Check if outputs exist for this view
-      const generateOutputs = look.outputs?.filter(o => o.view === view);
+      const generateOutputs = look.outputs?.filter(o => matchingViews.includes(o.view));
       if (!generateOutputs?.length) return 'not_started';
-      if (generateOutputs.some(o => o.status === 'generating')) return 'in_progress';
-      if (generateOutputs.some(o => o.status === 'failed')) return 'failed';
+      if (generateOutputs.some(o => o.status === 'generating' || o.status === 'pending')) return 'in_progress';
+      if (generateOutputs.some(o => o.status === 'failed') && !generateOutputs.some(o => o.status === 'completed')) return 'failed';
       if (generateOutputs.some(o => o.status === 'completed')) return 'completed';
       return 'in_progress';
       
     case 'review':
       // Completed if an output is selected
-      const selectedOutput = look.outputs?.find(o => o.view === view && o.is_selected);
+      const selectedOutput = look.outputs?.find(o => matchingViews.includes(o.view) && o.is_selected);
       return selectedOutput ? 'completed' : 'not_started';
       
     case 'ai_apply':
       // Check AI apply outputs
-      const aiOutputs = look.aiApplyOutputs?.filter(o => o.view === view);
+      const aiOutputs = look.aiApplyOutputs?.filter(o => matchingViews.includes(o.view));
       if (!aiOutputs?.length) return 'not_started';
-      if (aiOutputs.some(o => o.status === 'generating')) return 'in_progress';
-      if (aiOutputs.some(o => o.status === 'failed')) return 'failed';
+      if (aiOutputs.some(o => o.status === 'generating' || o.status === 'pending')) return 'in_progress';
+      if (aiOutputs.some(o => o.status === 'failed') && !aiOutputs.some(o => o.status === 'completed')) return 'failed';
       if (aiOutputs.some(o => o.is_selected)) return 'completed';
       if (aiOutputs.some(o => o.status === 'completed')) return 'completed';
       return 'in_progress';
@@ -77,6 +80,21 @@ export function inferViewState(
     default:
       return 'not_started';
   }
+}
+
+/**
+ * Get matching view names (handle legacy and new naming)
+ */
+function getMatchingViews(view: string): string[] {
+  const mapping: Record<string, string[]> = {
+    'full_front': ['full_front', 'front'],
+    'cropped_front': ['cropped_front', 'side'],
+    'front': ['front', 'full_front'],
+    'back': ['back'],
+    'side': ['side', 'cropped_front'],
+    'detail': ['detail'],
+  };
+  return mapping[view] || [view];
 }
 
 /**

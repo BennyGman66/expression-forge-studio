@@ -49,10 +49,13 @@ export interface WorkflowStateContextValue {
   getTabSummary: (tab: TabName) => { needsAction: number; total: number; complete: number };
   refetch: () => Promise<void>;
   isLoading: boolean;
+  isSyncing: boolean;
 }
 
-// View types used in the pipeline
-export const WORKFLOW_VIEWS = ['full_front', 'cropped_front', 'back', 'detail'] as const;
+// View types used in the pipeline - matches actual database values
+// The database uses: front, back, side, detail (legacy 3-view)
+// AND: full_front, cropped_front, back, detail (new 4-view)
+export const WORKFLOW_VIEWS = ['full_front', 'cropped_front', 'front', 'back', 'side', 'detail'] as const;
 export type WorkflowView = typeof WORKFLOW_VIEWS[number];
 
 // Tab display labels
