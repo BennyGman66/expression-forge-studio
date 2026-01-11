@@ -2353,6 +2353,60 @@ export type Database = {
         }
         Relationships: []
       }
+      look_view_states: {
+        Row: {
+          completed_at: string | null
+          completed_by: string | null
+          completion_source: string | null
+          created_at: string | null
+          id: string
+          look_id: string
+          status: string
+          tab: string
+          updated_at: string | null
+          view: string
+        }
+        Insert: {
+          completed_at?: string | null
+          completed_by?: string | null
+          completion_source?: string | null
+          created_at?: string | null
+          id?: string
+          look_id: string
+          status?: string
+          tab: string
+          updated_at?: string | null
+          view: string
+        }
+        Update: {
+          completed_at?: string | null
+          completed_by?: string | null
+          completion_source?: string | null
+          created_at?: string | null
+          id?: string
+          look_id?: string
+          status?: string
+          tab?: string
+          updated_at?: string | null
+          view?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "look_view_states_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "look_view_states_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "talent_looks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           comment_id: string | null
@@ -3243,7 +3297,10 @@ export type Database = {
           name: string
           product_type: string | null
           project_id: string | null
+          signed_off_at: string | null
+          signed_off_by: string | null
           talent_id: string
+          workflow_status: string | null
         }
         Insert: {
           created_at?: string
@@ -3252,7 +3309,10 @@ export type Database = {
           name: string
           product_type?: string | null
           project_id?: string | null
+          signed_off_at?: string | null
+          signed_off_by?: string | null
           talent_id: string
+          workflow_status?: string | null
         }
         Update: {
           created_at?: string
@@ -3261,7 +3321,10 @@ export type Database = {
           name?: string
           product_type?: string | null
           project_id?: string | null
+          signed_off_at?: string | null
+          signed_off_by?: string | null
           talent_id?: string
+          workflow_status?: string | null
         }
         Relationships: [
           {
@@ -3276,6 +3339,13 @@ export type Database = {
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "face_application_projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "talent_looks_signed_off_by_fkey"
+            columns: ["signed_off_by"]
+            isOneToOne: false
+            referencedRelation: "users"
             referencedColumns: ["id"]
           },
           {

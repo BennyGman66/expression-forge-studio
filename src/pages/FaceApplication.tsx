@@ -12,6 +12,21 @@ import { SendToJobBoardTab } from "@/components/face-application/SendToJobBoardT
 import { FaceAppProjectsGrid } from "@/components/face-application/FaceAppProjectsGrid";
 import { useFaceApplicationProjects } from "@/hooks/useFaceApplicationProjects";
 import { supabase } from "@/integrations/supabase/client";
+import { WorkflowStateProvider, useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
+import { WorkflowFilterBar } from "@/components/face-application/WorkflowFilterBar";
+import { TabBadge } from "@/components/face-application/TabBadge";
+import { TAB_NAMES, TAB_LABELS, type TabName } from "@/types/workflow-state";
+
+// Tab configuration
+const TABS: { value: TabName; label: string }[] = [
+  { value: 'upload', label: 'Looks Upload' },
+  { value: 'crop', label: 'Head Crop' },
+  { value: 'match', label: 'Face Match' },
+  { value: 'generate', label: 'Generate' },
+  { value: 'review', label: 'Review' },
+  { value: 'ai_apply', label: 'AI Apply' },
+  { value: 'handoff', label: 'Send to Job Board' },
+];
 
 export default function FaceApplication() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -78,12 +93,56 @@ export default function FaceApplication() {
     );
   }
 
-  // Project workspace view
+  // Project workspace view - wrapped in provider
   return (
-    <div className="min-h-screen bg-background">
-      <header className="h-14 border-b border-border bg-card px-6 flex items-center gap-4">
+    <WorkflowStateProvider projectId={projectId}>
+      <FaceApplicationWorkspace
+        projectId={projectId}
+        projectName={projectName}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        selectedLookId={selectedLookId}
+        setSelectedLookId={setSelectedLookId}
+        selectedTalentId={selectedTalentId}
+        setSelectedTalentId={setSelectedTalentId}
+        onBackToProjects={handleBackToProjects}
+      />
+    </WorkflowStateProvider>
+  );
+}
+
+// Inner component that can use workflow context
+interface WorkspaceProps {
+  projectId: string;
+  projectName: string;
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+  selectedLookId: string | null;
+  setSelectedLookId: (id: string | null) => void;
+  selectedTalentId: string | null;
+  setSelectedTalentId: (id: string | null) => void;
+  onBackToProjects: () => void;
+}
+
+function FaceApplicationWorkspace({
+  projectId,
+  projectName,
+  activeTab,
+  setActiveTab,
+  selectedLookId,
+  setSelectedLookId,
+  selectedTalentId,
+  setSelectedTalentId,
+  onBackToProjects,
+}: WorkspaceProps) {
+  const workflowState = useWorkflowStateContext();
+  const currentTabSummary = workflowState.getTabSummary(activeTab as TabName);
+  
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="h-14 border-b border-border bg-card px-6 flex items-center gap-4 flex-shrink-0">
         <button 
-          onClick={handleBackToProjects}
+          onClick={onBackToProjects}
           className="text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />
@@ -91,19 +150,40 @@ export default function FaceApplication() {
         <h1 className="text-lg font-semibold">{projectName || "Project"}</h1>
       </header>
 
-      <main className="p-6">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-6">
-            <TabsTrigger value="upload">Looks Upload</TabsTrigger>
-            <TabsTrigger value="crop">Head Crop</TabsTrigger>
-            <TabsTrigger value="match">Face Match</TabsTrigger>
-            <TabsTrigger value="generate">Generate</TabsTrigger>
-            <TabsTrigger value="review">Review</TabsTrigger>
-            <TabsTrigger value="ai-apply">AI Apply</TabsTrigger>
-            <TabsTrigger value="handoff">Send to Job Board</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+        <div className="border-b border-border bg-card px-6">
+          <TabsList className="h-12 bg-transparent p-0 gap-1">
+            {TABS.map((tab) => {
+              const summary = workflowState.getTabSummary(tab.value);
+              return (
+                <TabsTrigger
+                  key={tab.value}
+                  value={tab.value}
+                  className="data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-t-lg rounded-b-none border-b-2 border-transparent data-[state=active]:border-primary"
+                >
+                  {tab.label}
+                  <TabBadge
+                    needsAction={summary.needsAction}
+                    total={summary.total}
+                    complete={summary.complete}
+                  />
+                </TabsTrigger>
+              );
+            })}
           </TabsList>
+        </div>
 
-          <TabsContent value="upload">
+        <WorkflowFilterBar
+          filterMode={workflowState.filterMode}
+          onFilterChange={workflowState.setFilterMode}
+          needsActionCount={currentTabSummary.needsAction}
+          totalCount={currentTabSummary.total}
+          completeCount={currentTabSummary.complete}
+          currentTab={activeTab as TabName}
+        />
+
+        <main className="flex-1 p-6 overflow-auto">
+          <TabsContent value="upload" className="mt-0">
             <LooksUploadTab
               projectId={projectId}
               selectedLookId={selectedLookId}
@@ -114,7 +194,7 @@ export default function FaceApplication() {
             />
           </TabsContent>
 
-          <TabsContent value="crop">
+          <TabsContent value="crop" className="mt-0">
             <HeadCropTab
               projectId={projectId}
               lookId={selectedLookId}
@@ -124,7 +204,7 @@ export default function FaceApplication() {
             />
           </TabsContent>
 
-          <TabsContent value="match">
+          <TabsContent value="match" className="mt-0">
             <FaceMatchTab
               projectId={projectId}
               talentId={selectedTalentId}
@@ -132,7 +212,7 @@ export default function FaceApplication() {
             />
           </TabsContent>
 
-          <TabsContent value="generate">
+          <TabsContent value="generate" className="mt-0">
             <GenerateTab
               projectId={projectId}
               lookId={selectedLookId}
@@ -141,7 +221,7 @@ export default function FaceApplication() {
             />
           </TabsContent>
 
-          <TabsContent value="review">
+          <TabsContent value="review" className="mt-0">
             <ReviewTab
               projectId={projectId}
               lookId={selectedLookId}
@@ -149,15 +229,15 @@ export default function FaceApplication() {
             />
           </TabsContent>
 
-          <TabsContent value="ai-apply">
+          <TabsContent value="ai_apply" className="mt-0">
             <AIApplyTab projectId={projectId} />
           </TabsContent>
 
-          <TabsContent value="handoff">
+          <TabsContent value="handoff" className="mt-0">
             <SendToJobBoardTab projectId={projectId} />
           </TabsContent>
-        </Tabs>
-      </main>
+        </main>
+      </Tabs>
     </div>
   );
 }
