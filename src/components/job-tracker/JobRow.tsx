@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ExternalLink, Pause, Play, RotateCcw, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
+import { ExternalLink, Pause, Play, RotateCcw, AlertTriangle, RefreshCw, Loader2, X, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -13,10 +13,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { useState } from 'react';
-
-interface EnhancedPipelineJob extends PipelineJob {
-  isStalled?: boolean;
-}
+import type { EnhancedPipelineJob } from '@/hooks/useActiveJobs';
 
 interface JobRowProps {
   job: EnhancedPipelineJob;
@@ -104,6 +101,24 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
     onMarkStalled?.(job.id);
   };
 
+  const handleCancel = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const { error } = await supabase
+      .from('pipeline_jobs')
+      .update({ 
+        status: 'CANCELED',
+        progress_message: 'Canceled by user',
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', job.id);
+    
+    if (error) {
+      toast.error('Failed to cancel job');
+    } else {
+      toast.success('Job canceled');
+    }
+  };
+
   return (
     <div 
       className="p-3 hover:bg-muted/50 cursor-pointer transition-colors border-b last:border-b-0"
@@ -116,6 +131,12 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
             <Badge variant="destructive" className="text-[10px] px-2">
               <AlertTriangle className="h-3 w-3 mr-1" />
               Stalled
+            </Badge>
+          )}
+          {job.isAbandoned && !job.isStalled && (
+            <Badge variant="outline" className="text-[10px] px-2 text-amber-600 border-amber-400">
+              <Clock className="h-3 w-3 mr-1" />
+              Abandoned
             </Badge>
           )}
           <Badge variant={statusConfig.variant} className="text-[10px] px-2">
@@ -146,8 +167,14 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
           Not updated {timeAgo} · {job.progress_done}/{job.progress_total} completed
         </div>
       )}
+
+      {job.isAbandoned && !job.isStalled && (
+        <div className="mb-2 p-2 bg-amber-500/10 rounded text-xs text-amber-600">
+          Paused {timeAgo} · {job.progress_done}/{job.progress_total} completed
+        </div>
+      )}
       
-      {!isActive && !job.isStalled && (
+      {!isActive && !job.isStalled && !job.isAbandoned && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
           <span>
             {job.progress_done}/{job.progress_total}
@@ -191,25 +218,28 @@ export function JobRow({ job, onOpenDetail, onMarkStalled, onResume, onClose }: 
             )}
           </>
         )}
+
+        {(isPaused || job.isAbandoned) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-destructive"
+            onClick={handleCancel}
+          >
+            <X className="h-3 w-3 mr-1" />
+            Cancel
+          </Button>
+        )}
         
-        {job.supports_pause && isActive && !job.isStalled && (
+        {job.supports_pause && isActive && !job.isStalled && !isPaused && (
           <Button
             variant="ghost"
             size="sm"
             className="h-6 px-2 text-xs"
             onClick={handleTogglePause}
           >
-            {job.status === 'PAUSED' ? (
-              <>
-                <Play className="h-3 w-3 mr-1" />
-                Resume
-              </>
-            ) : (
-              <>
-                <Pause className="h-3 w-3 mr-1" />
-                Pause
-              </>
-            )}
+            <Pause className="h-3 w-3 mr-1" />
+            Pause
           </Button>
         )}
         

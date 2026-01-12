@@ -4,15 +4,21 @@ import type { PipelineJob, PipelineJobStatus } from '@/types/pipeline-jobs';
 
 // Jobs are considered stalled if not updated in 5 minutes
 const STALL_THRESHOLD_MS = 5 * 60 * 1000;
+// Paused jobs are considered abandoned after 1 hour
+const ABANDONED_THRESHOLD_MS = 60 * 60 * 1000;
 
 export interface EnhancedPipelineJob extends PipelineJob {
   isStalled: boolean;
+  isAbandoned: boolean;
 }
 
-interface UseActiveJobsReturn {
+export interface UseActiveJobsReturn {
   activeJobs: EnhancedPipelineJob[];
   recentJobs: EnhancedPipelineJob[];
   activeCount: number;
+  runningCount: number;
+  pausedCount: number;
+  stalledCount: number;
   totalProgress: { done: number; total: number };
   isLoading: boolean;
   refetch: () => Promise<void>;
@@ -23,7 +29,8 @@ function enhanceJob(job: PipelineJob): EnhancedPipelineJob {
   const updatedAt = new Date(job.updated_at).getTime();
   const now = Date.now();
   const isStalled = job.status === 'RUNNING' && (now - updatedAt) > STALL_THRESHOLD_MS;
-  return { ...job, isStalled };
+  const isAbandoned = job.status === 'PAUSED' && (now - updatedAt) > ABANDONED_THRESHOLD_MS;
+  return { ...job, isStalled, isAbandoned };
 }
 
 export function useActiveJobs(): UseActiveJobsReturn {
@@ -119,8 +126,13 @@ export function useActiveJobs(): UseActiveJobsReturn {
     return () => clearInterval(interval);
   }, []);
 
-  // Calculate aggregate progress
-  const totalProgress = activeJobs.reduce(
+  // Calculate counts
+  const runningJobs = activeJobs.filter(j => j.status === 'RUNNING' || j.status === 'QUEUED');
+  const pausedJobs = activeJobs.filter(j => j.status === 'PAUSED');
+  const stalledJobs = activeJobs.filter(j => j.isStalled);
+
+  // Calculate aggregate progress - only for actively running jobs (not paused)
+  const totalProgress = runningJobs.reduce(
     (acc, job) => ({
       done: acc.done + job.progress_done,
       total: acc.total + job.progress_total,
@@ -132,6 +144,9 @@ export function useActiveJobs(): UseActiveJobsReturn {
     activeJobs,
     recentJobs,
     activeCount: activeJobs.length,
+    runningCount: runningJobs.length,
+    pausedCount: pausedJobs.length,
+    stalledCount: stalledJobs.length,
     totalProgress,
     isLoading,
     refetch: fetchJobs,
