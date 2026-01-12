@@ -1,11 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage, FaceFoundation } from "@/types/face-application";
 import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
+import { lookNeedsActionForTab } from "@/lib/workflowFilterUtils";
 
 interface LookWithImages {
   id: string;
@@ -23,6 +25,96 @@ interface FaceMatchTabProps {
   projectId: string;
   talentId: string | null;
   onContinue: () => void;
+}
+
+// Extracted component for look match card
+interface LookMatchCardProps {
+  look: LookWithImages;
+  faceFoundations: FaceFoundation[];
+  matches: Record<string, string>;
+  viewToAngle: (view: string) => string;
+  onSelectFace: (sourceImageId: string, faceUrl: string) => void;
+}
+
+function LookMatchCard({ look, faceFoundations, matches, viewToAngle, onSelectFace }: LookMatchCardProps) {
+  return (
+    <Card>
+      <CardHeader className="py-3">
+        <CardTitle className="text-base">{look.name}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {look.sourceImages.map((img) => {
+          // Filter foundations to only show those for THIS look's assigned talent
+          const talentFoundations = faceFoundations.filter(
+            (f) => f.digital_talent_id === look.digital_talent_id
+          );
+          
+          return (
+            <div
+              key={img.id}
+              className="grid grid-cols-[140px_1fr] gap-4 p-3 border rounded-lg bg-muted/30"
+            >
+              {/* Look Image */}
+              <div className="space-y-1">
+                <p className="text-xs font-medium capitalize text-muted-foreground">
+                  {img.view} View
+                </p>
+                <img
+                  src={img.head_cropped_url ? `${img.head_cropped_url}?t=${Date.now()}` : img.source_url}
+                  alt={img.view}
+                  className="w-full aspect-square object-cover rounded-lg"
+                />
+              </div>
+
+              {/* Face Selection */}
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Select {viewToAngle(img.view)} face:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {talentFoundations.map((face) => (
+                    <button
+                      key={face.id}
+                      onClick={() => onSelectFace(img.id, face.stored_url)}
+                      className={`
+                        relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all
+                        ${matches[img.id] === face.stored_url
+                          ? "border-primary ring-2 ring-primary/30"
+                          : "border-transparent hover:border-muted-foreground/50"
+                        }
+                      `}
+                    >
+                      <img
+                        src={face.stored_url}
+                        alt={face.view}
+                        className="w-full h-full object-cover"
+                      />
+                      {matches[img.id] === face.stored_url && (
+                        <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                          <Check className="h-5 w-5 text-primary" />
+                        </div>
+                      )}
+                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] py-0.5 text-center capitalize">
+                        {face.view}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {talentFoundations.length === 0 && (
+                  <p className="text-xs text-yellow-600">
+                    No face foundations found for this talent. Create them in Talent Face Library first.
+                  </p>
+                )}
+                {!matches[img.id] && talentFoundations.length > 0 && (
+                  <p className="text-xs text-muted-foreground italic">No face selected</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
 }
 
 export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabProps) {
@@ -233,6 +325,25 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
     }
   };
 
+  // Split looks into needs action vs completed
+  const { needsActionLooks, completedLooks } = useMemo(() => {
+    const needsAction: LookWithImages[] = [];
+    const completed: LookWithImages[] = [];
+
+    for (const look of looks) {
+      if (lookNeedsActionForTab(workflowState.lookStates, look.id, 'match')) {
+        needsAction.push(look);
+      } else {
+        completed.push(look);
+      }
+    }
+
+    return { needsActionLooks: needsAction, completedLooks: completed };
+  }, [looks, workflowState.lookStates]);
+
+  // Filter based on mode
+  const displayLooks = workflowState.filterMode === 'needs_action' ? needsActionLooks : looks;
+
   if (looks.length === 0) {
     return (
       <Card>
@@ -256,84 +367,58 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
           </p>
         </div>
 
-        {looks.map((look) => (
-          <Card key={look.id}>
-            <CardHeader className="py-3">
-              <CardTitle className="text-base">{look.name}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {look.sourceImages.map((img) => {
-                // Filter foundations to only show those for THIS look's assigned talent
-                const talentFoundations = faceFoundations.filter(
-                  (f) => f.digital_talent_id === look.digital_talent_id
-                );
-                
-                return (
-                  <div
-                    key={img.id}
-                    className="grid grid-cols-[140px_1fr] gap-4 p-3 border rounded-lg bg-muted/30"
-                  >
-                    {/* Look Image */}
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium capitalize text-muted-foreground">
-                        {img.view} View
-                      </p>
-                      <img
-                        src={img.head_cropped_url ? `${img.head_cropped_url}?t=${Date.now()}` : img.source_url}
-                        alt={img.view}
-                        className="w-full aspect-square object-cover rounded-lg"
-                      />
-                    </div>
+        {/* Needs Action Section */}
+        {needsActionLooks.length > 0 && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm font-medium text-amber-600">
+              <AlertCircle className="h-4 w-4" />
+              Needs Matching ({needsActionLooks.length})
+            </div>
+            {needsActionLooks.map((look) => (
+              <LookMatchCard 
+                key={look.id}
+                look={look}
+                faceFoundations={faceFoundations}
+                matches={matches}
+                viewToAngle={viewToAngle}
+                onSelectFace={handleSelectFace}
+              />
+            ))}
+          </div>
+        )}
 
-                    {/* Face Selection */}
-                    <div className="space-y-2">
-                      <p className="text-xs text-muted-foreground">
-                        Select {viewToAngle(img.view)} face:
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {talentFoundations.map((face) => (
-                          <button
-                            key={face.id}
-                            onClick={() => handleSelectFace(img.id, face.stored_url)}
-                            className={`
-                              relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all
-                              ${matches[img.id] === face.stored_url
-                                ? "border-primary ring-2 ring-primary/30"
-                                : "border-transparent hover:border-muted-foreground/50"
-                              }
-                            `}
-                          >
-                            <img
-                              src={face.stored_url}
-                              alt={face.view}
-                              className="w-full h-full object-cover"
-                            />
-                            {matches[img.id] === face.stored_url && (
-                              <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
-                                <Check className="h-5 w-5 text-primary" />
-                              </div>
-                            )}
-                            <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] py-0.5 text-center capitalize">
-                              {face.view}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                      {talentFoundations.length === 0 && (
-                        <p className="text-xs text-yellow-600">
-                          No face foundations found for this talent. Create them in Talent Face Library first.
-                        </p>
-                      )}
-                      {!matches[img.id] && talentFoundations.length > 0 && (
-                        <p className="text-xs text-muted-foreground italic">No face selected</p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+        {/* Completed Section */}
+        {workflowState.filterMode === 'all' && completedLooks.length > 0 && (
+          <Collapsible defaultOpen={false}>
+            <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground w-full py-2">
+              <ChevronDown className="h-4 w-4 transition-transform duration-200" />
+              <Check className="h-4 w-4 text-emerald-500" />
+              Completed ({completedLooks.length})
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-4 mt-2 opacity-60">
+              {completedLooks.map((look) => (
+                <LookMatchCard 
+                  key={look.id}
+                  look={look}
+                  faceFoundations={faceFoundations}
+                  matches={matches}
+                  viewToAngle={viewToAngle}
+                  onSelectFace={handleSelectFace}
+                />
+              ))}
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+
+        {/* Empty state */}
+        {needsActionLooks.length === 0 && workflowState.filterMode === 'needs_action' && (
+          <Card>
+            <CardContent className="py-8 text-center">
+              <Check className="h-8 w-8 mx-auto mb-3 text-emerald-500" />
+              <p className="text-muted-foreground">All looks matched!</p>
             </CardContent>
           </Card>
-        ))}
+        )}
 
         {/* Continue Button */}
         <div className="flex justify-end pt-4 pb-8">

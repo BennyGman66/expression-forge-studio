@@ -1,6 +1,7 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { 
   Check, 
@@ -9,10 +10,13 @@ import {
   ChevronRight,
   Circle,
   CircleDot,
+  AlertCircle,
 } from "lucide-react";
 import { VIEW_LABELS } from "@/types/face-application";
 import type { AIApplyLook, AIApplyViewStatus } from "@/types/ai-apply";
 import { useState, useMemo } from "react";
+import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
+import { lookNeedsActionForTab } from "@/lib/workflowFilterUtils";
 
 interface ViewSelectorProps {
   looks: AIApplyLook[];
@@ -45,6 +49,8 @@ export function ViewSelector({
   onSelectByType,
   onHoverView,
 }: ViewSelectorProps) {
+  const workflowState = useWorkflowStateContext();
+
   const [expandedLooks, setExpandedLooks] = useState<Set<string>>(
     new Set(looks.map(l => l.id))
   );
@@ -58,8 +64,27 @@ export function ViewSelector({
     return Array.from(types);
   }, [looks]);
 
+  // Split looks into needs action vs completed
+  const { needsActionLooks, completedLooks } = useMemo(() => {
+    const needsAction: AIApplyLook[] = [];
+    const completed: AIApplyLook[] = [];
+
+    for (const look of looks) {
+      if (lookNeedsActionForTab(workflowState.lookStates, look.id, 'ai_apply')) {
+        needsAction.push(look);
+      } else {
+        completed.push(look);
+      }
+    }
+
+    return { needsActionLooks: needsAction, completedLooks: completed };
+  }, [looks, workflowState.lookStates]);
+
+  const showCompleted = workflowState.filterMode === 'all';
+  const displayLooks = showCompleted ? looks : needsActionLooks;
+
   // Calculate total views and selected counts
-  const totalViews = looks.reduce((sum, look) => sum + Object.keys(look.views).length, 0);
+  const totalViews = displayLooks.reduce((sum, look) => sum + Object.keys(look.views).length, 0);
   const selectedCount = selectedViews.size;
   const allSelected = selectedCount === totalViews && totalViews > 0;
 
@@ -87,6 +112,97 @@ export function ViewSelector({
     const viewKeys = Object.keys(look.views);
     const selectedCount = viewKeys.filter(v => selectedViews.has(`${look.id}:${v}`)).length;
     return selectedCount > 0 && selectedCount < viewKeys.length;
+  };
+
+  // Render a single look item
+  const renderLookItem = (look: AIApplyLook, muted: boolean = false) => {
+    const isExpanded = expandedLooks.has(look.id);
+    const isFullySelected = isLookFullySelected(look);
+    const isPartiallySelected = isLookPartiallySelected(look);
+
+    return (
+      <div key={look.id} className={cn("rounded-lg overflow-hidden", muted && "opacity-60")}>
+        {/* Look header with checkbox */}
+        <div className={cn(
+          "flex items-center gap-2 px-3 py-2 rounded-md",
+          "hover:bg-accent/50 transition-colors"
+        )}>
+          <Checkbox
+            checked={isFullySelected}
+            className={isPartiallySelected ? "data-[state=checked]:bg-primary/50" : ""}
+            onCheckedChange={() => onToggleLook(look.id)}
+          />
+          <button
+            onClick={(e) => toggleLookExpanded(look.id, e)}
+            className="flex items-center gap-2 flex-1 text-left"
+          >
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            )}
+            <span className="truncate text-sm font-medium">{look.name}</span>
+          </button>
+          <Badge 
+            variant="secondary" 
+            className="text-[10px] px-1.5 py-0"
+          >
+            {Object.keys(look.views).length}
+          </Badge>
+        </div>
+
+        {/* View list */}
+        {isExpanded && (
+          <div className="ml-5 pl-3 border-l border-border/50 space-y-0.5 pb-2">
+            {Object.entries(look.views).map(([viewType, viewStatus]) => {
+              const viewId = `${look.id}:${viewType}`;
+              const isSelected = selectedViews.has(viewId);
+              const isHovered = hoveredView?.lookId === look.id && hoveredView?.view === viewType;
+
+              return (
+                <div
+                  key={viewType}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer",
+                    "hover:bg-accent/50 transition-colors",
+                    isHovered && "bg-accent/30"
+                  )}
+                  onMouseEnter={() => onHoverView({ lookId: look.id, view: viewType })}
+                  onMouseLeave={() => onHoverView(null)}
+                  onClick={() => onToggleView(look.id, viewType)}
+                >
+                  <Checkbox
+                    checked={isSelected}
+                    onCheckedChange={() => onToggleView(look.id, viewType)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <span className="text-xs truncate flex-1">
+                    {VIEW_LABELS[viewType] || viewType}
+                  </span>
+                  <StatusIcon status={viewStatus?.status || 'not_started'} />
+                  
+                  {/* Tiny thumbnails */}
+                  {viewStatus?.pairing?.headRender?.url && (
+                    <img 
+                      src={viewStatus.pairing.headRender.url} 
+                      alt=""
+                      className="w-5 h-5 rounded object-cover border border-border"
+                    />
+                  )}
+                  {viewStatus?.pairing?.bodyImage?.url && (
+                    <img 
+                      src={viewStatus.pairing.bodyImage.url} 
+                      alt=""
+                      className="w-5 h-5 rounded object-cover border border-border"
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -129,96 +245,39 @@ export function ViewSelector({
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
-          {looks.map(look => {
-            const isExpanded = expandedLooks.has(look.id);
-            const isFullySelected = isLookFullySelected(look);
-            const isPartiallySelected = isLookPartiallySelected(look);
-
-            return (
-              <div key={look.id} className="rounded-lg overflow-hidden">
-                {/* Look header with checkbox */}
-                <div className={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded-md",
-                  "hover:bg-accent/50 transition-colors"
-                )}>
-                  <Checkbox
-                    checked={isFullySelected}
-                    className={isPartiallySelected ? "data-[state=checked]:bg-primary/50" : ""}
-                    onCheckedChange={() => onToggleLook(look.id)}
-                  />
-                  <button
-                    onClick={(e) => toggleLookExpanded(look.id, e)}
-                    className="flex items-center gap-2 flex-1 text-left"
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    )}
-                    <span className="truncate text-sm font-medium">{look.name}</span>
-                  </button>
-                  <Badge 
-                    variant="secondary" 
-                    className="text-[10px] px-1.5 py-0"
-                  >
-                    {Object.keys(look.views).length}
-                  </Badge>
-                </div>
-
-                {/* View list */}
-                {isExpanded && (
-                  <div className="ml-5 pl-3 border-l border-border/50 space-y-0.5 pb-2">
-                    {Object.entries(look.views).map(([viewType, viewStatus]) => {
-                      const viewId = `${look.id}:${viewType}`;
-                      const isSelected = selectedViews.has(viewId);
-                      const isHovered = hoveredView?.lookId === look.id && hoveredView?.view === viewType;
-
-                      return (
-                        <div
-                          key={viewType}
-                          className={cn(
-                            "flex items-center gap-2 px-3 py-1.5 rounded-md cursor-pointer",
-                            "hover:bg-accent/50 transition-colors",
-                            isHovered && "bg-accent/30"
-                          )}
-                          onMouseEnter={() => onHoverView({ lookId: look.id, view: viewType })}
-                          onMouseLeave={() => onHoverView(null)}
-                          onClick={() => onToggleView(look.id, viewType)}
-                        >
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={() => onToggleView(look.id, viewType)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <span className="text-xs truncate flex-1">
-                            {VIEW_LABELS[viewType] || viewType}
-                          </span>
-                          <StatusIcon status={viewStatus?.status || 'not_started'} />
-                          
-                          {/* Tiny thumbnails */}
-                          {viewStatus?.pairing?.headRender?.url && (
-                            <img 
-                              src={viewStatus.pairing.headRender.url} 
-                              alt=""
-                              className="w-5 h-5 rounded object-cover border border-border"
-                            />
-                          )}
-                          {viewStatus?.pairing?.bodyImage?.url && (
-                            <img 
-                              src={viewStatus.pairing.bodyImage.url} 
-                              alt=""
-                              className="w-5 h-5 rounded object-cover border border-border"
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+        <div className="p-2 space-y-3">
+          {/* Needs Action Section */}
+          {needsActionLooks.length > 0 && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 px-2 text-xs font-medium text-amber-600">
+                <AlertCircle className="h-3 w-3" />
+                Needs Action ({needsActionLooks.length})
               </div>
-            );
-          })}
+              {needsActionLooks.map(look => renderLookItem(look))}
+            </div>
+          )}
+
+          {/* Completed Section */}
+          {showCompleted && completedLooks.length > 0 && (
+            <Collapsible defaultOpen={false}>
+              <CollapsibleTrigger className="flex items-center gap-2 px-2 text-xs text-muted-foreground hover:text-foreground w-full py-1">
+                <ChevronDown className="h-3 w-3 transition-transform duration-200" />
+                <Check className="h-3 w-3 text-emerald-500" />
+                Completed ({completedLooks.length})
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-1 mt-1">
+                {completedLooks.map(look => renderLookItem(look, true))}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+
+          {/* Empty state */}
+          {needsActionLooks.length === 0 && workflowState.filterMode === 'needs_action' && (
+            <div className="text-center py-6 text-sm text-muted-foreground">
+              <Check className="h-6 w-6 mx-auto mb-2 text-emerald-500" />
+              All views complete!
+            </div>
+          )}
         </div>
       </ScrollArea>
     </div>
