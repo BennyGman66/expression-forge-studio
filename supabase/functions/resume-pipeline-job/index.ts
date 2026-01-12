@@ -482,7 +482,7 @@ async function resumeFaceScrape(supabase: any, job: PipelineJob) {
 async function resumeReposeGeneration(supabase: any, job: PipelineJob) {
   const context = job.origin_context || {};
   const batchId = context.batchId as string;
-  const model = (context.model as string) || "google/gemini-2.5-flash";
+  const model = (context.model as string) || "google/gemini-3-pro-image-preview";
 
   if (!batchId) {
     throw new Error("Job context missing batchId");
