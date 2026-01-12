@@ -16,12 +16,18 @@ interface JobTrackerDropdownProps {
 export function JobTrackerDropdown({ activeJobs, recentJobs, onMarkStalled, onClose }: JobTrackerDropdownProps) {
   const [selectedJob, setSelectedJob] = useState<PipelineJob | null>(null);
 
-  const hasActiveJobs = activeJobs.length > 0;
-  const hasRecentJobs = recentJobs.length > 0;
-  const isEmpty = !hasActiveJobs && !hasRecentJobs;
+  // Split active jobs into running and paused
+  const runningJobs = activeJobs.filter(j => j.status === 'RUNNING' || j.status === 'QUEUED');
+  const pausedJobs = activeJobs.filter(j => j.status === 'PAUSED');
 
-  // Count stalled jobs
-  const stalledCount = activeJobs.filter(j => j.isStalled).length;
+  const hasRunningJobs = runningJobs.length > 0;
+  const hasPausedJobs = pausedJobs.length > 0;
+  const hasRecentJobs = recentJobs.length > 0;
+  const isEmpty = !hasRunningJobs && !hasPausedJobs && !hasRecentJobs;
+
+  // Count stalled and abandoned jobs
+  const stalledCount = runningJobs.filter(j => j.isStalled).length;
+  const abandonedCount = pausedJobs.filter(j => j.isAbandoned).length;
 
   return (
     <>
@@ -34,15 +40,15 @@ export function JobTrackerDropdown({ activeJobs, recentJobs, onMarkStalled, onCl
             </div>
           )}
           
-          {hasActiveJobs && (
+          {hasRunningJobs && (
             <div>
               <div className="px-3 py-2 bg-muted/50 text-xs font-medium text-muted-foreground sticky top-0">
-                ACTIVE ({activeJobs.length})
+                RUNNING ({runningJobs.length})
                 {stalledCount > 0 && (
                   <span className="text-destructive ml-2">· {stalledCount} stalled</span>
                 )}
               </div>
-              {activeJobs.map((job) => (
+              {runningJobs.map((job) => (
                 <JobRow 
                   key={job.id} 
                   job={job} 
@@ -54,7 +60,29 @@ export function JobTrackerDropdown({ activeJobs, recentJobs, onMarkStalled, onCl
             </div>
           )}
           
-          {hasActiveJobs && hasRecentJobs && <Separator />}
+          {hasRunningJobs && hasPausedJobs && <Separator />}
+          
+          {hasPausedJobs && (
+            <div>
+              <div className="px-3 py-2 bg-amber-500/10 text-xs font-medium text-amber-600 dark:text-amber-400 sticky top-0">
+                PAUSED ({pausedJobs.length})
+                {abandonedCount > 0 && (
+                  <span className="text-muted-foreground ml-2">· {abandonedCount} abandoned</span>
+                )}
+              </div>
+              {pausedJobs.map((job) => (
+                <JobRow 
+                  key={job.id} 
+                  job={job} 
+                  onOpenDetail={setSelectedJob}
+                  onMarkStalled={onMarkStalled}
+                  onClose={onClose}
+                />
+              ))}
+            </div>
+          )}
+          
+          {(hasRunningJobs || hasPausedJobs) && hasRecentJobs && <Separator />}
           
           {hasRecentJobs && (
             <div>

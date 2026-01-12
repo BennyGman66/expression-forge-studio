@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle } from 'lucide-react';
+import { Activity, AlertTriangle, Pause } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Popover,
@@ -7,31 +7,28 @@ import {
 } from '@/components/ui/popover';
 import { JobTrackerDropdown } from './JobTrackerDropdown';
 import { useActiveJobs } from '@/hooks/useActiveJobs';
-
 import { useState } from 'react';
 
 export function JobTrackerIndicator() {
-  const { activeJobs, recentJobs, activeCount, totalProgress, isLoading, markJobStalled } = useActiveJobs();
+  const { activeJobs, recentJobs, runningCount, pausedCount, stalledCount, totalProgress, markJobStalled } = useActiveJobs();
   const [isOpen, setIsOpen] = useState(false);
 
-  const hasActiveJobs = activeCount > 0;
-  const stalledCount = activeJobs.filter(j => j.isStalled).length;
+  const hasRunningJobs = runningCount > 0;
+  const hasPausedOnly = pausedCount > 0 && runningCount === 0;
   const hasStalled = stalledCount > 0;
+  const hasAnyActive = runningCount > 0 || pausedCount > 0;
   
   const progressPercent = totalProgress.total > 0
     ? Math.round((totalProgress.done / totalProgress.total) * 100)
     : 0;
 
-  // Get the most recent active job for display
-  const primaryJob = activeJobs[0];
-
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant={hasStalled ? 'destructive' : hasActiveJobs ? 'default' : 'ghost'}
+          variant={hasStalled ? 'destructive' : hasRunningJobs ? 'default' : hasPausedOnly ? 'outline' : 'ghost'}
           size="sm"
-          className={hasActiveJobs ? 'gap-2 px-3' : 'gap-1.5'}
+          className={hasAnyActive ? 'gap-2 px-3' : 'gap-1.5'}
         >
           {hasStalled ? (
             <>
@@ -40,7 +37,7 @@ export function JobTrackerIndicator() {
                 {stalledCount} Stalled
               </span>
             </>
-          ) : hasActiveJobs ? (
+          ) : hasRunningJobs ? (
             <>
               <div className="relative w-5 h-4 flex items-center justify-center">
                 <Activity className="h-3.5 w-3.5 relative z-10" />
@@ -59,6 +56,13 @@ export function JobTrackerIndicator() {
                   />
                 </div>
               </div>
+            </>
+          ) : hasPausedOnly ? (
+            <>
+              <Pause className="h-3.5 w-3.5" />
+              <span className="text-xs font-medium">
+                {pausedCount} Paused
+              </span>
             </>
           ) : (
             <>
