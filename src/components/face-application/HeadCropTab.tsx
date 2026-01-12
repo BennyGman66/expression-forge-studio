@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, RotateCcw } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, RotateCcw, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage } from "@/types/face-application";
 import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
+import { LooksSwitcher } from "./shared/LooksSwitcher";
+import { isViewComplete } from "@/lib/workflowFilterUtils";
 
 interface HeadCropTabProps {
   projectId: string;
@@ -502,6 +504,33 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
 
   const allCropped = sourceImages.every((img) => img.head_cropped_url);
 
+  // Filter source images based on workflow filter mode
+  const filteredSourceImages = useMemo(() => {
+    if (workflowState.filterMode === 'all') return sourceImages;
+    
+    return sourceImages.filter(img => {
+      const isComplete = isViewComplete(workflowState.lookStates, img.look_id, img.view, 'crop');
+      return !isComplete;
+    });
+  }, [sourceImages, workflowState.filterMode, workflowState.lookStates]);
+
+  // Split source images into needs action and completed
+  const { needsActionImages, completedImages } = useMemo(() => {
+    const needsAction: LookSourceImage[] = [];
+    const completed: LookSourceImage[] = [];
+
+    for (const img of sourceImages) {
+      const isComplete = isViewComplete(workflowState.lookStates, img.look_id, img.view, 'crop');
+      if (isComplete) {
+        completed.push(img);
+      } else {
+        needsAction.push(img);
+      }
+    }
+
+    return { needsActionImages: needsAction, completedImages: completed };
+  }, [sourceImages, workflowState.lookStates]);
+
   // Calculate crop box position using CACHED bounds for consistency
   const getCropStyle = () => {
     if (!cachedBounds) return {};
@@ -547,50 +576,95 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
           <CardHeader>
             <CardTitle>Source Images</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {sourceImages.map((img, index) => (
-              <button
-                key={img.id}
-                onClick={() => setSelectedIndex(index)}
-                className={`
-                  w-full flex items-center gap-3 p-2 rounded-lg transition-colors
-                  ${index === selectedIndex ? "bg-primary/10 border border-primary" : "hover:bg-muted"}
-                `}
-              >
-                <img
-                  src={img.source_url}
-                  alt={img.view}
-                  className="w-12 h-16 object-cover rounded"
-                />
-                <div className="flex-1 text-left">
-                  <p className="font-medium capitalize">{img.view}</p>
-                  {img.head_cropped_url && (
-                    <p className="text-xs text-green-600 flex items-center gap-1">
-                      <Check className="h-3 w-3" /> Cropped
-                    </p>
-                  )}
+          <CardContent className="space-y-3">
+            {/* Needs Action Section */}
+            {needsActionImages.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-medium text-amber-600">
+                  <AlertCircle className="h-3 w-3" />
+                  Needs Cropping ({needsActionImages.length})
                 </div>
-              </button>
-            ))}
+                {needsActionImages.map((img) => {
+                  const originalIndex = sourceImages.findIndex(s => s.id === img.id);
+                  return (
+                    <button
+                      key={img.id}
+                      onClick={() => setSelectedIndex(originalIndex)}
+                      className={`
+                        w-full flex items-center gap-3 p-2 rounded-lg transition-colors
+                        ${originalIndex === selectedIndex ? "bg-primary/10 border border-primary" : "hover:bg-muted"}
+                      `}
+                    >
+                      <img
+                        src={img.source_url}
+                        alt={img.view}
+                        className="w-12 h-16 object-cover rounded"
+                      />
+                      <div className="flex-1 text-left">
+                        <p className="font-medium capitalize">{img.view}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Completed Section */}
+            {workflowState.filterMode === 'all' && completedImages.length > 0 && (
+              <div className="space-y-2 border-t pt-3 mt-3">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Check className="h-3 w-3 text-emerald-500" />
+                  Completed ({completedImages.length})
+                </div>
+                <div className="opacity-60">
+                  {completedImages.map((img) => {
+                    const originalIndex = sourceImages.findIndex(s => s.id === img.id);
+                    return (
+                      <button
+                        key={img.id}
+                        onClick={() => setSelectedIndex(originalIndex)}
+                        className={`
+                          w-full flex items-center gap-3 p-2 rounded-lg transition-colors
+                          ${originalIndex === selectedIndex ? "bg-secondary border border-border" : "hover:bg-muted/50"}
+                        `}
+                      >
+                        <img
+                          src={img.source_url}
+                          alt={img.view}
+                          className="w-12 h-16 object-cover rounded"
+                        />
+                        <div className="flex-1 text-left">
+                          <p className="font-medium capitalize">{img.view}</p>
+                          <p className="text-xs text-emerald-600 flex items-center gap-1">
+                            <Check className="h-3 w-3" /> Cropped
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {needsActionImages.length === 0 && workflowState.filterMode === 'needs_action' && (
+              <div className="text-center py-4 text-sm text-muted-foreground">
+                <Check className="h-5 w-5 mx-auto mb-2 text-emerald-500" />
+                All images cropped for this look!
+              </div>
+            )}
           </CardContent>
 
-          {/* Looks Quick Switcher */}
+          {/* Looks Quick Switcher with filtering */}
           {looks.length > 0 && (
             <div className="border-t p-3">
               <p className="text-xs text-muted-foreground mb-2">Switch Look</p>
-              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-                {looks.map((look) => (
-                  <Button
-                    key={look.id}
-                    size="sm"
-                    variant={look.id === lookId ? "default" : "outline"}
-                    className="shrink-0 text-xs"
-                    onClick={() => onLookChange(look.id)}
-                  >
-                    {look.name}
-                  </Button>
-                ))}
-              </div>
+              <LooksSwitcher
+                looks={looks}
+                selectedLookId={lookId}
+                tab="crop"
+                onLookChange={onLookChange}
+              />
             </div>
           )}
         </Card>
