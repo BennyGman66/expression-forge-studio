@@ -112,7 +112,7 @@ export default function Hub() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-6">
             <TabsTrigger value="internal">Leapfrog Internal</TabsTrigger>
-            <TabsTrigger value="freelance">Freelance</TabsTrigger>
+            <TabsTrigger value="freelance">Editors</TabsTrigger>
             <TabsTrigger value="client">Client</TabsTrigger>
             {isAdmin && <TabsTrigger value="admin">Admin</TabsTrigger>}
           </TabsList>
