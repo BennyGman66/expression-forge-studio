@@ -31,8 +31,8 @@ const internalApps = [
   },
   {
     id: "brand-pose-library",
-    title: "Brand Pose Libraries",
-    description: "Scrape brands, generate clay poses, curate reusable libraries.",
+    title: "Pose Library",
+    description: "Generate clay poses and curate a reusable library.",
     icon: Grid3X3,
     path: "/brand-pose-library",
   },
