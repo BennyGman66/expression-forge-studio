@@ -23,7 +23,7 @@ export interface ReposeConfig {
 
 export const REPOSE_MODEL_OPTIONS = [
   { value: 'google/gemini-2.5-flash-image-preview', label: 'Nano Fast' },
-  { value: 'google/gemini-3-pro-image-preview', label: 'Nano Pro' },
+  { value: 'google/gemini-3-pro-image-preview', label: 'Pro' },
 ] as const;
 
 export const DEFAULT_REPOSE_MODEL = 'google/gemini-3-pro-image-preview';
