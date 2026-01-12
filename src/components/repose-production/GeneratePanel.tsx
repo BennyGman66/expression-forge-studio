@@ -51,6 +51,7 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
           event: '*',
           schema: 'public',
           table: 'repose_outputs',
+          filter: `batch_id=eq.${batchId}`,
         },
         () => {
           refetchOutputs();
@@ -87,6 +88,17 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
       setIsGenerating(false);
     }
   }, [batch?.status]);
+
+  // Polling fallback for progress updates during generation
+  useEffect(() => {
+    if (!isGenerating || !batchId) return;
+    
+    const pollInterval = setInterval(() => {
+      refetchOutputs();
+    }, 3000);
+    
+    return () => clearInterval(pollInterval);
+  }, [isGenerating, batchId, refetchOutputs]);
 
   const completedCount = outputs?.filter(o => o.status === 'complete').length || 0;
   const failedCount = outputs?.filter(o => o.status === 'failed').length || 0;
@@ -285,7 +297,7 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
         title: `Repose: ${batch.job_id?.slice(0, 8) || 'Batch'}`,
         total: totalOutputs,
         origin_route: `/repose-production/batch/${batchId}?tab=generate`,
-        origin_context: { batchId },
+        origin_context: { batchId, model },
         supports_pause: true,
         supports_retry: false,
         supports_restart: false,
