@@ -49,12 +49,22 @@ interface ImageWithView {
   originalFilename: string;
 }
 
+// Callback for progressive image saving - called after each successful conversion
+export interface ProgressiveImageData {
+  url: string;
+  view: 'front' | 'back' | 'side' | 'detail' | 'unassigned';
+  originalFilename: string;
+  lookKey: string | null;
+}
+
 interface TiffImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   files: File[];
   projectId: string;
   onComplete: (looks: { lookName: string; images: ImageWithView[] }[]) => void;
+  /** Called after each successful conversion to save to DB immediately */
+  onImageReady?: (imageData: ProgressiveImageData) => Promise<void>;
 }
 
 type ConversionStatus = "queued" | "uploading" | "converting" | "done" | "failed";
@@ -76,6 +86,7 @@ export function TiffImportDialog({
   files,
   projectId,
   onComplete,
+  onImageReady,
 }: TiffImportDialogProps) {
   const [step, setStep] = useState<Step>("converting");
   const [conversionStates, setConversionStates] = useState<FileConversionState[]>([]);
@@ -262,6 +273,21 @@ export function TiffImportDialog({
           i === index ? { ...s, status: "done", pngUrl, error: null, uploadProgress: 100 } : s
         )
       );
+
+      // Progressive save: call onImageReady immediately after successful conversion
+      if (onImageReady) {
+        try {
+          await onImageReady({
+            url: pngUrl,
+            view: item.file.inferredView,
+            originalFilename: item.file.originalFilename,
+            lookKey: item.file.lookKey,
+          });
+        } catch (saveError) {
+          console.warn(`[TiffImport] Failed to save ${item.file.originalFilename} to DB:`, saveError);
+          // Don't fail the conversion - the image is still uploaded and can be recovered
+        }
+      }
     } catch (error) {
       console.error(`Failed to convert ${item.file.originalFilename}:`, error);
       const errorMessage = error instanceof Error ? error.message : String(error);

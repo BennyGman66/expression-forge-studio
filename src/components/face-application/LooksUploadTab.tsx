@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { Plus, ArrowRight, Image as ImageIcon, FolderOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BulkUploadZone } from "./BulkUploadZone";
 import { LooksTable, LookData, TalentOption } from "./LooksTable";
-import { TiffImportDialog } from "./TiffImportDialog";
+import { TiffImportDialog, ProgressiveImageData } from "./TiffImportDialog";
 import { isTiffFile } from "@/lib/tiffImportUtils";
 import {
   Dialog,
@@ -382,30 +382,144 @@ export function LooksUploadTab({
     toast({ title: "Bulk upload complete", description: `Created ${lookNames.length} looks from ${files.length} images.` });
   };
 
+  // Track looks created during progressive import (lookKey -> lookId mapping)
+  const progressiveLooksRef = useRef<Map<string, string>>(new Map());
+
+  // Progressive image save - called after each successful conversion
+  const handleImageReady = useCallback(async (imageData: ProgressiveImageData): Promise<void> => {
+    const { url, view, originalFilename, lookKey } = imageData;
+    
+    // Use lookKey or fallback to a generated name
+    const lookName = lookKey || `Look ${Date.now()}`;
+    const viewToUse = view === 'unassigned' ? 'front' : view;
+    
+    // Check if we already have a look for this lookKey
+    let lookId = progressiveLooksRef.current.get(lookName);
+    
+    if (!lookId) {
+      // Check if the look already exists in the current looks state
+      const existingLook = looks.find(l => l.name === lookName);
+      
+      if (existingLook) {
+        lookId = existingLook.id;
+        progressiveLooksRef.current.set(lookName, lookId);
+      } else {
+        // Create a new look
+        const talentId = await getDefaultTalentId();
+        if (!talentId) {
+          console.error("[TiffImport] No talent found for progressive save");
+          return;
+        }
+        
+        const { data: lookData, error } = await supabase
+          .from("talent_looks")
+          .insert({ name: lookName, talent_id: talentId, project_id: projectId, digital_talent_id: null })
+          .select()
+          .single();
+        
+        if (error || !lookData) {
+          console.error("[TiffImport] Failed to create look:", error);
+          return;
+        }
+        
+        lookId = lookData.id;
+        progressiveLooksRef.current.set(lookName, lookId);
+        
+        // Add to local state immediately
+        const newLook: LookData = { ...lookData, sourceImages: [] };
+        setLooks((prev) => [newLook, ...prev]);
+      }
+    }
+    
+    // Check for duplicate image URL to prevent re-inserting on retry
+    const existingImage = looks
+      .find(l => l.id === lookId)
+      ?.sourceImages.find(img => img.source_url === url);
+    
+    if (existingImage) {
+      console.log("[TiffImport] Image already exists, skipping:", originalFilename);
+      return;
+    }
+    
+    // Insert the image
+    const { data: imageResult, error: imageError } = await supabase
+      .from("look_source_images")
+      .insert({ look_id: lookId, view: viewToUse, source_url: url })
+      .select()
+      .single();
+    
+    if (imageError) {
+      console.error("[TiffImport] Failed to insert image:", imageError);
+      return;
+    }
+    
+    // Update local state with the new image
+    if (imageResult) {
+      setLooks((prev) =>
+        prev.map((look) =>
+          look.id === lookId
+            ? { ...look, sourceImages: [...look.sourceImages, imageResult] }
+            : look
+        )
+      );
+    }
+  }, [looks, projectId]);
+
   const handleTiffImportComplete = async (createdLooks: { lookName: string; images: { url: string; view: string; originalFilename: string }[] }[]) => {
+    // Clear the progressive looks cache when import completes
+    progressiveLooksRef.current.clear();
+    
+    // For any looks not already saved progressively, save them now
     const talentId = await getDefaultTalentId();
     if (!talentId) return;
 
     for (const { lookName, images } of createdLooks) {
-      const { data: lookData, error } = await supabase
-        .from("talent_looks")
-        .insert({ name: lookName, talent_id: talentId, project_id: projectId, digital_talent_id: null })
-        .select()
-        .single();
-      if (error || !lookData) continue;
-
-      const newLook: LookData = { ...lookData, sourceImages: [] };
-      for (const { url, view } of images) {
-        // Use actual view from import, default to 'front' if unassigned
-        const viewToUse = view === 'unassigned' ? 'front' : view;
-        const { data: imageData } = await supabase
-          .from("look_source_images")
-          .insert({ look_id: lookData.id, view: viewToUse, source_url: url })
+      // Check if look was already created during progressive save
+      const existingLook = looks.find(l => l.name === lookName);
+      
+      if (existingLook) {
+        // Add only images that weren't already saved
+        for (const { url, view } of images) {
+          const imageExists = existingLook.sourceImages.some(img => img.source_url === url);
+          if (!imageExists) {
+            const viewToUse = view === 'unassigned' ? 'front' : view;
+            const { data: imageData } = await supabase
+              .from("look_source_images")
+              .insert({ look_id: existingLook.id, view: viewToUse, source_url: url })
+              .select()
+              .single();
+            if (imageData) {
+              setLooks((prev) =>
+                prev.map((look) =>
+                  look.id === existingLook.id
+                    ? { ...look, sourceImages: [...look.sourceImages, imageData] }
+                    : look
+                )
+              );
+            }
+          }
+        }
+      } else {
+        // Create new look (shouldn't happen if progressive save worked)
+        const { data: lookData, error } = await supabase
+          .from("talent_looks")
+          .insert({ name: lookName, talent_id: talentId, project_id: projectId, digital_talent_id: null })
           .select()
           .single();
-        if (imageData) newLook.sourceImages.push(imageData);
+        if (error || !lookData) continue;
+
+        const newLook: LookData = { ...lookData, sourceImages: [] };
+        for (const { url, view } of images) {
+          const viewToUse = view === 'unassigned' ? 'front' : view;
+          const { data: imageData } = await supabase
+            .from("look_source_images")
+            .insert({ look_id: lookData.id, view: viewToUse, source_url: url })
+            .select()
+            .single();
+          if (imageData) newLook.sourceImages.push(imageData);
+        }
+        setLooks((prev) => [newLook, ...prev]);
       }
-      setLooks((prev) => [newLook, ...prev]);
     }
   };
 
@@ -483,6 +597,7 @@ export function LooksUploadTab({
           files={tiffImportFiles}
           projectId={projectId}
           onComplete={handleTiffImportComplete}
+          onImageReady={handleImageReady}
         />
       </div>
     );
@@ -553,6 +668,7 @@ export function LooksUploadTab({
         files={tiffImportFiles}
         projectId={projectId}
         onComplete={handleTiffImportComplete}
+        onImageReady={handleImageReady}
       />
     </div>
   );
