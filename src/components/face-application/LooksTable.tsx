@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, MoreHorizontal, Trash2, Copy, Image as ImageIcon, Check, AlertCircle } from "lucide-react";
+import { format } from "date-fns";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ export interface LookData {
   name: string;
   product_type: string | null;
   digital_talent_id: string | null;
+  created_at: string;
   sourceImages: {
     id: string;
     view: string;
@@ -115,6 +117,7 @@ export function LooksTable({
             <TableHead className="w-[60px] text-center">Detail</TableHead>
             <TableHead className="w-[180px]">Model</TableHead>
             <TableHead className="w-[140px]">Status</TableHead>
+            <TableHead className="w-[150px]">Date Added</TableHead>
             <TableHead className="w-[50px]"></TableHead>
           </TableRow>
         </TableHeader>
@@ -183,6 +186,9 @@ export function LooksTable({
                       {status.label}
                     </Badge>
                   </TableCell>
+                  <TableCell className="py-2 text-sm text-muted-foreground">
+                    {format(new Date(look.created_at), "MMM d, yyyy h:mm a")}
+                  </TableCell>
                   <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -208,7 +214,7 @@ export function LooksTable({
                 </TableRow>
                 {isExpanded && (
                   <TableRow key={`${look.id}-expanded`}>
-                    <TableCell colSpan={9} className="p-0 bg-muted/20">
+                    <TableCell colSpan={10} className="p-0 bg-muted/20">
                       <LookRowExpanded
                         look={look}
                         talents={talents}
