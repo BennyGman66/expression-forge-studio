@@ -528,7 +528,7 @@ export function TiffImportDialog({
 
         {/* Step 1: Conversion */}
         {step === "converting" && (
-          <div className="flex-1 overflow-hidden flex flex-col gap-4">
+          <div className="flex-1 overflow-hidden flex flex-col gap-4 min-h-0">
             <div className="flex items-center justify-between">
               <div className="text-sm text-muted-foreground">
                 {processingCount > 0 || completedCount > 0 ? (
@@ -576,7 +576,7 @@ export function TiffImportDialog({
               </div>
             </div>
 
-            <ScrollArea className="flex-1 border rounded-lg max-h-[50vh]">
+            <ScrollArea className="flex-1 border rounded-lg min-h-0 h-0">
               <div className="p-2 space-y-1">
                 {conversionStates.map((state, index) => (
                   <div
