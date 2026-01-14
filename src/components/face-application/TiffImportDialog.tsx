@@ -597,11 +597,14 @@ export function TiffImportDialog({
                       </span>
                     )}
                     
-                    {state.file.lookKey && state.status !== "failed" && state.status !== "uploading" && state.status !== "converting" && (
-                      <Badge variant="outline" className="text-xs">
-                        {state.file.lookKey}
-                      </Badge>
-                    )}
+                  {state.file.lookKey && state.status !== "failed" && state.status !== "uploading" && state.status !== "converting" && (
+                    <Badge 
+                      variant="outline" 
+                      className={`text-xs ${state.status === "done" ? "border-green-500 text-green-600 bg-green-50" : ""}`}
+                    >
+                      {state.file.lookKey}
+                    </Badge>
+                  )}
                     
                     {state.status === "failed" && (
                       <Button
