@@ -187,7 +187,7 @@ export function LooksTable({
                     </Badge>
                   </TableCell>
                   <TableCell className="py-2 text-sm text-muted-foreground">
-                    {format(new Date(look.created_at), "MMM d, yyyy h:mm a")}
+                    {look.created_at ? format(new Date(look.created_at), "MMM d, yyyy h:mm a") : "—"}
                   </TableCell>
                   <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
