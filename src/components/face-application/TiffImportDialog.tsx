@@ -40,8 +40,16 @@ import {
   parseFile,
   groupFilesByLook,
   renameLookGroup,
+  updateFileView,
   isTiffFile,
 } from "@/lib/tiffImportUtils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface ImageWithView {
   url: string;
@@ -493,6 +501,23 @@ export function TiffImportDialog({
     setEditingGroupKey(null);
   };
 
+  const handleViewChange = (lookKey: string, fileIndex: number, newView: ParsedFile['inferredView']) => {
+    setLookGroups(prev => updateFileView(prev, lookKey, fileIndex, newView));
+  };
+
+  const handleQuickAssign = (pattern: 'front-back' | 'sequential') => {
+    if (!selectedGroup) return;
+    
+    const views: ParsedFile['inferredView'][] = 
+      pattern === 'front-back' 
+        ? ['front', 'back'] 
+        : ['front', 'back', 'side', 'detail'];
+    
+    selectedGroup.files.forEach((_, i) => {
+      handleViewChange(selectedGroup.lookKey, i, views[i % views.length]);
+    });
+  };
+
   const handleCommit = async () => {
     setIsCommitting(true);
     setStep("committing");
@@ -797,35 +822,78 @@ export function TiffImportDialog({
                 </div>
               </ScrollArea>
 
-              {/* Preview thumbnails */}
+              {/* Preview thumbnails with view selectors */}
               <ScrollArea className="border rounded-lg">
-                <div className="p-4">
+                <div className="p-4 space-y-4">
                   {selectedGroup ? (
-                    <div className="grid grid-cols-4 gap-3">
-                      {selectedGroup.files.map((file: ParsedFile & { pngUrl?: string }, index) => (
-                        <div
-                          key={index}
-                          className="aspect-[3/4] bg-muted rounded-lg overflow-hidden relative group"
-                        >
-                          {file.pngUrl ? (
-                            <img
-                              src={file.pngUrl}
-                              alt={file.originalFilename}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex items-center justify-center h-full">
-                              <ImageIcon className="h-8 w-8 text-muted-foreground" />
-                            </div>
-                          )}
-                          <div className="absolute inset-x-0 bottom-0 bg-black/70 p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <p className="text-xs text-white truncate">
-                              {file.originalFilename}
-                            </p>
-                          </div>
+                    <>
+                      {/* Quick assign buttons */}
+                      {selectedGroup.files.length > 1 && (
+                        <div className="flex items-center gap-2 pb-2 border-b">
+                          <span className="text-xs text-muted-foreground">Quick assign:</span>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={() => handleQuickAssign('front-back')}
+                          >
+                            Front/Back
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={() => handleQuickAssign('sequential')}
+                          >
+                            F/B/S/D Sequence
+                          </Button>
                         </div>
-                      ))}
-                    </div>
+                      )}
+                      
+                      <div className="grid grid-cols-4 gap-3">
+                        {selectedGroup.files.map((file: ParsedFile & { pngUrl?: string }, index) => (
+                          <div
+                            key={index}
+                            className="aspect-[3/4] bg-muted rounded-lg overflow-hidden relative group"
+                          >
+                            {file.pngUrl ? (
+                              <img
+                                src={file.pngUrl}
+                                alt={file.originalFilename}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex items-center justify-center h-full">
+                                <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                              </div>
+                            )}
+                            {/* View selector overlay - always visible */}
+                            <div className="absolute inset-x-0 bottom-0 bg-black/80 p-2 space-y-1">
+                              <Select
+                                value={file.inferredView}
+                                onValueChange={(value: ParsedFile['inferredView']) => 
+                                  handleViewChange(selectedGroup.lookKey, index, value)
+                                }
+                              >
+                                <SelectTrigger className="h-7 text-xs bg-transparent border-white/30 text-white hover:bg-white/10">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="front">Front</SelectItem>
+                                  <SelectItem value="back">Back</SelectItem>
+                                  <SelectItem value="side">Side</SelectItem>
+                                  <SelectItem value="detail">Detail</SelectItem>
+                                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <p className="text-[10px] text-white/70 truncate">
+                                {file.originalFilename}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   ) : (
                     <div className="flex items-center justify-center h-32 text-muted-foreground">
                       Select a look to preview images
@@ -834,6 +902,16 @@ export function TiffImportDialog({
                 </div>
               </ScrollArea>
             </div>
+
+            {/* Warning for unassigned views */}
+            {lookGroups.some((g) => 
+              g.lookKey !== "UNMATCHED" && g.files.some(f => f.inferredView === 'unassigned')
+            ) && (
+              <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 rounded-lg">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                Some images have unassigned views. Set views to avoid duplicates.
+              </div>
+            )}
 
             {lookGroups.some((g) => g.lookKey === "UNMATCHED" && g.files.length > 0) && (
               <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 rounded-lg">
