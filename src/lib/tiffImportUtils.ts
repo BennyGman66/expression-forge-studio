@@ -181,3 +181,23 @@ export function renameLookGroup(
     g.lookKey === lookKey ? { ...g, lookName: newName } : g
   );
 }
+
+/**
+ * Update view type for a specific file in a group
+ */
+export function updateFileView(
+  groups: LookGroup[],
+  lookKey: string,
+  fileIndex: number,
+  newView: ParsedFile['inferredView']
+): LookGroup[] {
+  return groups.map(g => {
+    if (g.lookKey !== lookKey) return g;
+    return {
+      ...g,
+      files: g.files.map((f, i) => 
+        i === fileIndex ? { ...f, inferredView: newView } : f
+      ),
+    };
+  });
+}
