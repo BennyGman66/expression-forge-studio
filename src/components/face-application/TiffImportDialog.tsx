@@ -293,7 +293,7 @@ export function TiffImportDialog({
         });
       });
       
-      const CONCURRENCY = 3;
+      const CONCURRENCY = 6;
       const queuedIndices = currentStates
         .map((s, i) => (s.status === "queued" ? i : -1))
         .filter((i) => i >= 0);
@@ -408,7 +408,7 @@ export function TiffImportDialog({
     });
 
     // Process in parallel with concurrency limit
-    const CONCURRENCY = 3;
+    const CONCURRENCY = 6;
     let currentIndex = 0;
 
     const processNext = async () => {
