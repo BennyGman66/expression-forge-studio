@@ -190,9 +190,34 @@ export function TiffImportDialog({
       xhr.setRequestHeader("Content-Type", contentType);
       xhr.setRequestHeader("x-upsert", "true");
       
+      // Add timeout (5 minutes for large TIFF files)
+      xhr.timeout = 300000;
+      
+      // Stall detection
+      let lastProgress = 0;
+      let lastProgressTime = Date.now();
+      let progressCheckInterval: number | undefined;
+      
+      // Check for stalled progress every 10 seconds
+      progressCheckInterval = window.setInterval(() => {
+        const timeSinceProgress = Date.now() - lastProgressTime;
+        if (timeSinceProgress > 30000 && lastProgress < 100) {
+          console.warn(`[TiffImport] Upload stalled at ${lastProgress}% for 30 seconds, aborting`);
+          clearInterval(progressCheckInterval);
+          xhr.abort();
+        }
+      }, 10000);
+      
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
           const percent = Math.round((event.loaded / event.total) * 100);
+          
+          // Update stall detection
+          if (percent > lastProgress) {
+            lastProgress = percent;
+            lastProgressTime = Date.now();
+          }
+          
           setConversionStates((prev) =>
             prev.map((s, i) => (i === index ? { ...s, uploadProgress: percent } : s))
           );
@@ -200,14 +225,26 @@ export function TiffImportDialog({
       };
       
       xhr.onload = () => {
+        if (progressCheckInterval) clearInterval(progressCheckInterval);
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
-          reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+          reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText} - ${xhr.responseText}`));
         }
       };
       
-      xhr.onerror = () => reject(new Error("Upload network error"));
+      xhr.onerror = () => {
+        if (progressCheckInterval) clearInterval(progressCheckInterval);
+        reject(new Error("Upload network error - check connection"));
+      };
+      xhr.ontimeout = () => {
+        if (progressCheckInterval) clearInterval(progressCheckInterval);
+        reject(new Error("Upload timed out after 5 minutes"));
+      };
+      xhr.onabort = () => {
+        if (progressCheckInterval) clearInterval(progressCheckInterval);
+        reject(new Error("Upload was aborted - connection stalled"));
+      };
       xhr.send(file);
     });
   };
