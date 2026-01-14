@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, ArrowRight, Image as ImageIcon, FolderOpen } from "lucide-react";
+import { Plus, ArrowRight, Image as ImageIcon, FolderOpen, FolderSearch } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BulkUploadZone } from "./BulkUploadZone";
 import { LooksTable, LookData, TalentOption } from "./LooksTable";
 import { TiffImportDialog, ProgressiveImageData } from "./TiffImportDialog";
+import { OrphanImageRecovery } from "./OrphanImageRecovery";
 import { isTiffFile } from "@/lib/tiffImportUtils";
 import {
   Dialog,
@@ -47,6 +48,7 @@ export function LooksUploadTab({
   const [newLookName, setNewLookName] = useState("");
   const [tiffImportFiles, setTiffImportFiles] = useState<File[]>([]);
   const [showTiffImport, setShowTiffImport] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
   const { toast } = useToast();
 
   // Handler to clear state when TIFF dialog closes
@@ -613,10 +615,16 @@ export function LooksUploadTab({
             {assignedTalentsCount !== 1 ? "s" : ""} · {completeLooksCount} complete
           </span>
         </div>
-        <Button size="sm" onClick={() => setShowCreateDialog(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Look
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowRecovery(true)}>
+            <FolderSearch className="h-4 w-4 mr-2" />
+            Recover Lost Images
+          </Button>
+          <Button size="sm" onClick={() => setShowCreateDialog(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Look
+          </Button>
+        </div>
       </div>
 
       {/* Compact bulk upload */}
@@ -669,6 +677,14 @@ export function LooksUploadTab({
         projectId={projectId}
         onComplete={handleTiffImportComplete}
         onImageReady={handleImageReady}
+      />
+
+      <OrphanImageRecovery
+        projectId={projectId}
+        existingLookNames={looks.map((l) => l.name)}
+        onRecovered={fetchLooks}
+        open={showRecovery}
+        onOpenChange={setShowRecovery}
       />
     </div>
   );
