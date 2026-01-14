@@ -79,7 +79,7 @@ export function LooksUploadTab({
     setLoading(true);
     const { data: looksData } = await supabase
       .from("talent_looks")
-      .select("id, name, product_type, digital_talent_id")
+      .select("id, name, product_type, digital_talent_id, created_at")
       .eq("project_id", projectId)
       .order("created_at", { ascending: false });
 
