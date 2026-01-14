@@ -498,7 +498,7 @@ export function TiffImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5" />
@@ -576,7 +576,7 @@ export function TiffImportDialog({
               </div>
             </div>
 
-            <ScrollArea className="flex-1 border rounded-lg min-h-0 h-0">
+            <ScrollArea className="border rounded-lg h-[50vh]">
               <div className="p-2 space-y-1">
                 {conversionStates.map((state, index) => (
                   <div
