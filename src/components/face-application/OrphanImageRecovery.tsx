@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { getImageUrl } from "@/lib/imageUtils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
@@ -477,7 +478,7 @@ export function OrphanImageRecovery({
                           >
                             <div className="aspect-[3/4] bg-muted">
                               <img
-                                src={img.publicUrl}
+                                src={getImageUrl(img.publicUrl, 'tiny')}
                                 alt={img.filename}
                                 className="w-full h-full object-cover"
                                 loading="lazy"
