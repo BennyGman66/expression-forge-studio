@@ -65,6 +65,7 @@ interface FileConversionState {
   pngUrl: string | null;
   error: string | null;
   tiffStoragePath: string | null;
+  uploadProgress: number; // 0-100 percentage
 }
 
 type Step = "converting" | "grouping" | "committing";
@@ -131,6 +132,7 @@ export function TiffImportDialog({
             pngUrl: null,
             error: null,
             tiffStoragePath: null,
+            uploadProgress: 0,
           }))
         );
         setStep("converting");
@@ -161,23 +163,63 @@ export function TiffImportDialog({
     }
   }, [open, step, conversionStates.length, isConverting]);
 
+  // Upload with XMLHttpRequest for progress tracking
+  const uploadWithProgress = async (
+    file: File,
+    path: string,
+    index: number,
+    contentType: string
+  ): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const uploadUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/images/${path}`;
+      
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", uploadUrl);
+      xhr.setRequestHeader("Authorization", `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`);
+      xhr.setRequestHeader("Content-Type", contentType);
+      xhr.setRequestHeader("x-upsert", "true");
+      
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          setConversionStates((prev) =>
+            prev.map((s, i) => (i === index ? { ...s, uploadProgress: percent } : s))
+          );
+        }
+      };
+      
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+        }
+      };
+      
+      xhr.onerror = () => reject(new Error("Upload network error"));
+      xhr.send(file);
+    });
+  };
+
   // Upload TIFF to storage first (client-side, no memory issues)
-  const uploadTiffToStorage = async (file: File): Promise<string> => {
+  const uploadTiffToStorage = async (file: File, index: number): Promise<string> => {
     const timestamp = Date.now();
     const randomId = Math.random().toString(36).substring(2, 8);
     const path = `face-application/${projectId}/temp-tiff/${timestamp}-${randomId}-${file.name}`;
 
-    const { error } = await supabase.storage
-      .from("images")
-      .upload(path, file, { contentType: "image/tiff" });
-
-    if (error) throw error;
+    await uploadWithProgress(file, path, index, "image/tiff");
     return path;
   };
 
   // Convert single file (handles both TIFF and non-TIFF)
-  const convertSingleFile = async (index: number) => {
-    const item = conversionStates[index];
+  // Takes states as parameter to avoid stale closure issues
+  const convertSingleFile = async (index: number, states: FileConversionState[]) => {
+    const item = states[index];
+    
+    if (!item) {
+      console.error(`[TiffImport] No item at index ${index}, states length: ${states.length}`);
+      return;
+    }
     
     try {
       let pngUrl: string;
@@ -185,10 +227,10 @@ export function TiffImportDialog({
       if (isTiffFile(item.file.file)) {
         // Step 1: Upload TIFF to storage first
         setConversionStates((prev) =>
-          prev.map((s, i) => (i === index ? { ...s, status: "uploading" } : s))
+          prev.map((s, i) => (i === index ? { ...s, status: "uploading", uploadProgress: 0 } : s))
         );
 
-        const tiffStoragePath = await uploadTiffToStorage(item.file.file);
+        const tiffStoragePath = await uploadTiffToStorage(item.file.file, index);
         
         setConversionStates((prev) =>
           prev.map((s, i) => (i === index ? { ...s, tiffStoragePath, status: "converting" } : s))
@@ -210,14 +252,14 @@ export function TiffImportDialog({
       } else {
         // Upload non-TIFF files directly
         setConversionStates((prev) =>
-          prev.map((s, i) => (i === index ? { ...s, status: "uploading" } : s))
+          prev.map((s, i) => (i === index ? { ...s, status: "uploading", uploadProgress: 0 } : s))
         );
-        pngUrl = await uploadDirectly(item.file.file);
+        pngUrl = await uploadDirectly(item.file.file, index);
       }
 
       setConversionStates((prev) =>
         prev.map((s, i) =>
-          i === index ? { ...s, status: "done", pngUrl, error: null } : s
+          i === index ? { ...s, status: "done", pngUrl, error: null, uploadProgress: 100 } : s
         )
       );
     } catch (error) {
@@ -270,7 +312,8 @@ export function TiffImportDialog({
         if (currentQueueIndex >= queuedIndices.length) return;
         
         const index = queuedIndices[currentQueueIndex++];
-        await convertSingleFile(index);
+        // Pass currentStates to avoid stale closure
+        await convertSingleFile(index, currentStates);
         await processNext();
       };
 
@@ -288,16 +331,12 @@ export function TiffImportDialog({
     }
   }, [isConverting]);
 
-  const uploadDirectly = async (file: File): Promise<string> => {
+  const uploadDirectly = async (file: File, index: number): Promise<string> => {
     const timestamp = Date.now();
     const randomId = Math.random().toString(36).substring(2, 8);
     const path = `face-application/${projectId}/uploads/${timestamp}-${randomId}-${file.name}`;
 
-    const { error } = await supabase.storage
-      .from("images")
-      .upload(path, file, { contentType: file.type });
-
-    if (error) throw error;
+    await uploadWithProgress(file, path, index, file.type);
 
     const { data } = supabase.storage.from("images").getPublicUrl(path);
     return data.publicUrl;
@@ -338,15 +377,18 @@ export function TiffImportDialog({
 
   // Retry a single failed file
   const handleRetrySingle = async (index: number) => {
-    setConversionStates((prev) =>
-      prev.map((s, i) =>
-        i === index ? { ...s, status: "queued", error: null, tiffStoragePath: null } : s
-      )
-    );
+    // Update state and get fresh reference
+    const freshStates = await new Promise<FileConversionState[]>((resolve) => {
+      setConversionStates((prev) => {
+        const updated = prev.map((s, i) =>
+          i === index ? { ...s, status: "queued" as ConversionStatus, error: null, tiffStoragePath: null, uploadProgress: 0 } : s
+        );
+        resolve(updated);
+        return updated;
+      });
+    });
     
-    // Small delay to ensure state is updated
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await convertSingleFile(index);
+    await convertSingleFile(index, freshStates);
   };
 
   const handleRetryFailed = async () => {
@@ -354,12 +396,16 @@ export function TiffImportDialog({
       .map((s, i) => (s.status === "failed" ? i : -1))
       .filter((i) => i >= 0);
 
-    // Reset all failed to queued
-    setConversionStates((prev) =>
-      prev.map((s, i) =>
-        failedIndices.includes(i) ? { ...s, status: "queued", error: null, tiffStoragePath: null } : s
-      )
-    );
+    // Reset all failed to queued and get fresh state
+    const freshStates = await new Promise<FileConversionState[]>((resolve) => {
+      setConversionStates((prev) => {
+        const updated = prev.map((s, i) =>
+          failedIndices.includes(i) ? { ...s, status: "queued" as ConversionStatus, error: null, tiffStoragePath: null, uploadProgress: 0 } : s
+        );
+        resolve(updated);
+        return updated;
+      });
+    });
 
     // Process in parallel with concurrency limit
     const CONCURRENCY = 3;
@@ -368,7 +414,7 @@ export function TiffImportDialog({
     const processNext = async () => {
       if (currentIndex >= failedIndices.length) return;
       const idx = failedIndices[currentIndex++];
-      await convertSingleFile(idx);
+      await convertSingleFile(idx, freshStates);
       await processNext();
     };
 
@@ -423,15 +469,6 @@ export function TiffImportDialog({
   };
 
   const selectedGroup = lookGroups.find((g) => g.lookKey === selectedGroupKey);
-
-  // Get status label for display
-  const getStatusLabel = (status: ConversionStatus) => {
-    switch (status) {
-      case "uploading": return "Uploading...";
-      case "converting": return "Converting...";
-      default: return null;
-    }
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -544,13 +581,23 @@ export function TiffImportDialog({
                       {state.file.originalFilename}
                     </span>
                     
-                    {getStatusLabel(state.status) && (
+                    {/* Show upload progress percentage */}
+                    {state.status === "uploading" && (
+                      <div className="flex items-center gap-1.5">
+                        <Progress value={state.uploadProgress} className="w-16 h-1.5" />
+                        <span className="text-xs text-muted-foreground w-8">
+                          {state.uploadProgress}%
+                        </span>
+                      </div>
+                    )}
+                    
+                    {state.status === "converting" && (
                       <span className="text-xs text-muted-foreground">
-                        {getStatusLabel(state.status)}
+                        Converting...
                       </span>
                     )}
                     
-                    {state.file.lookKey && state.status !== "failed" && (
+                    {state.file.lookKey && state.status !== "failed" && state.status !== "uploading" && state.status !== "converting" && (
                       <Badge variant="outline" className="text-xs">
                         {state.file.lookKey}
                       </Badge>
