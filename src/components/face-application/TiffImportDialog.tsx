@@ -550,7 +550,7 @@ export function TiffImportDialog({
               </div>
             </div>
 
-            <ScrollArea className="flex-1 border rounded-lg">
+            <ScrollArea className="flex-1 border rounded-lg max-h-[50vh]">
               <div className="p-2 space-y-1">
                 {conversionStates.map((state, index) => (
                   <div
