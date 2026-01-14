@@ -333,7 +333,13 @@ export function OrphanImageRecovery({
     setIsDeleting(false);
   };
 
-  // Group orphaned images by inferred look key for display
+  // Extract timestamp from filename (e.g., "1768149071537-eae0kd..." -> 1768149071537)
+  const extractTimestamp = (filename: string): number => {
+    const match = filename.match(/^(\d{13})/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
+  // Group orphaned images by inferred look key for display, sorted by newest first
   const groupedOrphans: OrphanGroup[] = React.useMemo(() => {
     const groups = new Map<string, OrphanedImage[]>();
     for (const img of orphanedImages) {
@@ -343,11 +349,21 @@ export function OrphanImageRecovery({
       groups.set(key, existing);
     }
     return Array.from(groups.entries())
-      .map(([lookKey, images]) => ({ lookKey, images }))
+      .map(([lookKey, images]) => ({
+        lookKey,
+        // Sort images within group by timestamp (newest first)
+        images: images.sort((a, b) => 
+          extractTimestamp(b.filename) - extractTimestamp(a.filename)
+        ),
+      }))
       .sort((a, b) => {
+        // UNMATCHED always at the bottom
         if (a.lookKey === "UNMATCHED") return 1;
         if (b.lookKey === "UNMATCHED") return -1;
-        return a.lookKey.localeCompare(b.lookKey);
+        // Sort groups by their newest image (descending - newest first)
+        const aMaxTime = Math.max(...a.images.map(img => extractTimestamp(img.filename)));
+        const bMaxTime = Math.max(...b.images.map(img => extractTimestamp(img.filename)));
+        return bMaxTime - aMaxTime;
       });
   }, [orphanedImages]);
 
