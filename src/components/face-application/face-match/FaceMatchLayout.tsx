@@ -36,7 +36,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
   const { toast } = useToast();
   const workflowState = useWorkflowStateContext();
 
-  // Fetch looks with cropped source images
+  // Fetch looks with cropped source images and load existing pairings
   useEffect(() => {
     if (!projectId) return;
 
@@ -85,6 +85,24 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
         .filter(look => look.sourceImages.length > 0);
 
       setLooks(looksWithImages);
+
+      // Load existing pairings and skipped status from database
+      const existingPairings = new Map<string, string>();
+      const existingSkipped = new Set<string>();
+      
+      if (allImages) {
+        for (const img of allImages) {
+          if ((img as any).matched_face_url) {
+            existingPairings.set(img.id, (img as any).matched_face_url);
+          }
+          if ((img as any).is_skipped) {
+            existingSkipped.add(img.id);
+          }
+        }
+      }
+      
+      setPairings(existingPairings);
+      setSkippedImageIds(existingSkipped);
 
       // Fetch face foundations for all talents
       if (talentIds.length > 0) {
@@ -169,22 +187,34 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     [looks, selectedLookId]
   );
 
-  // Handlers
-  const handleSetPairing = useCallback((sourceImageId: string, faceUrl: string) => {
+  // Handlers - persist pairings to database immediately
+  const handleSetPairing = useCallback(async (sourceImageId: string, faceUrl: string) => {
     setPairings(prev => {
       const next = new Map(prev);
       next.set(sourceImageId, faceUrl);
       return next;
     });
     setClickSelectedFace(null);
+    
+    // Persist to database
+    await supabase
+      .from("look_source_images")
+      .update({ matched_face_url: faceUrl, is_skipped: false })
+      .eq("id", sourceImageId);
   }, []);
 
-  const handleClearPairing = useCallback((sourceImageId: string) => {
+  const handleClearPairing = useCallback(async (sourceImageId: string) => {
     setPairings(prev => {
       const next = new Map(prev);
       next.delete(sourceImageId);
       return next;
     });
+    
+    // Persist to database
+    await supabase
+      .from("look_source_images")
+      .update({ matched_face_url: null })
+      .eq("id", sourceImageId);
   }, []);
 
   const handleApplyAutoMatches = useCallback(() => {
@@ -237,9 +267,22 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     );
   }, []);
 
-  // Handle skip image
-  const handleSkipImage = useCallback((imageId: string) => {
+  // Handle skip image - persist to database
+  const handleSkipImage = useCallback(async (imageId: string) => {
     setSkippedImageIds(prev => new Set([...prev, imageId]));
+    
+    // Persist to database
+    await supabase
+      .from("look_source_images")
+      .update({ is_skipped: true, matched_face_url: null })
+      .eq("id", imageId);
+    
+    // Also clear any pairing for this image
+    setPairings(prev => {
+      const next = new Map(prev);
+      next.delete(imageId);
+      return next;
+    });
   }, []);
 
   // Drag handlers
