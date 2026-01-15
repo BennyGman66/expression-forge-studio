@@ -98,8 +98,8 @@ export default function PublicJobWorkspace() {
     });
   }, [inputs, job?.type]);
 
-  const expectedOutputs = job?.type === 'FOUNDATION_FACE_REPLACE' ? 3 : 1;
-  const uploadProgress = Math.round((outputs.length / expectedOutputs) * 100);
+  const recommendedOutputs = job?.type === 'FOUNDATION_FACE_REPLACE' ? 3 : 1;
+  const uploadProgress = outputs.length > 0 ? Math.min(100, Math.round((outputs.length / recommendedOutputs) * 100)) : 0;
 
   // Mutations
   const updateJobStatus = useMutation({
@@ -199,10 +199,7 @@ export default function PublicJobWorkspace() {
       toast.error('Please upload at least one output before submitting');
       return;
     }
-    if (outputs.length < expectedOutputs) {
-      toast.error(`Please upload all ${expectedOutputs} outputs before submitting`);
-      return;
-    }
+    // No longer require exactly N outputs - any number >= 1 is fine
     createSubmission.mutate();
   };
 
@@ -230,13 +227,18 @@ export default function PublicJobWorkspace() {
   }, []);
 
   const addFilesToPending = (files: File[]) => {
-    const imageFiles = files.filter(file => 
-      file.type.startsWith('image/') || 
-      file.name.endsWith('.psd') || 
-      file.name.endsWith('.tiff') ||
-      file.name.endsWith('.ai') ||
-      file.name.endsWith('.pdf')
-    );
+    const imageFiles = files.filter(file => {
+      const name = file.name.toLowerCase();
+      return file.type.startsWith('image/') || 
+        name.endsWith('.psd') || 
+        name.endsWith('.tiff') ||
+        name.endsWith('.tif') ||
+        name.endsWith('.ai') ||
+        name.endsWith('.pdf') ||
+        name.endsWith('.png') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg');
+    });
     
     const newUploads: PendingUpload[] = imageFiles.map(file => ({
       id: crypto.randomUUID(),
@@ -442,8 +444,10 @@ export default function PublicJobWorkspace() {
     );
   }
 
-  const isReadOnly = job.status === 'SUBMITTED' || job.status === 'APPROVED' || job.status === 'CLOSED';
-  const canUpload = job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES';
+  const isFullyReadOnly = job.status === 'APPROVED' || job.status === 'CLOSED';
+  const isReadOnly = job.status === 'SUBMITTED' || isFullyReadOnly;
+  // Allow uploads for IN_PROGRESS, NEEDS_CHANGES, and SUBMITTED (to update before review completes)
+  const canUpload = job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES' || job.status === 'SUBMITTED';
   const canStart = job.status === 'OPEN' || job.status === 'ASSIGNED';
 
   return (
@@ -662,7 +666,7 @@ export default function PublicJobWorkspace() {
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Upload Progress</span>
-                      <span>{outputs.length} / {expectedOutputs}</span>
+                      <span>{outputs.length} output{outputs.length !== 1 ? 's' : ''}</span>
                     </div>
                     <Progress value={uploadProgress} className="h-2" />
                   </div>
@@ -789,7 +793,7 @@ export default function PublicJobWorkspace() {
                   <Button 
                     className="w-full" 
                     onClick={handleSubmitJob}
-                    disabled={outputs.length < expectedOutputs || createSubmission.isPending}
+                    disabled={outputs.length < 1 || createSubmission.isPending}
                   >
                     <Send className="h-4 w-4 mr-2" />
                     {createSubmission.isPending ? 'Submitting...' : 'Submit for Review'}

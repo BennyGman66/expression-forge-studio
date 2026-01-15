@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFreelancerJobs, useDeleteJob } from '@/hooks/useJobs';
+import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Briefcase, Clock, CheckCircle, ArrowRight, AlertCircle, AlertTriangle, Trash2, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import type { UnifiedJob } from '@/types/jobs';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,12 +24,36 @@ import {
 export default function FreelancerDashboard() {
   const { user, profile, isFreelancer, isInternal, isAdmin } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const deleteJob = useDeleteJob();
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
   
   // Fetch claimable (open/unassigned) jobs + user's assigned jobs
   const { data, isLoading } = useFreelancerJobs(user?.id);
   const { assignedJobs = [], claimableJobs = [] } = data || {};
+
+  // Real-time subscription for job updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('unified-jobs-realtime-dashboard')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'unified_jobs'
+        },
+        () => {
+          // Refetch jobs when any job changes
+          queryClient.invalidateQueries({ queryKey: ['freelancer-jobs'] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   // Redirect non-freelancers - using useEffect-like check but let the page render
   if (!isFreelancer && !isInternal && !isLoading) {

@@ -115,9 +115,9 @@ export default function FreelancerJobDetail() {
     );
   }, [inputs, job?.type]);
 
-  // Expected outputs for Foundation Face Replace
-  const expectedOutputs = job?.type === 'FOUNDATION_FACE_REPLACE' ? 3 : 1;
-  const uploadProgress = Math.round((outputs.length / expectedOutputs) * 100);
+  // Expected outputs for Foundation Face Replace (optional, not required)
+  const recommendedOutputs = job?.type === 'FOUNDATION_FACE_REPLACE' ? 3 : 1;
+  const uploadProgress = outputs.length > 0 ? Math.min(100, Math.round((outputs.length / recommendedOutputs) * 100)) : 0;
 
   const handleStartJob = async () => {
     if (!user?.id) return;
@@ -153,10 +153,7 @@ export default function FreelancerJobDetail() {
       toast.error('Please upload at least one output before submitting');
       return;
     }
-    if (outputs.length < expectedOutputs) {
-      toast.error(`Please upload all ${expectedOutputs} outputs before submitting`);
-      return;
-    }
+    // No longer require exactly N outputs - any number >= 1 is fine
     
     // Build assets from job outputs with proper labels
     const assets = outputs.map((output, index) => ({
@@ -211,13 +208,18 @@ export default function FreelancerJobDetail() {
   }, []);
 
   const addFilesToPending = (files: File[]) => {
-    const imageFiles = files.filter(file => 
-      file.type.startsWith('image/') || 
-      file.name.endsWith('.psd') || 
-      file.name.endsWith('.tiff') ||
-      file.name.endsWith('.ai') ||
-      file.name.endsWith('.pdf')
-    );
+    const imageFiles = files.filter(file => {
+      const name = file.name.toLowerCase();
+      return file.type.startsWith('image/') || 
+        name.endsWith('.psd') || 
+        name.endsWith('.tiff') ||
+        name.endsWith('.tif') ||
+        name.endsWith('.ai') ||
+        name.endsWith('.pdf') ||
+        name.endsWith('.png') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg');
+    });
     
     const newUploads: PendingUpload[] = imageFiles.map(file => ({
       id: crypto.randomUUID(),
@@ -483,8 +485,10 @@ export default function FreelancerJobDetail() {
   }
 
   const isPreviewMode = job.status === 'OPEN' || job.status === 'ASSIGNED';
-  const isReadOnly = job.status === 'SUBMITTED' || job.status === 'APPROVED' || job.status === 'CLOSED' || isPreviewMode;
-  const canUpload = job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES';
+  const isFullyReadOnly = job.status === 'APPROVED' || job.status === 'CLOSED' || isPreviewMode;
+  const isReadOnly = job.status === 'SUBMITTED' || isFullyReadOnly;
+  // Allow uploads for IN_PROGRESS, NEEDS_CHANGES, and SUBMITTED (to update before review completes)
+  const canUpload = job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES' || job.status === 'SUBMITTED';
 
   return (
     <div className="min-h-screen bg-background">
@@ -751,7 +755,7 @@ export default function FreelancerJobDetail() {
                   </CardTitle>
                   {job.type === 'FOUNDATION_FACE_REPLACE' && (
                     <p className="text-sm text-muted-foreground mt-1">
-                      {outputs.length} of {expectedOutputs} outputs uploaded
+                      {outputs.length} output{outputs.length !== 1 ? 's' : ''} uploaded
                     </p>
                   )}
                 </div>
@@ -1015,18 +1019,18 @@ export default function FreelancerJobDetail() {
                     <div className="p-3 rounded-lg bg-muted/30 border border-border text-sm space-y-2">
                       <p className="font-medium text-muted-foreground">Before submitting:</p>
                       <div className="flex items-center gap-2">
-                        <div className={`h-4 w-4 rounded-full flex items-center justify-center ${outputs.length >= expectedOutputs ? 'bg-green-500' : 'bg-muted'}`}>
-                          {outputs.length >= expectedOutputs && <CheckCircle className="h-3 w-3 text-white" />}
+                        <div className={`h-4 w-4 rounded-full flex items-center justify-center ${outputs.length >= 1 ? 'bg-green-500' : 'bg-muted'}`}>
+                          {outputs.length >= 1 && <CheckCircle className="h-3 w-3 text-white" />}
                         </div>
-                        <span className={outputs.length >= expectedOutputs ? 'text-foreground' : 'text-muted-foreground'}>
-                          {expectedOutputs} outputs uploaded
+                        <span className={outputs.length >= 1 ? 'text-foreground' : 'text-muted-foreground'}>
+                          At least 1 output uploaded ({outputs.length} uploaded)
                         </span>
                       </div>
                     </div>
                     <Button 
                       onClick={handleSubmitJob} 
                       className="w-full" 
-                      disabled={updateStatus.isPending || createSubmission.isPending || outputs.length < expectedOutputs}
+                      disabled={updateStatus.isPending || createSubmission.isPending || outputs.length < 1}
                     >
                       <CheckCircle className="mr-2 h-4 w-4" /> {createSubmission.isPending ? 'Submitting...' : 'Submit for Review'}
                     </Button>
