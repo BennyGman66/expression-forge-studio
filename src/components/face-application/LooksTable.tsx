@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useCallback } from "react";
-import { ChevronDown, ChevronRight, MoreHorizontal, Trash2, Copy, Image as ImageIcon, Check, AlertCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, MoreHorizontal, Trash2, Copy, Image as ImageIcon, Check, AlertCircle, Search, X } from "lucide-react";
 import { format } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { LookRowExpanded } from "./LookRowExpanded";
 import { getImageUrl } from "@/lib/imageUtils";
 import { cn } from "@/lib/utils";
-
 export interface LookData {
   id: string;
   name: string;
@@ -117,6 +117,7 @@ export function LooksTable({
   uploadingViews,
 }: LooksTableProps) {
   const [expandedLookId, setExpandedLookId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const parentRef = useRef<HTMLDivElement>(null);
 
   const toggleExpand = (lookId: string) => {
@@ -127,21 +128,43 @@ export function LooksTable({
     return look.sourceImages.find((img) => img.view === view)?.source_url;
   };
 
+  // Filter looks based on search query (supports comma-separated values)
+  const filteredLooks = useMemo(() => {
+    if (!searchQuery.trim()) return looks;
+    
+    const searchTerms = searchQuery
+      .split(",")
+      .map((term) => term.trim().toLowerCase())
+      .filter((term) => term.length > 0);
+    
+    if (searchTerms.length === 0) return looks;
+    
+    return looks.filter((look) => {
+      const lookName = look.name.toLowerCase();
+      const lookCode = (look.look_code || "").toLowerCase();
+      
+      return searchTerms.some(
+        (term) => lookName.includes(term) || lookCode.includes(term)
+      );
+    });
+  }, [looks, searchQuery]);
+
   const hasSelection = selectedIds !== undefined && onToggleSelection !== undefined;
-  const allSelected = hasSelection && looks.length > 0 && selectedIds.size === looks.length;
-  const someSelected = hasSelection && selectedIds.size > 0 && selectedIds.size < looks.length;
+  const allSelected = hasSelection && filteredLooks.length > 0 && selectedIds.size === filteredLooks.length;
+  const someSelected = hasSelection && selectedIds.size > 0 && selectedIds.size < filteredLooks.length;
+  const isFiltered = searchQuery.trim().length > 0;
 
   // Build flat list with expansion rows - key is used by virtualizer to track items
   const flatRows = useMemo(() => {
     const rows: { type: 'look' | 'expanded'; look: LookData; key: string }[] = [];
-    for (const look of looks) {
+    for (const look of filteredLooks) {
       rows.push({ type: 'look', look, key: look.id });
       if (expandedLookId === look.id) {
         rows.push({ type: 'expanded', look, key: `${look.id}-expanded` });
       }
     }
     return rows;
-  }, [looks, expandedLookId]);
+  }, [filteredLooks, expandedLookId]);
 
   // Memoize virtualizer config functions to prevent re-initialization
   const estimateSize = useCallback((index: number) => {
@@ -163,28 +186,59 @@ export function LooksTable({
 
   return (
     <div className="space-y-2">
-      {/* Selection controls */}
-      {hasSelection && (
-        <div className="flex items-center gap-2 text-sm">
-          <Button variant="outline" size="sm" onClick={onSelectAll} className="h-7 text-xs">
-            {allSelected ? 'Deselect All' : 'Select All'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={onSelectReady} className="h-7 text-xs">
-            Select Ready ({looks.filter(l => {
-              const views = l.sourceImages.map(img => img.view);
-              return views.includes('front') && views.includes('back');
-            }).length})
-          </Button>
-          {selectedIds.size > 0 && (
-            <Button variant="ghost" size="sm" onClick={onClearSelection} className="h-7 text-xs text-muted-foreground">
-              Clear
+      {/* Search and Selection controls */}
+      <div className="flex items-center gap-3">
+        {/* Search input */}
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by SKU or look name (comma-separated)..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9 pr-8 h-8 text-sm"
+          />
+          {searchQuery && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
+              onClick={() => setSearchQuery("")}
+            >
+              <X className="h-3.5 w-3.5" />
             </Button>
           )}
-          {selectedIds.size > 0 && (
-            <span className="text-muted-foreground ml-2">{selectedIds.size} selected</span>
-          )}
         </div>
-      )}
+        
+        {/* Filter count badge */}
+        {isFiltered && (
+          <Badge variant="secondary" className="text-xs">
+            Showing {filteredLooks.length} of {looks.length}
+          </Badge>
+        )}
+
+        {/* Selection controls */}
+        {hasSelection && (
+          <div className="flex items-center gap-2 text-sm ml-auto">
+            <Button variant="outline" size="sm" onClick={onSelectAll} className="h-7 text-xs">
+              {allSelected ? 'Deselect All' : 'Select All'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={onSelectReady} className="h-7 text-xs">
+              Select Ready ({filteredLooks.filter(l => {
+                const views = l.sourceImages.map(img => img.view);
+                return views.includes('front') && views.includes('back');
+              }).length})
+            </Button>
+            {selectedIds.size > 0 && (
+              <Button variant="ghost" size="sm" onClick={onClearSelection} className="h-7 text-xs text-muted-foreground">
+                Clear
+              </Button>
+            )}
+            {selectedIds.size > 0 && (
+              <span className="text-muted-foreground">{selectedIds.size} selected</span>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="border rounded-lg overflow-hidden">
         {/* Fixed Header */}
