@@ -6,21 +6,34 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Identity lock prompt template
-const IDENTITY_LOCK_PROMPT = `Using the provided head image as the sole identity authority; preserve exact facial identity with zero deviation (structure, tone, texture, freckles). No beautify/smooth.
+// View-specific pose and framing instructions (from working generate-face-application)
+const VIEW_PROMPTS: Record<string, string> = {
+  full_front: `Full-length front-facing portrait showing the complete outfit from head to toe. Model standing upright with head held straight and aligned with the torso. Eyes looking directly at the camera with a calm, steady gaze. Brows in a soft, neutral resting position. Mouth closed with an extremely subtle smile.
 
-Using the provided body image as full-body authority; preserve pose, proportions, clothing, crop, and silhouette exactly; no redesign.
+Keep face and lighting consistent from image 2, make sure to keep freckles intact.`,
 
-Replace head naturally; match perspective and angle to the body so the subject appears coherent.
+  cropped_front: `Close-up front-facing portrait cropped at chest level, focusing on the face and upper body. Head held upright and aligned with the torso, showing no noticeable tilt left or right. Chin is neutral and level. Eyes looking directly at the camera with a calm, steady gaze.
 
-Preserve studio lighting and background from body image.`;
+Keep face and lighting consistent from image 2, make sure to keep freckles intact.`,
 
-const VIEW_INSTRUCTIONS: Record<string, string> = {
-  full_front: 'The subject is facing forward in a full-body shot.',
-  cropped_front: 'The subject is facing forward in a cropped/close-up shot.',
-  back: 'The subject is facing away from the camera. Ensure head placement appears natural from behind.',
-  detail: 'This is a detail/side angle shot focusing on product features.',
+  front: `Front-facing portrait with full visibility of the face and outfit. Head held upright and aligned with the torso. Eyes looking directly at the camera with a calm, steady gaze.
+
+Keep face and lighting consistent from image 2, make sure to keep freckles intact.`,
+
+  back: `Back-facing pose with shoulders squared to the camera. Head is rotated slightly to her left (camera right), creating a soft partial profile. Chin is neutral and level. The face is visible only in side view, with the cheek, jawline, and nose seen in gentle profile while the eyes are turned away from the camera. Overall posture is upright, calm, and centered.
+
+Keep face and lighting consistent from image 2.`,
+
+  side: `Side profile view with the model's face in clean profile. Head held upright, chin neutral and level. The full outline of the face is visible - forehead, nose, lips, and chin in silhouette against the background.
+
+Keep face and lighting consistent from image 2.`,
+
+  detail: `Close-up detail shot focusing on a specific feature of the outfit (collar, cuff, pocket, or texture). Frame tightly on the detail while keeping the model's face partially visible at the edge of frame for context.
+
+Keep face and lighting consistent from image 2.`,
 };
+
+const STUDIO_LIGHTING_PROMPT = `Model photographed in soft, high-key studio lighting against a clean white background with no visible texture. Light is diffused and even, creating minimal shadows. Key light is centred and slightly above eye level, producing gentle falloff on the cheeks and a natural, matte skin appearance. No harsh rim light. Overall look is crisp, neutral, and modern, similar to premium fashion e-commerce photography. Colours are true-to-life with subtle contrast.`;
 
 interface RequestBody {
   projectId: string;
@@ -30,6 +43,7 @@ interface RequestBody {
   attemptsPerView?: number;
   model?: string;
   strictness?: 'high' | 'medium' | 'low';
+  prompt?: string; // Custom prompt override
 }
 
 // Helper to upload base64 image to storage
@@ -101,10 +115,11 @@ serve(async (req) => {
       type, 
       attemptsPerView = 4,
       model = 'google/gemini-2.5-flash-image-preview',
-      strictness = 'high'
+      strictness = 'high',
+      prompt: customPrompt
     } = body;
 
-    console.log(`[AI Apply] Starting ${type} for look ${lookId}, view: ${view || 'all'}`);
+    console.log(`[AI Apply] Starting ${type} for look ${lookId}, view: ${view || 'all'}, model: ${model}`);
 
     // Get or create AI Apply job for this look
     let { data: existingJob } = await supabase
@@ -115,6 +130,7 @@ serve(async (req) => {
       .single();
 
     let jobId: string;
+    let digitalTalentId: string | null = null;
 
     if (!existingJob) {
       // Get digital talent ID from face_application_jobs
@@ -125,12 +141,14 @@ serve(async (req) => {
         .eq('look_id', lookId)
         .single();
 
+      digitalTalentId = faceAppJob?.digital_talent_id;
+
       const { data: newJob, error: jobError } = await supabase
         .from('ai_apply_jobs')
         .insert({
           project_id: projectId,
           look_id: lookId,
-          digital_talent_id: faceAppJob?.digital_talent_id,
+          digital_talent_id: digitalTalentId,
           status: 'running',
           model,
           attempts_per_view: attemptsPerView,
@@ -143,6 +161,7 @@ serve(async (req) => {
       jobId = newJob.id;
     } else {
       jobId = existingJob.id;
+      digitalTalentId = existingJob.digital_talent_id;
       // Update job status
       await supabase
         .from('ai_apply_jobs')
@@ -153,13 +172,15 @@ serve(async (req) => {
     // Determine which views to process
     const viewsToProcess = view ? [view] : ['full_front', 'cropped_front', 'back', 'detail'];
 
-    // Get source images for pairing
+    // Get source images for pairing (body images)
     const { data: sourceImages } = await supabase
       .from('look_source_images')
       .select('id, look_id, view, source_url, head_cropped_url')
       .eq('look_id', lookId);
 
-    // Get selected head renders from face_application_outputs
+    console.log(`[AI Apply] Found ${sourceImages?.length || 0} source images for look`);
+
+    // Get selected head renders from face_application_outputs (Stage 2)
     const { data: faceAppJobs } = await supabase
       .from('face_application_jobs')
       .select('id')
@@ -174,6 +195,29 @@ serve(async (req) => {
       .in('job_id', faceAppJobIds)
       .eq('is_selected', true);
 
+    console.log(`[AI Apply] Found ${headRenders?.length || 0} selected head renders from Stage 2`);
+
+    // Get face foundation from face_pairing_outputs (clean face for identity reference)
+    let faceFoundationUrl: string | null = null;
+    if (digitalTalentId) {
+      const { data: foundations } = await supabase
+        .from('face_pairing_outputs')
+        .select(`
+          id,
+          stored_url,
+          pairing:face_pairings!inner(digital_talent_id)
+        `)
+        .eq('is_face_foundation', true)
+        .eq('status', 'completed')
+        .not('stored_url', 'is', null);
+
+      const talentFoundations = foundations?.filter(
+        (f: any) => f.pairing?.digital_talent_id === digitalTalentId
+      );
+      faceFoundationUrl = talentFoundations?.[0]?.stored_url || null;
+      console.log(`[AI Apply] Face foundation for talent ${digitalTalentId}: ${faceFoundationUrl ? 'FOUND' : 'NOT FOUND'}`);
+    }
+
     // View name mapping: generation views -> database views
     const viewAliases: Record<string, string[]> = {
       'full_front': ['full_front', 'front'],
@@ -182,8 +226,6 @@ serve(async (req) => {
       'detail': ['detail', 'side'],
     };
 
-    console.log(`[AI Apply] Available source images:`, sourceImages?.map(s => ({ view: s.view, id: s.id })));
-
     // Process each view
     for (const currentView of viewsToProcess) {
       console.log(`[AI Apply] Processing view: ${currentView}`);
@@ -191,27 +233,26 @@ serve(async (req) => {
       // Get body image for this view - check all aliases
       const aliases = viewAliases[currentView] || [currentView];
       let bodyImage = sourceImages?.find(s => aliases.includes(s.view));
-      let bodySource: 'exact' | 'fallback' = bodyImage?.view === currentView ? 'exact' : 'fallback';
       
       if (!bodyImage) {
         // Fallback logic for front views
         if (currentView === 'back') {
-          console.log(`[AI Apply] ERROR: No back body image for back view`);
-          continue; // Skip - back requires back body
+          console.log(`[AI Apply] SKIP: No back body image for back view`);
+          continue;
         }
-        // Try any front variant as fallback for front views
         bodyImage = sourceImages?.find(s => ['full_front', 'cropped_front', 'front'].includes(s.view));
-        bodySource = 'fallback';
       }
 
       if (!bodyImage) {
-        console.log(`[AI Apply] ERROR: No body image found for ${currentView}, checked aliases: ${aliases.join(', ')}`);
+        console.log(`[AI Apply] SKIP: No body image found for ${currentView}`);
         continue;
       }
 
-      console.log(`[AI Apply] Found body image for ${currentView}: ${bodyImage.view} (${bodySource})`)
+      // Use head_cropped_url if available, otherwise source_url
+      const bodyImageUrl = bodyImage.head_cropped_url || bodyImage.source_url;
+      console.log(`[AI Apply] Body image for ${currentView}: ${bodyImageUrl.substring(0, 60)}...`);
 
-      // Get head render for this view
+      // Get head render for this view - prefer exact match, fallback to similar views
       const frontViews = ['full_front', 'front', 'cropped_front', 'detail'];
       let headRender = headRenders?.find(h => h.view === currentView);
       let angleMatch: 'exact' | 'reused' | 'risk' = 'exact';
@@ -229,10 +270,15 @@ serve(async (req) => {
         }
       }
 
-      if (!headRender?.stored_url) {
-        console.log(`[AI Apply] ERROR: No head render found for ${currentView}`);
+      // Determine which head image to use: prefer face foundation, fallback to head render
+      const headImageUrl = faceFoundationUrl || headRender?.stored_url;
+
+      if (!headImageUrl) {
+        console.log(`[AI Apply] SKIP: No head image (foundation or render) for ${currentView}`);
         continue;
       }
+
+      console.log(`[AI Apply] Head image for ${currentView}: ${headImageUrl.substring(0, 60)}... (${faceFoundationUrl ? 'foundation' : 'render'})`);
 
       // Determine how many attempts to create
       let attemptsToCreate = attemptsPerView;
@@ -240,7 +286,6 @@ serve(async (req) => {
       if (type === 'add_more') {
         attemptsToCreate = 2;
       } else if (type === 'retry_failed') {
-        // Delete failed outputs and count them
         const { data: failedOutputs } = await supabase
           .from('ai_apply_outputs')
           .select('id')
@@ -276,12 +321,12 @@ serve(async (req) => {
           look_id: lookId,
           view: currentView,
           attempt_index: attemptIndex,
-          head_image_id: headRender.id,
-          head_image_url: headRender.stored_url,
+          head_image_id: headRender?.id || null,
+          head_image_url: headImageUrl,
           body_image_id: bodyImage.id,
-          body_image_url: bodyImage.source_url,
+          body_image_url: bodyImageUrl,
           status: 'generating',
-          prompt_version: 'v1',
+          prompt_version: 'v2-face-swap',
         });
       }
 
@@ -309,13 +354,28 @@ serve(async (req) => {
 
       for (const output of pendingOutputs || []) {
         try {
-          // Build the prompt
-          const viewInstruction = VIEW_INSTRUCTIONS[currentView] || '';
-          const finalPrompt = `${IDENTITY_LOCK_PROMPT}\n\n${viewInstruction}`;
+          // Build the prompt using the CORRECT format from generate-face-application
+          const viewPrompt = VIEW_PROMPTS[currentView] || VIEW_PROMPTS.front || '';
+          
+          let finalPrompt: string;
+          if (customPrompt) {
+            // Use custom prompt if provided, but still append view-specific instructions
+            finalPrompt = `${customPrompt}
 
-          console.log(`[AI Apply] Generating output ${output.id} for ${currentView}`);
+${viewPrompt}
 
-          // Call Lovable AI Gateway directly
+${STUDIO_LIGHTING_PROMPT}`;
+          } else {
+            // Default prompt: explicit face swap instruction
+            finalPrompt = `Recreate image 1, keep the crop, pose and clothing exactly the same but put the head of image 2 on it. ${viewPrompt}
+
+${STUDIO_LIGHTING_PROMPT}`;
+          }
+
+          console.log(`[AI Apply] Generating output ${output.id} for ${currentView} attempt ${output.attempt_index}`);
+
+          // Call Lovable AI Gateway
+          // CRITICAL: Image order matters! Image 1 = body, Image 2 = head
           const aiResponse = await fetch(
             "https://ai.gateway.lovable.dev/v1/chat/completions",
             {
@@ -331,8 +391,8 @@ serve(async (req) => {
                     role: 'user',
                     content: [
                       { type: 'text', text: finalPrompt },
-                      { type: 'image_url', image_url: { url: output.head_image_url } },
-                      { type: 'image_url', image_url: { url: output.body_image_url } },
+                      { type: 'image_url', image_url: { url: output.body_image_url } },  // Image 1 = Body
+                      { type: 'image_url', image_url: { url: output.head_image_url } },  // Image 2 = Head
                     ],
                   },
                 ],
@@ -374,7 +434,7 @@ serve(async (req) => {
                 })
                 .eq('id', output.id);
 
-              console.log(`[AI Apply] Successfully saved output ${output.id}`);
+              console.log(`[AI Apply] SUCCESS: Output ${output.id} saved to ${storedUrl.substring(0, 60)}...`);
             } else {
               throw new Error('Failed to upload image to storage');
             }
@@ -429,7 +489,7 @@ serve(async (req) => {
       })
       .eq('id', jobId);
 
-    console.log(`[AI Apply] Completed for look ${lookId}`);
+    console.log(`[AI Apply] Job ${jobId} completed for look ${lookId}`);
 
     return new Response(
       JSON.stringify({ success: true, jobId }),
