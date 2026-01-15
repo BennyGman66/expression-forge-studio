@@ -746,12 +746,12 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                   )}
                 </div>
 
-                <div className="flex justify-between items-center">
+                <div className="flex flex-col gap-3">
                   <p className="text-sm text-muted-foreground">
                     <span className="text-green-600 font-medium">Green box</span> = your selection (becomes bottom half). 
                     Top half will be white padding. Output: {OUTPUT_SIZE}×{OUTPUT_SIZE}px
                   </p>
-                  <div className="flex gap-2">
+                  <div className="flex justify-end gap-2">
                     <Button 
                       variant="outline" 
                       onClick={handleExpandImage} 
