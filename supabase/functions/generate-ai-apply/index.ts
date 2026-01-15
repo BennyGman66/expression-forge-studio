@@ -174,30 +174,42 @@ serve(async (req) => {
       .in('job_id', faceAppJobIds)
       .eq('is_selected', true);
 
+    // View name mapping: generation views -> database views
+    const viewAliases: Record<string, string[]> = {
+      'full_front': ['full_front', 'front'],
+      'cropped_front': ['cropped_front', 'front'],
+      'back': ['back'],
+      'detail': ['detail', 'side'],
+    };
+
+    console.log(`[AI Apply] Available source images:`, sourceImages?.map(s => ({ view: s.view, id: s.id })));
+
     // Process each view
     for (const currentView of viewsToProcess) {
       console.log(`[AI Apply] Processing view: ${currentView}`);
 
-      // Get body image for this view
-      let bodyImage = sourceImages?.find(s => s.view === currentView);
-      let bodySource: 'exact' | 'fallback' = 'exact';
+      // Get body image for this view - check all aliases
+      const aliases = viewAliases[currentView] || [currentView];
+      let bodyImage = sourceImages?.find(s => aliases.includes(s.view));
+      let bodySource: 'exact' | 'fallback' = bodyImage?.view === currentView ? 'exact' : 'fallback';
       
       if (!bodyImage) {
-        // Fallback logic
+        // Fallback logic for front views
         if (currentView === 'back') {
           console.log(`[AI Apply] ERROR: No back body image for back view`);
           continue; // Skip - back requires back body
         }
-        // Try full_front or front as fallback
-        bodyImage = sourceImages?.find(s => s.view === 'full_front') || 
-                   sourceImages?.find(s => s.view === 'front');
+        // Try any front variant as fallback for front views
+        bodyImage = sourceImages?.find(s => ['full_front', 'cropped_front', 'front'].includes(s.view));
         bodySource = 'fallback';
       }
 
       if (!bodyImage) {
-        console.log(`[AI Apply] ERROR: No body image found for ${currentView}`);
+        console.log(`[AI Apply] ERROR: No body image found for ${currentView}, checked aliases: ${aliases.join(', ')}`);
         continue;
       }
+
+      console.log(`[AI Apply] Found body image for ${currentView}: ${bodyImage.view} (${bodySource})`)
 
       // Get head render for this view
       const frontViews = ['full_front', 'front', 'cropped_front', 'detail'];

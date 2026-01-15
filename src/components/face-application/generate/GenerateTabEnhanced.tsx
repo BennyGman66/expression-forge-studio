@@ -395,12 +395,14 @@ export function GenerateTabEnhanced({
         
         await supabase.functions.invoke("generate-ai-apply", {
           body: {
+            projectId: projectId,
+            lookId: look.lookId,
+            type: 'run',
             jobId: newJob.id,
             outfitDescriptions,
             views: viewsToProcess,
-            attemptsPerView: allowRegenerate 
-              ? attemptsPerView 
-              : undefined, // Let edge function calculate missing
+            attemptsPerView: attemptsPerView,
+            model: selectedModel,
             allowRegenerate,
           },
         });
