@@ -445,16 +445,80 @@ export default function PublicJobWorkspace() {
     );
   }
 
+  // Check if this is a preview (OPEN job that hasn't been claimed by this freelancer)
+  const isPreviewMode = (job.status === 'OPEN' || job.status === 'ASSIGNED') && 
+    job.freelancer_identity_id !== identity?.id;
+  
   const isFullyReadOnly = job.status === 'APPROVED' || job.status === 'CLOSED';
-  const isReadOnly = job.status === 'SUBMITTED' || isFullyReadOnly;
+  const isReadOnly = job.status === 'SUBMITTED' || isFullyReadOnly || isPreviewMode;
   // Allow uploads for IN_PROGRESS, NEEDS_CHANGES, and SUBMITTED (to update before review completes)
-  const canUpload = job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES' || job.status === 'SUBMITTED';
+  const canUpload = !isPreviewMode && (job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES' || job.status === 'SUBMITTED');
   const canStart = job.status === 'OPEN' || job.status === 'ASSIGNED';
+
+  // Get instructions with fallback
+  const displayInstructions = job.instructions || 
+    JOB_TYPE_CONFIG[job.type as keyof typeof JOB_TYPE_CONFIG]?.defaultInstructions || 
+    'No instructions provided';
+
+  // Handle claim job for preview mode
+  const claimJob = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase
+        .from('unified_jobs')
+        .update({ 
+          status: 'IN_PROGRESS',
+          freelancer_identity_id: identity?.id,
+          started_at: new Date().toISOString()
+        })
+        .eq('id', jobId)
+        .eq('status', 'OPEN')
+        .is('freelancer_identity_id', null)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      if (!data) throw new Error('Job is no longer available - it may have been claimed by someone else');
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
+      toast.success('Job claimed! You can now start working.');
+    },
+    onError: (error: any) => {
+      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
+      toast.error(error.message || 'Failed to claim job');
+    },
+  });
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Preview Mode Banner */}
+      {isPreviewMode && (
+        <div className="bg-blue-500/20 border-b border-blue-500/30 px-6 py-3">
+          <div className="container mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Eye className="h-5 w-5 text-blue-400" />
+              <div>
+                <p className="font-medium text-blue-200">Job Preview</p>
+                <p className="text-sm text-blue-300/80">
+                  Review this job before claiming it. Click "Start Working" to begin.
+                </p>
+              </div>
+            </div>
+            <Button 
+              onClick={() => claimJob.mutate()}
+              disabled={claimJob.isPending}
+              className="gap-2"
+            >
+              <Play className="h-4 w-4" />
+              {claimJob.isPending ? 'Claiming...' : 'Start Working'}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Status Banners */}
-      {job.status === 'NEEDS_CHANGES' && (
+      {job.status === 'NEEDS_CHANGES' && !isPreviewMode && (
         <div className="bg-orange-500/20 border-b border-orange-500/30 px-6 py-3">
           <div className="container mx-auto flex items-center gap-3">
             <AlertTriangle className="h-5 w-5 text-orange-400" />
@@ -468,7 +532,7 @@ export default function PublicJobWorkspace() {
         </div>
       )}
 
-      {job.status === 'SUBMITTED' && (
+      {job.status === 'SUBMITTED' && !isPreviewMode && (
         <div className="bg-purple-500/20 border-b border-purple-500/30 px-6 py-3">
           <div className="container mx-auto flex items-center gap-3">
             <Clock className="h-5 w-5 text-purple-400" />
@@ -547,15 +611,9 @@ export default function PublicJobWorkspace() {
                 </AccordionTrigger>
                 <AccordionContent>
                   <div className="pt-2 pb-4 space-y-4">
-                    {job.instructions ? (
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                        {job.instructions}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground italic">
-                        No specific instructions provided.
-                      </p>
-                    )}
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                      {displayInstructions}
+                    </p>
                     
                     {/* Input Images Grid */}
                     {inputs.length > 0 && (
