@@ -264,7 +264,7 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
           table: 'look_view_states',
         },
         () => {
-          // Refetch on any change
+          // Refetch on any change - use ref to avoid dependency issues
           fetchStates();
         }
       )
@@ -273,7 +273,8 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [projectId, fetchStates]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]); // Only depend on projectId to avoid re-subscribing
 
   // Build summaries from states using detected views
   const lookSummaries = useMemo(() => {

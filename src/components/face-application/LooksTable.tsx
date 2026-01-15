@@ -1,8 +1,8 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useCallback } from "react";
 import { ChevronDown, ChevronRight, MoreHorizontal, Trash2, Copy, Image as ImageIcon, Check, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -143,14 +143,21 @@ export function LooksTable({
     return rows;
   }, [looks, expandedLookId]);
 
+  // Memoize virtualizer config functions to prevent re-initialization
+  const estimateSize = useCallback((index: number) => {
+    const row = flatRows[index];
+    return row?.type === 'expanded' ? EXPANDED_ROW_HEIGHT : ROW_HEIGHT;
+  }, [flatRows]);
+
+  const getItemKey = useCallback((index: number) => {
+    return flatRows[index]?.key ?? `row-${index}`;
+  }, [flatRows]);
+
   const rowVirtualizer = useVirtualizer({
     count: flatRows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: (index) => {
-      const row = flatRows[index];
-      return row.type === 'expanded' ? EXPANDED_ROW_HEIGHT : ROW_HEIGHT;
-    },
-    getItemKey: (index) => flatRows[index].key,
+    estimateSize,
+    getItemKey,
     overscan: 5,
   });
 
