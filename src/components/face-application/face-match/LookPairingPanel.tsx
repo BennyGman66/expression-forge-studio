@@ -10,9 +10,11 @@ interface LookPairingPanelProps {
   look: LookWithImages | null;
   faceFoundations: FaceFoundation[];
   pairings: Map<string, string>;
+  skippedImageIds: Set<string>;
   onSetPairing: (sourceImageId: string, faceUrl: string) => void;
   onClearPairing: (sourceImageId: string) => void;
   onApplyAutoMatches: () => void;
+  onSkipImage: (imageId: string) => void;
   onCropComplete: (updatedImage: LookSourceImage) => void;
   dragOverSlotId: string | null;
 }
@@ -21,14 +23,15 @@ export function LookPairingPanel({
   look,
   faceFoundations,
   pairings,
+  skippedImageIds,
   onSetPairing,
   onClearPairing,
   onApplyAutoMatches,
+  onSkipImage,
   onCropComplete,
   dragOverSlotId,
 }: LookPairingPanelProps) {
   const [cropDialogImage, setCropDialogImage] = useState<LookSourceImage | null>(null);
-  const [skippedImageIds, setSkippedImageIds] = useState<Set<string>>(new Set());
 
   if (!look) {
     return (
@@ -76,8 +79,8 @@ export function LookPairingPanel({
     setCropDialogImage(null);
   };
 
-  const handleSkipImage = (imageId: string) => {
-    setSkippedImageIds(prev => new Set([...prev, imageId]));
+  const handleSkipImageClick = (imageId: string) => {
+    onSkipImage(imageId);
   };
 
   const needsCropCount = nonSkippedImages.filter(img => !img.head_cropped_url).length;
@@ -131,7 +134,7 @@ export function LookPairingPanel({
               pairedFaceUrl={pairings.get(img.id) || null}
               onClearPairing={() => onClearPairing(img.id)}
               onCropClick={() => handleCropClick(img)}
-              onSkip={() => handleSkipImage(img.id)}
+              onSkip={() => handleSkipImageClick(img.id)}
               isOver={dragOverSlotId === img.id}
               isSkipped={skippedImageIds.has(img.id)}
             />

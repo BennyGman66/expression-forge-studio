@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 interface LookNavigatorProps {
   looks: LookWithImages[];
   pairings: Map<string, string>;
+  skippedImageIds: Set<string>;
   selectedLookId: string | null;
   onSelectLook: (lookId: string) => void;
   filterMode: 'needs_action' | 'all';
@@ -18,6 +19,7 @@ const ROW_HEIGHT = 56;
 export function LookNavigator({
   looks,
   pairings,
+  skippedImageIds,
   selectedLookId,
   onSelectLook,
   filterMode,
@@ -28,10 +30,10 @@ export function LookNavigator({
   const displayLooks = useMemo(() => {
     if (filterMode === 'all') return looks;
     return looks.filter(look => {
-      const status = getLookPairingStatus(look, pairings);
+      const status = getLookPairingStatus(look, pairings, skippedImageIds);
       return status.status !== 'complete';
     });
-  }, [looks, pairings, filterMode]);
+  }, [looks, pairings, skippedImageIds, filterMode]);
 
   const rowVirtualizer = useVirtualizer({
     count: displayLooks.length,
@@ -85,7 +87,7 @@ export function LookNavigator({
         >
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
             const look = displayLooks[virtualRow.index];
-            const status = getLookPairingStatus(look, pairings);
+            const status = getLookPairingStatus(look, pairings, skippedImageIds);
             const isSelected = selectedLookId === look.id;
 
             return (

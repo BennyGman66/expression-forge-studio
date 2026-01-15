@@ -24,6 +24,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
   const [looks, setLooks] = useState<LookWithImages[]>([]);
   const [faceFoundations, setFaceFoundations] = useState<FaceFoundation[]>([]);
   const [pairings, setPairings] = useState<Map<string, string>>(new Map());
+  const [skippedImageIds, setSkippedImageIds] = useState<Set<string>>(new Set());
   const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [dragOverSlotId, setDragOverSlotId] = useState<string | null>(null);
@@ -137,7 +138,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     fetchData();
   }, [projectId, selectedLookIds]);
 
-  // Calculate progress - now accounting for cropped vs uncropped
+  // Calculate progress - accounting for skipped images
   const { totalViews, croppedViews, pairedViews, completedLooks, needsActionLooks } = useMemo(() => {
     let total = 0;
     let cropped = 0;
@@ -146,7 +147,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     let needsAction = 0;
 
     looks.forEach(look => {
-      const status = getLookPairingStatus(look, pairings);
+      const status = getLookPairingStatus(look, pairings, skippedImageIds);
       total += status.total;
       cropped += status.cropped;
       paired += status.paired;
@@ -158,7 +159,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     });
 
     return { totalViews: total, croppedViews: cropped, pairedViews: paired, completedLooks: completed, needsActionLooks: needsAction };
-  }, [looks, pairings]);
+  }, [looks, pairings, skippedImageIds]);
 
   const progressPercent = croppedViews > 0 ? Math.round((pairedViews / croppedViews) * 100) : 0;
 
@@ -234,6 +235,11 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
         ),
       }))
     );
+  }, []);
+
+  // Handle skip image
+  const handleSkipImage = useCallback((imageId: string) => {
+    setSkippedImageIds(prev => new Set([...prev, imageId]));
   }, []);
 
   // Drag handlers
@@ -392,6 +398,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
             <LookNavigator
               looks={looks}
               pairings={pairings}
+              skippedImageIds={skippedImageIds}
               selectedLookId={selectedLookId}
               onSelectLook={setSelectedLookId}
               filterMode={filterMode}
@@ -404,9 +411,11 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
               look={selectedLook}
               faceFoundations={faceFoundations}
               pairings={pairings}
+              skippedImageIds={skippedImageIds}
               onSetPairing={handleSetPairing}
               onClearPairing={handleClearPairing}
               onApplyAutoMatches={handleApplyAutoMatches}
+              onSkipImage={handleSkipImage}
               onCropComplete={handleCropComplete}
               dragOverSlotId={dragOverSlotId}
             />

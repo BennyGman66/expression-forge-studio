@@ -21,15 +21,24 @@ export interface LookPairingStatus {
 
 export function getLookPairingStatus(
   look: LookWithImages,
-  pairings: Map<string, string>
+  pairings: Map<string, string>,
+  skippedImageIds?: Set<string>
 ): LookPairingStatus {
-  const total = look.sourceImages.length;
-  const cropped = look.sourceImages.filter(img => !!img.head_cropped_url).length;
-  const paired = look.sourceImages.filter(img => !!img.head_cropped_url && pairings.has(img.id)).length;
+  // Filter out skipped images from calculations
+  const relevantImages = skippedImageIds 
+    ? look.sourceImages.filter(img => !skippedImageIds.has(img.id))
+    : look.sourceImages;
+  
+  const total = relevantImages.length;
+  const cropped = relevantImages.filter(img => !!img.head_cropped_url).length;
+  const paired = relevantImages.filter(img => !!img.head_cropped_url && pairings.has(img.id)).length;
   
   let status: 'needs_crop' | 'empty' | 'partial' | 'complete' = 'empty';
   
-  if (cropped < total) {
+  if (total === 0) {
+    // All images were skipped - consider complete
+    status = 'complete';
+  } else if (cropped < total) {
     // Some images still need cropping
     status = 'needs_crop';
   } else if (paired === total && total > 0) {
