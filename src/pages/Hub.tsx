@@ -187,7 +187,7 @@ export default function Hub() {
                 <h2 className="text-lg font-medium text-foreground mb-4">Portal Preview</h2>
                 <Button
                   variant="outline"
-                  onClick={() => handleAppClick("/freelancer")}
+                  onClick={() => handleAppClick("/work")}
                   className="gap-2"
                 >
                   <Eye className="h-4 w-4" />
