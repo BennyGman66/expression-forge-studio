@@ -52,6 +52,7 @@ export function useGenerationTracking({
   const [looks, setLooks] = useState<LookGenerationStats[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<number>(Date.now());
+  const [hasInitialLoad, setHasInitialLoad] = useState(false);
 
   // Fetch all looks with their source images and output counts
   const fetchData = useCallback(async () => {
@@ -61,7 +62,10 @@ export function useGenerationTracking({
       return;
     }
 
-    setIsLoading(true);
+    // Only show loading spinner on initial load, not refreshes
+    if (!hasInitialLoad) {
+      setIsLoading(true);
+    }
 
     try {
       // Fetch looks
@@ -184,6 +188,7 @@ export function useGenerationTracking({
       console.error("Error fetching generation tracking data:", error);
     } finally {
       setIsLoading(false);
+      setHasInitialLoad(true);
     }
   }, [projectId, selectedLookIds, requiredOptions, lastRunTimestamp]);
 
@@ -220,7 +225,7 @@ export function useGenerationTracking({
     };
   }, [projectId]);
 
-  // Polling fallback - refresh every 3 seconds when there are generating outputs
+  // Polling fallback - refresh every 5 seconds when there are generating outputs
   useEffect(() => {
     if (!projectId) return;
     
@@ -234,7 +239,7 @@ export function useGenerationTracking({
     console.log('[Generation Tracking] Active generation detected, starting polling');
     const interval = setInterval(() => {
       setLastRefresh(Date.now());
-    }, 3000);
+    }, 5000);
     
     return () => clearInterval(interval);
   }, [projectId, looks]);
