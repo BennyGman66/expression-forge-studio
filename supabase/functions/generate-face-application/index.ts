@@ -149,6 +149,38 @@ serve(async (req) => {
   }
 });
 
+// Parallel execution helper with concurrency limit
+async function parallelLimit<T>(
+  tasks: (() => Promise<T>)[],
+  limit: number
+): Promise<T[]> {
+  const results: T[] = [];
+  let index = 0;
+
+  async function runNext(): Promise<void> {
+    const currentIndex = index++;
+    if (currentIndex >= tasks.length) return;
+    
+    try {
+      const result = await tasks[currentIndex]();
+      results[currentIndex] = result;
+    } catch (error) {
+      console.error(`Task ${currentIndex} failed:`, error);
+      results[currentIndex] = null as T;
+    }
+    
+    await runNext();
+  }
+
+  // Start 'limit' number of parallel workers
+  const workers = Array(Math.min(limit, tasks.length))
+    .fill(null)
+    .map(() => runNext());
+
+  await Promise.all(workers);
+  return results;
+}
+
 async function processGeneration(
   supabase: any,
   job: any,
@@ -159,6 +191,9 @@ async function processGeneration(
   attemptsPerView: number,
   singleView?: string
 ) {
+  // Concurrency limit - process 3 images at once
+  const CONCURRENCY = 3;
+  
   // Get existing completed outputs to calculate resume progress
   const { data: existingOutputs } = await supabase
     .from("face_application_outputs")
@@ -173,6 +208,7 @@ async function processGeneration(
 
   let progress = completedSet.size;
   console.log(`📊 Starting with ${progress} already completed outputs`);
+  console.log(`🚀 Using parallel processing with concurrency: ${CONCURRENCY}`);
 
   try {
     // Fetch all face foundations for the job's digital talent
@@ -217,107 +253,163 @@ async function processGeneration(
 
     console.log(`Found face foundations for views:`, Object.keys(foundationsByView));
 
+    // Build all generation tasks first
+    interface GenerationTask {
+      sourceImage: any;
+      attempt: number;
+      view: string;
+      outfitDesc: string;
+      faceUrl: string;
+      bodyImageUrl: string;
+    }
+
+    const tasks: GenerationTask[] = [];
+
     for (const sourceImage of sourceImages) {
       const outfitDesc = outfitDescriptions[sourceImage.id] || "the outfit shown";
-      
-      // Get face foundation - match by view or use default
       const view = sourceImage.view || "front";
       const faceUrl = foundationsByView[view] || foundationsByView["front"] || defaultFoundation;
+      const bodyImageUrl = sourceImage.head_cropped_url;
 
       if (!faceUrl) {
         console.log(`No face foundation found for image ${sourceImage.id} (view: ${view}), skipping`);
         continue;
       }
 
-      // Use the cropped image, not the full body
-      const bodyImageUrl = sourceImage.head_cropped_url;
       if (!bodyImageUrl) {
         console.log(`No cropped image for ${sourceImage.id}, skipping`);
         continue;
       }
 
       for (let attempt = 0; attempt < attemptsPerView; attempt++) {
-        // Skip if this source+attempt is already completed
         const outputKey = `${sourceImage.id}-${attempt}`;
         if (completedSet.has(outputKey)) {
           console.log(`⏭️ Skipping ${view} attempt ${attempt + 1} - already completed`);
           continue;
         }
-        console.log(`Generating ${view} attempt ${attempt + 1}/${attemptsPerView}`);
 
-        // Create output record
-        const { data: output } = await supabase
-          .from("face_application_outputs")
-          .insert({
-            job_id: job.id,
-            look_source_image_id: sourceImage.id,
-            face_foundation_url: faceUrl,
-            view: view,
-            attempt_index: attempt,
-            outfit_description: outfitDesc,
-            status: "generating",
-          })
-          .select()
-          .single();
+        tasks.push({
+          sourceImage,
+          attempt,
+          view,
+          outfitDesc,
+          faceUrl,
+          bodyImageUrl,
+        });
+      }
+    }
 
-        try {
-          // Build view-specific prompt
-          const viewPrompt = VIEW_PROMPTS[view] || VIEW_PROMPTS.front;
-          const prompt = `Recreate image 1 with "${outfitDesc}", keep the crop, pose and clothing exactly the same but put the head of image 2 on it. ${viewPrompt}
+    console.log(`📋 Total tasks to process: ${tasks.length} (in batches of ${CONCURRENCY})`);
+
+    // Update job with correct total
+    const totalTasks = tasks.length + progress;
+    await supabase
+      .from("face_application_jobs")
+      .update({ total: totalTasks, updated_at: new Date().toISOString() })
+      .eq("id", job.id);
+
+    // Create task functions that can be executed in parallel
+    const taskFunctions = tasks.map((task, taskIndex) => async () => {
+      const { sourceImage, attempt, view, outfitDesc, faceUrl, bodyImageUrl } = task;
+      
+      console.log(`🎯 [${taskIndex + 1}/${tasks.length}] Generating ${view} attempt ${attempt + 1}`);
+
+      // Create output record
+      const { data: output } = await supabase
+        .from("face_application_outputs")
+        .insert({
+          job_id: job.id,
+          look_source_image_id: sourceImage.id,
+          face_foundation_url: faceUrl,
+          view: view,
+          attempt_index: attempt,
+          outfit_description: outfitDesc,
+          status: "generating",
+        })
+        .select()
+        .single();
+
+      try {
+        // Build view-specific prompt
+        const viewPrompt = VIEW_PROMPTS[view] || VIEW_PROMPTS.front;
+        const prompt = `Recreate image 1 with "${outfitDesc}", keep the crop, pose and clothing exactly the same but put the head of image 2 on it. ${viewPrompt}
 
 ${STUDIO_LIGHTING_PROMPT}`;
 
-          // Call Lovable AI for image generation
-          const generatedUrl = await generateImage(
-            bodyImageUrl, // CROPPED head image
-            faceUrl, // Face foundation
-            prompt,
-            apiKey,
-            model
-          );
+        // Call Lovable AI for image generation
+        const generatedUrl = await generateImage(
+          bodyImageUrl,
+          faceUrl,
+          prompt,
+          apiKey,
+          model
+        );
 
-          if (generatedUrl) {
-            // Upload to storage
-            const storedUrl = await uploadToStorage(supabase, generatedUrl, job.id, output.id);
+        if (generatedUrl) {
+          // Upload to storage
+          const storedUrl = await uploadToStorage(supabase, generatedUrl, job.id, output.id);
 
-            // Update output record
-            await supabase
-              .from("face_application_outputs")
-              .update({
-                stored_url: storedUrl,
-                final_prompt: prompt,
-                status: "completed",
-              })
-              .eq("id", output.id);
-          } else {
-            await supabase
-              .from("face_application_outputs")
-              .update({ status: "failed" })
-              .eq("id", output.id);
-          }
-        } catch (genError) {
-          console.error(`Generation error for output ${output.id}:`, genError);
+          // Update output record
+          await supabase
+            .from("face_application_outputs")
+            .update({
+              stored_url: storedUrl,
+              final_prompt: prompt,
+              status: "completed",
+            })
+            .eq("id", output.id);
+
+          // Increment progress atomically
+          progress++;
+          await supabase
+            .from("face_application_jobs")
+            .update({ progress, updated_at: new Date().toISOString() })
+            .eq("id", job.id);
+
+          console.log(`✅ [${taskIndex + 1}/${tasks.length}] Completed ${view} attempt ${attempt + 1}`);
+          return true;
+        } else {
           await supabase
             .from("face_application_outputs")
             .update({ status: "failed" })
             .eq("id", output.id);
+          console.log(`❌ [${taskIndex + 1}/${tasks.length}] Failed ${view} attempt ${attempt + 1} - no URL`);
+          return false;
         }
-
-        progress++;
+      } catch (genError) {
+        console.error(`Generation error for output ${output.id}:`, genError);
         await supabase
-          .from("face_application_jobs")
-          .update({ progress })
-          .eq("id", job.id);
+          .from("face_application_outputs")
+          .update({ status: "failed" })
+          .eq("id", output.id);
+        return false;
       }
-    }
+    });
+
+    // Execute all tasks with concurrency limit
+    const startTime = Date.now();
+    await parallelLimit(taskFunctions, CONCURRENCY);
+    const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    // Get final progress count
+    const { data: finalOutputs } = await supabase
+      .from("face_application_outputs")
+      .select("id, status")
+      .eq("job_id", job.id);
+
+    const finalCompleted = finalOutputs?.filter((o: any) => o.status === "completed").length || 0;
 
     // Mark job complete
     await supabase
       .from("face_application_jobs")
-      .update({ status: "completed", progress })
+      .update({ 
+        status: "completed", 
+        progress: finalCompleted,
+        updated_at: new Date().toISOString()
+      })
       .eq("id", job.id);
 
-    console.log(`Job ${job.id} completed with ${progress} generations`);
+    console.log(`🏁 Job ${job.id} completed with ${finalCompleted} generations in ${elapsedSec}s (${CONCURRENCY}x parallel)`);
   } catch (error) {
     console.error(`Job ${job.id} failed:`, error);
     await supabase
