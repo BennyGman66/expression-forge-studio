@@ -13,20 +13,17 @@ interface LookGenerationCardProps {
 }
 
 function ViewStatusBadge({ 
-  viewStat, 
-  requiredOptions 
+  viewStat 
 }: { 
   viewStat: ViewOutputStats; 
-  requiredOptions: number;
 }) {
-  const { completedCount, failedCount, runningCount, pendingCount, isComplete, viewLabel } = viewStat;
+  const { completedCount, failedCount, runningCount, pendingCount, viewLabel } = viewStat;
   const hasActivity = runningCount > 0 || pendingCount > 0;
   const hasFailed = failedCount > 0;
 
-  // Calculate dynamic total - shows actual outputs created, not just the target
-  const actualTotalOutputs = completedCount + pendingCount + runningCount + failedCount;
-  const displayTotal = Math.max(actualTotalOutputs, requiredOptions);
-  const allComplete = actualTotalOutputs > 0 && completedCount === actualTotalOutputs && !hasActivity;
+  // Total outputs CREATED for this view (not the setting target)
+  const totalCreated = completedCount + pendingCount + runningCount + failedCount;
+  const allComplete = totalCreated > 0 && completedCount === totalCreated && !hasActivity;
 
   // Determine status icon and color
   let statusIcon: React.ReactNode = null;
@@ -58,7 +55,7 @@ function ViewStatusBadge({
         completedCount > 0 ? "text-amber-600" : 
         "text-muted-foreground"
       )}>
-        {completedCount}/{displayTotal}
+        {totalCreated > 0 ? `${completedCount}/${totalCreated}` : '0/0'}
       </span>
       <div className={cn(
         "w-4 h-4 rounded-full flex items-center justify-center mt-1",
@@ -166,7 +163,7 @@ export function LookGenerationCard({
                 />
               )}
               {/* Status below thumbnail */}
-              <ViewStatusBadge viewStat={viewStat} requiredOptions={requiredOptions} />
+              <ViewStatusBadge viewStat={viewStat} />
             </div>
           );
         })}
