@@ -796,28 +796,34 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                         src={currentImage.head_cropped_url}
                         alt="Cropped result"
                         className="w-full h-full object-contain"
-                      draggable={false}
-                    />
-                  ) : imageReady && getLivePreviewStyle() ? (
-                    <div className="absolute inset-0 overflow-hidden">
-                      <img
-                        src={currentImage.source_url}
-                        alt="Live preview"
-                        className="absolute"
-                        style={{
-                          width: getLivePreviewStyle()!.width,
-                          height: getLivePreviewStyle()!.height,
-                          left: getLivePreviewStyle()!.left,
-                          top: getLivePreviewStyle()!.top,
-                        }}
                         draggable={false}
                       />
-                    </div>
-                    ) : (
-                      <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-                        Loading...
-                      </div>
-                    )}
+                    ) : (() => {
+                      const previewStyle = getLivePreviewStyle();
+                      if (imageReady && previewStyle) {
+                        return (
+                          <div className="absolute inset-0 overflow-hidden">
+                            <img
+                              src={currentImage.source_url}
+                              alt="Live preview"
+                              className="absolute"
+                              style={{
+                                width: `${previewStyle.width}px`,
+                                height: `${previewStyle.height}px`,
+                                left: `${previewStyle.left}px`,
+                                top: `${previewStyle.top}px`,
+                              }}
+                              draggable={false}
+                            />
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
+                          Loading...
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
