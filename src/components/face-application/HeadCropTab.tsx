@@ -839,6 +839,14 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                 <ArrowRight className="h-4 w-4 mr-1" />
                 {ignoringLook ? "Skipping..." : "Skip Look"}
               </Button>
+              <Button
+                size="sm"
+                onClick={handleApplyCrop}
+                disabled={processing || expanding || !currentImage}
+              >
+                <Check className="h-4 w-4 mr-1" />
+                {processing ? "Processing..." : "Apply Crop"}
+              </Button>
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -919,9 +927,6 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                     >
                       <Plus className="h-4 w-4 mr-1" />
                       {expanding ? "Expanding..." : "Increase Image"}
-                    </Button>
-                    <Button onClick={handleApplyCrop} disabled={processing || expanding}>
-                      {processing ? "Processing..." : "Apply Crop"}
                     </Button>
                   </div>
                 </div>
