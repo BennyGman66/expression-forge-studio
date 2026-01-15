@@ -159,12 +159,11 @@ export function LooksTable({
 
   // Force virtualizer to recalculate row positions when expansion state changes
   useEffect(() => {
-    rowVirtualizer.measure();
-    // Force re-render by scrolling to current position
-    const currentOffset = rowVirtualizer.scrollOffset ?? 0;
-    requestAnimationFrame(() => {
-      rowVirtualizer.scrollToOffset(currentOffset, { align: 'start' });
-    });
+    // Use setTimeout to break out of React's render cycle
+    const timeoutId = setTimeout(() => {
+      rowVirtualizer.measure();
+    }, 0);
+    return () => clearTimeout(timeoutId);
   }, [expandedLookId]);
 
   return (
@@ -247,13 +246,12 @@ export function LooksTable({
                 return (
                   <div
                     key={`${look.id}-expanded`}
-                    data-index={virtualRow.index}
-                    ref={rowVirtualizer.measureElement}
                     style={{
                       position: 'absolute',
                       top: 0,
                       left: 0,
                       width: '100%',
+                      height: `${virtualRow.size}px`,
                       transform: `translateY(${virtualRow.start}px)`,
                       zIndex: 10,
                     }}
