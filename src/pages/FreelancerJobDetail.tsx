@@ -299,35 +299,49 @@ export default function FreelancerJobDetail() {
   };
 
   const handleDownloadAll = async () => {
-    toast.info(`Downloading ${inputs.length} files...`);
+    const validInputs = inputs.filter(input => input.artifact?.file_url);
     
-    for (const input of inputs) {
-      const url = input.artifact?.file_url;
-      if (url) {
-        try {
-          const response = await fetch(url);
-          const blob = await response.blob();
-          
-          const urlParts = url.split('/');
-          const filename = urlParts[urlParts.length - 1] || `input-${input.id}`;
-          
-          const downloadUrl = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = downloadUrl;
-          link.download = filename;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          window.URL.revokeObjectURL(downloadUrl);
-          
-          await new Promise(resolve => setTimeout(resolve, 300));
-        } catch (error) {
-          console.error(`Failed to download ${url}:`, error);
-        }
+    if (validInputs.length === 0) {
+      toast.error('No files available to download');
+      return;
+    }
+    
+    toast.info(`Downloading ${validInputs.length} files...`);
+    let successCount = 0;
+    
+    for (const input of validInputs) {
+      const url = input.artifact!.file_url;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const blob = await response.blob();
+        const urlParts = url.split('/');
+        const filename = decodeURIComponent(urlParts[urlParts.length - 1]?.split('?')[0] || `input-${input.id}`);
+        
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        successCount++;
+        await new Promise(resolve => setTimeout(resolve, 300));
+      } catch (error) {
+        console.error(`Failed to download ${url}:`, error);
       }
     }
     
-    toast.success('Downloads complete!');
+    if (successCount === validInputs.length) {
+      toast.success('Downloads complete!');
+    } else if (successCount > 0) {
+      toast.warning(`Downloaded ${successCount} of ${validInputs.length} files`);
+    } else {
+      toast.error('Failed to download files');
+    }
   };
 
   // Check which views are already uploaded
