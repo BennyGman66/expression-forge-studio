@@ -2321,7 +2321,9 @@ export type Database = {
           head_crop_y: number | null
           head_cropped_url: string | null
           id: string
+          is_skipped: boolean | null
           look_id: string
+          matched_face_url: string | null
           original_filename: string | null
           original_source_url: string | null
           source_url: string
@@ -2336,7 +2338,9 @@ export type Database = {
           head_crop_y?: number | null
           head_cropped_url?: string | null
           id?: string
+          is_skipped?: boolean | null
           look_id: string
+          matched_face_url?: string | null
           original_filename?: string | null
           original_source_url?: string | null
           source_url: string
@@ -2351,7 +2355,9 @@ export type Database = {
           head_crop_y?: number | null
           head_cropped_url?: string | null
           id?: string
+          is_skipped?: boolean | null
           look_id?: string
+          matched_face_url?: string | null
           original_filename?: string | null
           original_source_url?: string | null
           source_url?: string
