@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, RotateCcw, AlertCircle } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, RotateCcw, AlertCircle, FastForward } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage } from "@/types/face-application";
 import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
@@ -371,7 +371,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
         console.error('Failed to update workflow state:', e);
       }
 
-      // Update local state with cache-busted URL AFTER workflow state
+      // Update local state with cache-busted URL
       const cacheBustedUrl = `${croppedUrl}?t=${Date.now()}`;
       setSourceImages((prev) =>
         prev.map((img) =>
@@ -390,9 +390,22 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
 
       toast({ title: "Crop applied", description: `${currentImage.view} head cropped successfully.` });
 
-      // Move to next image if available
-      if (selectedIndex < sourceImages.length - 1) {
-        setSelectedIndex(selectedIndex + 1);
+      // Small delay to let React process the optimistic update
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Auto-advance to next image that still needs cropping
+      const nextNeedsAction = sourceImages.find((img, idx) => 
+        idx !== selectedIndex && 
+        img.id !== currentImage.id &&
+        !isViewComplete(workflowState.lookStates, img.look_id, img.view, 'crop') &&
+        !img.head_cropped_url
+      );
+      
+      if (nextNeedsAction) {
+        const nextIndex = sourceImages.findIndex(s => s.id === nextNeedsAction.id);
+        if (nextIndex >= 0) {
+          setSelectedIndex(nextIndex);
+        }
       }
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -637,9 +650,22 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
         description: `${currentImage.view} marked as complete without cropping.`,
       });
       
-      // Move to next image if available
-      if (selectedIndex < sourceImages.length - 1) {
-        setSelectedIndex(selectedIndex + 1);
+      // Small delay to let React process the optimistic update
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Auto-advance to next image that still needs cropping
+      const nextNeedsAction = sourceImages.find((img, idx) => 
+        idx !== selectedIndex && 
+        img.id !== currentImage.id &&
+        !isViewComplete(workflowState.lookStates, img.look_id, img.view, 'crop') &&
+        !img.head_cropped_url
+      );
+      
+      if (nextNeedsAction) {
+        const nextIndex = sourceImages.findIndex(s => s.id === nextNeedsAction.id);
+        if (nextIndex >= 0) {
+          setSelectedIndex(nextIndex);
+        }
       }
     } catch (error) {
       console.error('Error skipping image:', error);
@@ -875,6 +901,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                 onClick={handleSkipImage}
                 disabled={skippingImage || !currentImage}
               >
+                <FastForward className="h-4 w-4 mr-1" />
                 {skippingImage ? "Skipping..." : "Skip Image"}
               </Button>
               <Button

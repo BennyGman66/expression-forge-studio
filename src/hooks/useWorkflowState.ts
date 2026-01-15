@@ -327,10 +327,11 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
       throw error;
     }
     
-    // Optimistic update
+    // Optimistic update - create completely new references to trigger React re-renders
     setLookStates(prev => {
       const newMap = new Map(prev);
-      const existing = newMap.get(lookId) || [];
+      // Clone the existing array to ensure a new reference
+      const existing = [...(prev.get(lookId) || [])];
       const stateIndex = existing.findIndex(s => s.view === view && s.tab === tab);
       
       const newState: LookViewState = {
@@ -347,11 +348,13 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
       };
       
       if (stateIndex >= 0) {
+        // Create new array with updated state
         existing[stateIndex] = newState;
       } else {
         existing.push(newState);
       }
       
+      // Set with a fresh array copy to ensure reference change
       newMap.set(lookId, [...existing]);
       return newMap;
     });
