@@ -168,16 +168,27 @@ export function ViewSlot({
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           {viewLabel}
         </span>
-        {pairedFaceUrl && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-            onClick={onClearPairing}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        )}
+        <div className="flex items-center gap-1">
+          {onSkip && (
+            <button
+              onClick={onSkip}
+              className="text-xs text-primary hover:text-primary/80 font-medium flex items-center gap-0.5"
+            >
+              <SkipForward className="h-3 w-3" />
+              Skip
+            </button>
+          )}
+          {pairedFaceUrl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+              onClick={onClearPairing}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Content */}
