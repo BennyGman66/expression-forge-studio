@@ -29,15 +29,17 @@ export function SmartSelectionToolbar({
   failedCount,
   disabled = false,
 }: SmartSelectionToolbarProps) {
-  return (
-    <div className="flex items-center justify-between py-2">
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">
-          {selectedCount} of {totalCount} looks selected
-        </span>
-      </div>
+  const hasSmartButtons = needsGenerationCount > 0 || newCount > 0 || failedCount > 0;
 
-      <div className="flex items-center gap-2">
+  return (
+    <div className="flex items-center justify-between py-2 px-3 bg-muted/30 rounded-lg border">
+      {/* Left: selection count */}
+      <span className="text-sm text-muted-foreground whitespace-nowrap">
+        <span className="font-medium text-foreground">{selectedCount}</span> of {totalCount} looks selected
+      </span>
+
+      {/* Right: buttons */}
+      <div className="flex items-center gap-1.5">
         {/* Smart select buttons */}
         {needsGenerationCount > 0 && (
           <Button
@@ -48,7 +50,7 @@ export function SmartSelectionToolbar({
             disabled={disabled}
           >
             <Sparkles className="w-3 h-3" />
-            Select Needs Generation ({needsGenerationCount})
+            Needs Gen ({needsGenerationCount})
           </Button>
         )}
 
@@ -61,7 +63,7 @@ export function SmartSelectionToolbar({
             disabled={disabled}
           >
             <Clock className="w-3 h-3" />
-            Select New ({newCount})
+            New ({newCount})
           </Button>
         )}
 
@@ -69,38 +71,38 @@ export function SmartSelectionToolbar({
           <Button
             variant="outline"
             size="sm"
-            className="h-7 text-xs gap-1.5 text-red-600 hover:text-red-700"
+            className="h-7 text-xs gap-1.5 text-red-600 hover:text-red-700 border-red-200"
             onClick={onSelectFailed}
             disabled={disabled}
           >
             <AlertCircle className="w-3 h-3" />
-            Select Failed ({failedCount})
+            Failed ({failedCount})
           </Button>
         )}
 
-        <div className="h-4 w-px bg-border mx-1" />
+        {hasSmartButtons && <div className="h-4 w-px bg-border mx-1" />}
 
         {/* Standard select buttons */}
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 text-xs"
+          className="h-7 text-xs gap-1"
           onClick={onSelectAll}
           disabled={disabled || selectedCount === totalCount}
         >
-          <CheckCircle2 className="w-3 h-3 mr-1" />
-          Select All
+          <CheckCircle2 className="w-3 h-3" />
+          All
         </Button>
         
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 text-xs"
+          className="h-7 text-xs gap-1"
           onClick={onDeselectAll}
           disabled={disabled || selectedCount === 0}
         >
-          <XCircle className="w-3 h-3 mr-1" />
-          Deselect All
+          <XCircle className="w-3 h-3" />
+          None
         </Button>
       </div>
     </div>
