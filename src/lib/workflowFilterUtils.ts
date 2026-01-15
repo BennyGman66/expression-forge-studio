@@ -1,5 +1,8 @@
 import type { LookViewState, TabName, FilterMode } from '@/types/workflow-state';
 
+// For crop tab, only front and back are required - side/detail are optional
+const CROP_REQUIRED_VIEWS = ['front', 'back', 'full_front'];
+
 export function isViewComplete(
   lookStates: Map<string, LookViewState[]>,
   lookId: string,
@@ -23,6 +26,36 @@ export function lookNeedsActionForTab(
   if (views.length === 0) return true; // No views = needs action
   
   return views.some(view => {
+    const viewState = tabStates.find(s => s.view === view);
+    return !viewState || (viewState.status !== 'completed' && viewState.status !== 'signed_off');
+  });
+}
+
+/**
+ * Special logic for crop tab: only front and back views are required.
+ * If a look only has one of front/back, only that one needs to be cropped.
+ * Side and detail views are optional for crop completion.
+ */
+export function lookNeedsActionForCropTab(
+  lookStates: Map<string, LookViewState[]>,
+  lookId: string,
+  availableViews: string[] // The actual views this look has source images for
+): boolean {
+  const states = lookStates.get(lookId) || [];
+  const tabStates = states.filter(s => s.tab === 'crop');
+  
+  // Find which required views (front/back) exist for this look
+  const requiredViewsForLook = availableViews.filter(v => 
+    CROP_REQUIRED_VIEWS.includes(v) || v === 'front' || v === 'back' || v === 'full_front'
+  );
+  
+  // If no required views exist (only side/detail), consider it complete
+  if (requiredViewsForLook.length === 0) {
+    return false;
+  }
+  
+  // Check if any required view needs action
+  return requiredViewsForLook.some(view => {
     const viewState = tabStates.find(s => s.view === view);
     return !viewState || (viewState.status !== 'completed' && viewState.status !== 'signed_off');
   });

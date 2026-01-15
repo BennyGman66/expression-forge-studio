@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { AlertCircle, Check, ChevronDown } from "lucide-react";
 import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
-import { lookNeedsActionForTab } from "@/lib/workflowFilterUtils";
+import { lookNeedsActionForTab, lookNeedsActionForCropTab } from "@/lib/workflowFilterUtils";
 import type { TabName } from "@/types/workflow-state";
 
 interface Look {
@@ -17,6 +17,8 @@ interface LooksSwitcherProps {
   tab: TabName;
   onLookChange: (lookId: string) => void;
   className?: string;
+  /** For crop tab: map of lookId -> available view names */
+  availableViewsByLook?: Map<string, string[]>;
 }
 
 export function LooksSwitcher({ 
@@ -25,6 +27,7 @@ export function LooksSwitcher({
   tab, 
   onLookChange,
   className = "",
+  availableViewsByLook,
 }: LooksSwitcherProps) {
   const workflowState = useWorkflowStateContext();
 
@@ -34,7 +37,12 @@ export function LooksSwitcher({
     const completed: Look[] = [];
 
     for (const look of looks) {
-      if (lookNeedsActionForTab(workflowState.lookStates, look.id, tab)) {
+      // For crop tab, use special logic that only requires front+back
+      const needsActionCheck = tab === 'crop' && availableViewsByLook
+        ? lookNeedsActionForCropTab(workflowState.lookStates, look.id, availableViewsByLook.get(look.id) || [])
+        : lookNeedsActionForTab(workflowState.lookStates, look.id, tab);
+      
+      if (needsActionCheck) {
         needsAction.push(look);
       } else {
         completed.push(look);
@@ -42,7 +50,7 @@ export function LooksSwitcher({
     }
 
     return { needsActionLooks: needsAction, completedLooks: completed };
-  }, [looks, workflowState.lookStates, tab]);
+  }, [looks, workflowState.lookStates, tab, availableViewsByLook]);
 
   // When filter mode is 'needs_action', only show needs action looks
   const showCompleted = workflowState.filterMode === 'all';
