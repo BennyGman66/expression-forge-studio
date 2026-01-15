@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowRight, Play, User, CheckCircle, XCircle, Clock, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowRight, Play, User, CheckCircle, XCircle, Clock, RefreshCw, Sparkles, Check, RotateCcw } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage, FaceApplicationJob, FaceFoundation, VIEW_LABELS } from "@/types/face-application";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
@@ -62,7 +63,28 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
   const [outputCounts, setOutputCounts] = useState<OutputCounts>({ completed: 0, failed: 0, pending: 0, generating: 0 });
   const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutput[]>([]);
   const [persistedOutputs, setPersistedOutputs] = useState<GeneratedOutput[]>([]);
+  const [excludedImageIds, setExcludedImageIds] = useState<Set<string>>(new Set());
   const { toast } = useToast();
+
+  // Toggle image selection for generation
+  const toggleImageSelection = (imageId: string) => {
+    setExcludedImageIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(imageId)) {
+        newSet.delete(imageId);
+      } else {
+        newSet.add(imageId);
+      }
+      return newSet;
+    });
+  };
+
+  // Get all source images and calculate included ones
+  const allSourceImages = useMemo(() => looks.flatMap(l => l.sourceImages), [looks]);
+  const includedSourceImages = useMemo(() => 
+    allSourceImages.filter(img => !excludedImageIds.has(img.id)), 
+    [allSourceImages, excludedImageIds]
+  );
 
   // Fetch ALL looks for this PROJECT with their source images
   useEffect(() => {
@@ -520,13 +542,24 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
   const handleRegenerateAll = async () => {
     if (looks.length === 0 || talentIds.length === 0) return;
     
+    // Filter looks to only include those with included images
+    const looksToProcess = looks.map(look => ({
+      ...look,
+      sourceImages: look.sourceImages.filter(img => !excludedImageIds.has(img.id))
+    })).filter(look => look.sourceImages.length > 0);
+
+    if (looksToProcess.length === 0) {
+      toast({ title: "No images selected", description: "Please select at least one image to generate.", variant: "destructive" });
+      return;
+    }
+
     setIsGenerating(true);
     setGenerationStartTime(new Date());
 
     try {
       const newBatchJobIds: string[] = [];
 
-      for (const look of looks) {
+      for (const look of looksToProcess) {
         const talentId = look.digital_talent_id || talentIds[0];
         
         // Auto-describe outfits
@@ -599,6 +632,18 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
   // Auto-describe and start generation for all looks
   const handleStartGeneration = async () => {
     if (looks.length === 0 || talentIds.length === 0) return;
+    
+    // Filter looks to only include those with included images
+    const looksToProcess = looks.map(look => ({
+      ...look,
+      sourceImages: look.sourceImages.filter(img => !excludedImageIds.has(img.id))
+    })).filter(look => look.sourceImages.length > 0);
+
+    if (looksToProcess.length === 0) {
+      toast({ title: "No images selected", description: "Please select at least one image to generate.", variant: "destructive" });
+      return;
+    }
+
     setIsGenerating(true);
     setGenerationStartTime(new Date());
     setCurrentBatchJobIds([]); // Reset current batch
@@ -606,7 +651,7 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
     try {
       const newBatchJobIds: string[] = [];
       // Create jobs for each look
-      for (const look of looks) {
+      for (const look of looksToProcess) {
         const talentId = look.digital_talent_id || talentIds[0];
         
         // Auto-describe outfits for this look's images
@@ -679,8 +724,7 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
   };
 
   // Calculate totals - only for current batch when generating
-  const allSourceImages = looks.flatMap(l => l.sourceImages);
-  const totalGenerations = allSourceImages.length * attemptsPerView;
+  const totalGenerations = includedSourceImages.length * attemptsPerView;
   
   // Filter to current batch jobs for progress display
   const currentBatchJobs = currentBatchJobIds.length > 0 
@@ -754,31 +798,82 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
                     <label className="text-sm font-medium">Total Generations</label>
                     <p className="text-3xl font-bold text-primary">{totalGenerations}</p>
                     <p className="text-xs text-muted-foreground">
-                      {looks.length} look{looks.length !== 1 ? "s" : ""} • {allSourceImages.length} view{allSourceImages.length !== 1 ? "s" : ""} × {attemptsPerView} each
+                      {looks.length} look{looks.length !== 1 ? "s" : ""} • {includedSourceImages.length} view{includedSourceImages.length !== 1 ? "s" : ""} × {attemptsPerView} each
+                      {excludedImageIds.size > 0 && (
+                        <span className="text-amber-600"> ({excludedImageIds.size} excluded)</span>
+                      )}
                     </p>
                   </div>
                 </div>
 
-                {/* Looks grid preview */}
+                {/* Looks grid preview with selectable images */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-medium">Looks to Generate</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium">Looks to Generate</h3>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setExcludedImageIds(new Set())}
+                        disabled={isGenerating || excludedImageIds.size === 0}
+                      >
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        Select All
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setExcludedImageIds(new Set(allSourceImages.map(i => i.id)))}
+                        disabled={isGenerating || excludedImageIds.size === allSourceImages.length}
+                      >
+                        <XCircle className="w-3 h-3 mr-1" />
+                        Deselect All
+                      </Button>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {looks.map((look) => (
                       <div key={look.id} className="border rounded-lg p-3 bg-muted/30">
                         <p className="font-medium text-sm mb-2">{look.name}</p>
-                        <div className="flex gap-2">
-                          {look.sourceImages.map((img) => (
-                            <div key={img.id} className="relative">
-                              <img
-                                src={img.head_cropped_url || img.source_url}
-                                alt={img.view}
-                                className="w-14 h-14 object-cover rounded border"
-                              />
-                              <span className="absolute -bottom-1 left-0 right-0 text-[9px] text-center capitalize bg-background/80 rounded-b">
-                                {img.view}
-                              </span>
-                            </div>
-                          ))}
+                        <div className="flex gap-2 flex-wrap">
+                          {look.sourceImages.map((img) => {
+                            const isExcluded = excludedImageIds.has(img.id);
+                            return (
+                              <button
+                                key={img.id}
+                                onClick={() => toggleImageSelection(img.id)}
+                                className="relative group cursor-pointer"
+                                disabled={isGenerating}
+                                type="button"
+                              >
+                                <img
+                                  src={img.head_cropped_url || img.source_url}
+                                  alt={img.view}
+                                  className={cn(
+                                    "w-14 h-14 object-cover rounded border transition-opacity",
+                                    isExcluded && "opacity-40"
+                                  )}
+                                />
+                                {/* Checkmark overlay */}
+                                <div className={cn(
+                                  "absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center transition-all",
+                                  isExcluded 
+                                    ? "bg-muted border-2 border-dashed border-muted-foreground/40" 
+                                    : "bg-emerald-500"
+                                )}>
+                                  {!isExcluded && <Check className="w-3 h-3 text-white" />}
+                                </div>
+                                <span className={cn(
+                                  "absolute -bottom-1 left-0 right-0 text-[9px] text-center capitalize bg-background/80 rounded-b",
+                                  isExcluded && "text-muted-foreground"
+                                )}>
+                                  {img.view}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
