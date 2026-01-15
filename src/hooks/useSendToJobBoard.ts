@@ -119,7 +119,7 @@ export function useSendToJobBoard() {
         // 3. Query source images directly from the database to ensure we get them all
         const { data: sourceImages, error: sourceError } = await supabase
           .from('look_source_images')
-          .select('id, view, source_url')
+          .select('id, view, source_url, original_source_url')
           .eq('look_id', look.id);
 
         if (sourceError) {
@@ -138,13 +138,16 @@ export function useSendToJobBoard() {
 
             const sourceType = getSourceArtifactType(normalizedView);
             
+            // Prefer original high-res URL if available
+            const fileUrl = sourceImage.original_source_url || sourceImage.source_url;
+            
             const { data: sourceArtifact, error: sourceArtifactError } = await supabase
               .from('unified_artifacts')
               .insert({
                 project_id: projectId,
                 look_id: look.id,
                 type: sourceType as any,
-                file_url: sourceImage.source_url,
+                file_url: fileUrl,
                 metadata: { view: normalizedView, source_image_id: sourceImage.id },
               })
               .select()

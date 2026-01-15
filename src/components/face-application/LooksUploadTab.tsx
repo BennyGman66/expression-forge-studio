@@ -249,9 +249,10 @@ export function LooksUploadTab({
       const existingImage = look.sourceImages.find((img) => img.view === view);
 
       if (existingImage) {
+        // Update both source_url and original_source_url (re-upload = new original)
         await supabase
           .from("look_source_images")
-          .update({ source_url: urlData.publicUrl })
+          .update({ source_url: urlData.publicUrl, original_source_url: urlData.publicUrl })
           .eq("id", existingImage.id);
 
         setLooks((prev) =>
@@ -275,6 +276,7 @@ export function LooksUploadTab({
             look_id: lookId,
             view,
             source_url: urlData.publicUrl,
+            original_source_url: urlData.publicUrl,
             digital_talent_id: look.digital_talent_id,
           })
           .select()
@@ -372,7 +374,7 @@ export function LooksUploadTab({
           const { data: urlData } = supabase.storage.from("images").getPublicUrl(fileName);
           const { data: imageData } = await supabase
             .from("look_source_images")
-            .insert({ look_id: lookData.id, view, source_url: urlData.publicUrl })
+            .insert({ look_id: lookData.id, view, source_url: urlData.publicUrl, original_source_url: urlData.publicUrl })
             .select()
             .single();
           if (imageData) newLook.sourceImages.push(imageData);
@@ -451,7 +453,7 @@ export function LooksUploadTab({
     // Insert the image
     const { data: imageResult, error: imageError } = await supabase
       .from("look_source_images")
-      .insert({ look_id: lookId, view: viewToUse, source_url: url })
+      .insert({ look_id: lookId, view: viewToUse, source_url: url, original_source_url: url })
       .select()
       .single();
     
@@ -492,7 +494,7 @@ export function LooksUploadTab({
             const viewToUse = view === 'unassigned' ? 'front' : view;
             const { data: imageData } = await supabase
               .from("look_source_images")
-              .insert({ look_id: existingLook.id, view: viewToUse, source_url: url })
+              .insert({ look_id: existingLook.id, view: viewToUse, source_url: url, original_source_url: url })
               .select()
               .single();
             if (imageData) {
