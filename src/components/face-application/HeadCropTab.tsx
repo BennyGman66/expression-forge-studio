@@ -52,6 +52,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const { toast } = useToast();
   const workflowState = useWorkflowStateContext();
 
@@ -550,37 +551,54 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     };
   };
 
-  // The live preview shows the cropped selection centered with aspect ratio preserved
-  // This matches the backend's "fit + center on white canvas" behavior
-  const getLivePreviewStyle = () => {
-    if (!imageDimensions.width || !cropBox.width || !cropBox.height) return null;
-    
-    // Preview container is 160x160 (w-40 h-40)
-    // We fit the crop selection into this space, preserving aspect ratio
+  // Canvas-based live preview - draws the cropped selection centered with white background
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas || !currentImage || currentImage.head_cropped_url) return;
+    if (!imageReady || !imageDimensions.width || !cropBox.width || !cropBox.height) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
     const previewSize = 160;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
     
-    // Calculate scale to fit the crop box into the preview while preserving aspect ratio
-    const scale = Math.min(previewSize / cropBox.width, previewSize / cropBox.height);
-    
-    // The rendered crop selection dimensions
-    const renderedCropWidth = cropBox.width * scale;
-    const renderedCropHeight = cropBox.height * scale;
-    
-    // Center the crop selection in the preview
-    const horizontalOffset = (previewSize - renderedCropWidth) / 2;
-    const verticalOffset = (previewSize - renderedCropHeight) / 2;
-    
-    // Position the full image so that the crop area is visible and centered
-    const left = -cropBox.x * scale + horizontalOffset;
-    const top = -cropBox.y * scale + verticalOffset;
-    
-    return {
-      width: imageDimensions.width * scale,
-      height: imageDimensions.height * scale,
-      left,
-      top,
+    img.onload = () => {
+      // Fill with white background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, previewSize, previewSize);
+
+      // Calculate scale to fit the crop box while preserving aspect ratio
+      const scale = Math.min(previewSize / cropBox.width, previewSize / cropBox.height);
+      
+      // Destination dimensions
+      const destW = cropBox.width * scale;
+      const destH = cropBox.height * scale;
+      
+      // Center the crop in the preview
+      const destX = (previewSize - destW) / 2;
+      const destY = (previewSize - destH) / 2;
+
+      // Draw the cropped portion of the source image
+      ctx.drawImage(
+        img,
+        cropBox.x, cropBox.y, cropBox.width, cropBox.height, // source rect
+        destX, destY, destW, destH // destination rect
+      );
     };
-  };
+
+    img.onerror = () => {
+      ctx.fillStyle = '#f0f0f0';
+      ctx.fillRect(0, 0, previewSize, previewSize);
+      ctx.fillStyle = '#888';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Preview error', previewSize / 2, previewSize / 2);
+    };
+
+    img.src = currentImage.source_url;
+  }, [currentImage, imageReady, imageDimensions, cropBox]);
 
   return (
     <div className="space-y-6">
@@ -798,32 +816,14 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                         className="w-full h-full object-contain"
                         draggable={false}
                       />
-                    ) : (() => {
-                      const previewStyle = getLivePreviewStyle();
-                      if (imageReady && previewStyle) {
-                        return (
-                          <div className="absolute inset-0 overflow-hidden">
-                            <img
-                              src={currentImage.source_url}
-                              alt="Live preview"
-                              className="absolute"
-                              style={{
-                                width: `${previewStyle.width}px`,
-                                height: `${previewStyle.height}px`,
-                                left: `${previewStyle.left}px`,
-                                top: `${previewStyle.top}px`,
-                              }}
-                              draggable={false}
-                            />
-                          </div>
-                        );
-                      }
-                      return (
-                        <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-                          Loading...
-                        </div>
-                      );
-                    })()}
+                    ) : (
+                      <canvas
+                        ref={previewCanvasRef}
+                        width={160}
+                        height={160}
+                        className="w-full h-full"
+                      />
+                    )}
                   </div>
                 </div>
               </div>
