@@ -228,16 +228,27 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
     }
   }, [projectId, fetchStates]);
 
-  // Initial fetch and sync
+  // Initial fetch and sync - only run once on mount
   useEffect(() => {
+    let mounted = true;
+    
     const init = async () => {
+      if (!mounted) return;
       await fetchStates();
       // After initial fetch, sync from data if we have no states yet
       // This populates initial states from existing data
-      await syncStatesFromData();
+      if (mounted) {
+        await syncStatesFromData();
+      }
     };
+    
     init();
-  }, [fetchStates, syncStatesFromData]);
+    
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]); // Only depend on projectId, not the callbacks
 
   // Subscribe to realtime updates
   useEffect(() => {
