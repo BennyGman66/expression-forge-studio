@@ -13,10 +13,11 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { toast } from 'sonner';
-import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft } from 'lucide-react';
+import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { FreelancerNamePrompt } from '@/components/freelancer/FreelancerNamePrompt';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { JOB_TYPE_CONFIG } from '@/lib/jobTypes';
 
 interface PendingUpload {
   id: string;
