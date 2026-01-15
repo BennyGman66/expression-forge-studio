@@ -250,7 +250,7 @@ export function LooksTable({
                       transform: `translateY(${virtualRow.start}px)`,
                       zIndex: 10,
                     }}
-                    className="bg-background border-b"
+                    className="bg-background border-b overflow-hidden"
                   >
                     <LookRowExpanded
                       look={look}
