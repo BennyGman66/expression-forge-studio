@@ -37,8 +37,8 @@ interface LooksTableProps {
   talents: TalentOption[];
   selectedIds?: Set<string>;
   onToggleSelection?: (lookId: string) => void;
-  onSelectAll?: () => void;
-  onSelectReady?: () => void;
+  onSelectAll?: (lookIds: string[]) => void;
+  onSelectReady?: (lookIds: string[]) => void;
   onClearSelection?: () => void;
   onUpdateLook: (lookId: string, updates: Partial<LookData>) => void;
   onDeleteLook: (lookId: string) => void;
@@ -230,10 +230,16 @@ export function LooksTable({
         {/* Selection controls */}
         {hasSelection && (
           <div className="flex items-center gap-2 text-sm ml-auto">
-            <Button variant="outline" size="sm" onClick={onSelectAll} className="h-7 text-xs">
+            <Button variant="outline" size="sm" onClick={() => onSelectAll?.(filteredLooks.map(l => l.id))} className="h-7 text-xs">
               {allSelected ? 'Deselect All' : 'Select All'}
             </Button>
-            <Button variant="outline" size="sm" onClick={onSelectReady} className="h-7 text-xs">
+            <Button variant="outline" size="sm" onClick={() => {
+              const readyLooks = filteredLooks.filter(l => {
+                const views = l.sourceImages.map(img => img.view);
+                return views.includes('front') && views.includes('back');
+              });
+              onSelectReady?.(readyLooks.map(l => l.id));
+            }} className="h-7 text-xs">
               Select Ready ({filteredLooks.filter(l => {
                 const views = l.sourceImages.map(img => img.view);
                 return views.includes('front') && views.includes('back');
@@ -265,7 +271,7 @@ export function LooksTable({
                         (el as any).indeterminate = someSelected;
                       }
                     }}
-                    onCheckedChange={() => onSelectAll?.()}
+                    onCheckedChange={() => onSelectAll?.(filteredLooks.map(l => l.id))}
                   />
                 </TableHead>
               )}

@@ -678,20 +678,22 @@ export function LooksUploadTab({
     });
   };
 
-  const handleSelectAll = () => {
-    if (selectedLookIds.size === looks.length) {
-      setSelectedLookIds(new Set());
+  const handleSelectAll = (lookIds: string[]) => {
+    // If all filtered looks are already selected, deselect them
+    const allFilteredSelected = lookIds.every(id => selectedLookIds.has(id));
+    if (allFilteredSelected && lookIds.length > 0) {
+      const newSet = new Set(selectedLookIds);
+      lookIds.forEach(id => newSet.delete(id));
+      setSelectedLookIds(newSet);
     } else {
-      setSelectedLookIds(new Set(looks.map(l => l.id)));
+      // Add all filtered looks to selection
+      setSelectedLookIds(new Set([...selectedLookIds, ...lookIds]));
     }
   };
 
-  const handleSelectReady = () => {
-    const readyLooks = looks.filter((look) => {
-      const views = look.sourceImages.map((img) => img.view);
-      return views.includes("front") && views.includes("back");
-    });
-    setSelectedLookIds(new Set(readyLooks.map(l => l.id)));
+  const handleSelectReady = (lookIds: string[]) => {
+    // Add the ready looks from filtered list to selection
+    setSelectedLookIds(new Set([...selectedLookIds, ...lookIds]));
   };
 
   const handleClearSelection = () => {
