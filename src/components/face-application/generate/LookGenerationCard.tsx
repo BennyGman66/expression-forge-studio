@@ -23,11 +23,16 @@ function ViewStatusBadge({
   const hasActivity = runningCount > 0 || pendingCount > 0;
   const hasFailed = failedCount > 0;
 
+  // Calculate dynamic total - shows actual outputs created, not just the target
+  const actualTotalOutputs = completedCount + pendingCount + runningCount + failedCount;
+  const displayTotal = Math.max(actualTotalOutputs, requiredOptions);
+  const allComplete = actualTotalOutputs > 0 && completedCount === actualTotalOutputs && !hasActivity;
+
   // Determine status icon and color
   let statusIcon: React.ReactNode = null;
   let statusColor = "bg-muted border border-dashed border-muted-foreground/30";
 
-  if (isComplete) {
+  if (allComplete) {
     statusIcon = <Check className="w-2.5 h-2.5 text-white" />;
     statusColor = "bg-emerald-500 border-emerald-500";
   } else if (hasActivity) {
@@ -48,11 +53,12 @@ function ViewStatusBadge({
       </span>
       <span className={cn(
         "text-[10px] font-medium tabular-nums",
-        isComplete ? "text-emerald-600" : 
+        allComplete ? "text-emerald-600" : 
+        hasActivity ? "text-blue-600" :
         completedCount > 0 ? "text-amber-600" : 
         "text-muted-foreground"
       )}>
-        {completedCount}/{requiredOptions}
+        {completedCount}/{displayTotal}
       </span>
       <div className={cn(
         "w-4 h-4 rounded-full flex items-center justify-center mt-1",
