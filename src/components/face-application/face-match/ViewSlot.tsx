@@ -43,9 +43,10 @@ export function ViewSlot({
   });
 
   const showDropIndicator = hasCrop && (isOver || isDragOver);
+  const displayImageUrl = hasCrop ? sourceImage.head_cropped_url : sourceImage.source_url;
 
-  // If not cropped but skipped - show green "skipped" state
-  if (!hasCrop && isSkipped) {
+  // Skipped state - for ANY skipped image (cropped or not)
+  if (isSkipped) {
     return (
       <div className="relative rounded-lg border-2 border-emerald-500/50 bg-emerald-50/50 p-3">
         {/* Header */}
@@ -63,7 +64,7 @@ export function ViewSlot({
         <div className="flex gap-3">
           <div className="relative">
             <img
-              src={sourceImage.source_url}
+              src={displayImageUrl}
               alt={viewLabel}
               className="w-20 h-20 object-cover rounded-lg opacity-50"
             />
