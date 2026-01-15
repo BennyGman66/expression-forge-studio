@@ -17,6 +17,45 @@ interface SendResult {
   error?: string;
 }
 
+// Normalize view names from source data to standard views
+const normalizeViewForArtifact = (view: string): string => {
+  const normalized = view.toLowerCase().replace(/[^a-z_]/g, '');
+  if (normalized === 'front' || normalized === 'full_front') return 'full_front';
+  if (normalized === 'cropped_front') return 'cropped_front';
+  if (normalized === 'back') return 'back';
+  if (normalized === 'side' || normalized === 'detail') return 'detail';
+  return normalized;
+};
+
+// Map normalized view to artifact type
+const getSourceArtifactType = (normalizedView: string): string => {
+  switch (normalizedView) {
+    case 'full_front':
+    case 'cropped_front':
+      return 'LOOK_ORIGINAL_FRONT';
+    case 'back':
+      return 'LOOK_ORIGINAL_BACK';
+    case 'detail':
+      return 'LOOK_ORIGINAL_SIDE';
+    default:
+      return 'LOOK_ORIGINAL';
+  }
+};
+
+const getHeadRenderType = (normalizedView: string): string => {
+  switch (normalizedView) {
+    case 'full_front':
+    case 'cropped_front':
+      return 'HEAD_RENDER_FRONT';
+    case 'back':
+      return 'HEAD_RENDER_BACK';
+    case 'detail':
+      return 'HEAD_RENDER_SIDE';
+    default:
+      return 'HEAD_RENDER_FRONT';
+  }
+};
+
 export function useSendToJobBoard() {
   const [isSending, setIsSending] = useState(false);
   const { toast } = useToast();
@@ -77,24 +116,27 @@ export function useSendToJobBoard() {
         if (jobError) throw jobError;
         jobIds.push(job.id);
 
-        // 3. Create artifacts and inputs for all views that have any data
-        // Map view keys to valid artifact types
-        const sourceTypeMap: Record<string, string> = {
-          'full_front': 'LOOK_ORIGINAL_FRONT',
-          'cropped_front': 'LOOK_ORIGINAL_FRONT',
-          'back': 'LOOK_ORIGINAL_BACK',
-          'detail': 'LOOK_ORIGINAL_SIDE',
-        };
-        
-        for (const viewKey of REQUIRED_VIEWS) {
-          const viewData = look.views[viewKey];
-          
-          // Skip if neither source nor render exists
-          if (!viewData.sourceUrl && !viewData.selectedUrl) continue;
-          
-          // Create artifact for source image (original fit model photo)
-          if (viewData.sourceUrl) {
-            const sourceType = sourceTypeMap[viewKey] || 'LOOK_ORIGINAL';
+        // 3. Query source images directly from the database to ensure we get them all
+        const { data: sourceImages, error: sourceError } = await supabase
+          .from('look_source_images')
+          .select('id, view, source_url')
+          .eq('look_id', look.id);
+
+        if (sourceError) {
+          console.error('Error fetching source images:', sourceError);
+        }
+
+        // 4. Attach source images (ALWAYS attach front and back if they exist)
+        if (sourceImages) {
+          for (const sourceImage of sourceImages) {
+            const normalizedView = normalizeViewForArtifact(sourceImage.view);
+            
+            // Only attach front and back source images (as per spec)
+            if (normalizedView !== 'full_front' && normalizedView !== 'back') {
+              continue;
+            }
+
+            const sourceType = getSourceArtifactType(normalizedView);
             
             const { data: sourceArtifact, error: sourceArtifactError } = await supabase
               .from('unified_artifacts')
@@ -102,8 +144,8 @@ export function useSendToJobBoard() {
                 project_id: projectId,
                 look_id: look.id,
                 type: sourceType as any,
-                file_url: viewData.sourceUrl,
-                metadata: { view: viewKey },
+                file_url: sourceImage.source_url,
+                metadata: { view: normalizedView, source_image_id: sourceImage.id },
               })
               .select()
               .single();
@@ -111,60 +153,57 @@ export function useSendToJobBoard() {
             if (sourceArtifactError) {
               console.error('Error creating source artifact:', sourceArtifactError);
             } else {
-              // Link as job input
+              const viewLabel = normalizedView === 'full_front' ? 'Full front' : 'Full back';
               await supabase
                 .from('job_inputs')
                 .insert({
                   job_id: job.id,
                   artifact_id: sourceArtifact.id,
-                  label: `Original ${viewKey.replace('_', ' ')}`,
-                });
-            }
-          }
-
-          // Create artifact for selected head render
-          if (viewData.selectedUrl) {
-            const { data: renderArtifact, error: renderArtifactError } = await supabase
-              .from('unified_artifacts')
-              .insert({
-                project_id: projectId,
-                look_id: look.id,
-                type: `HEAD_RENDER_${viewKey === 'back' ? 'BACK' : viewKey === 'detail' ? 'SIDE' : 'FRONT'}` as any,
-                file_url: viewData.selectedUrl,
-                source_table: 'face_application_outputs',
-                source_id: viewData.outputId,
-                metadata: { view: viewKey },
-              })
-              .select()
-              .single();
-
-            if (renderArtifactError) {
-              console.error('Error creating render artifact:', renderArtifactError);
-            } else {
-              // Link as job input
-              await supabase
-                .from('job_inputs')
-                .insert({
-                  job_id: job.id,
-                  artifact_id: renderArtifact.id,
-                  label: `Head render ${viewKey.replace('_', ' ')}`,
+                  label: `Original ${viewLabel}`,
                 });
             }
           }
         }
 
-        // 4. Lock the outputs so they can't be changed
-        const outputIds = REQUIRED_VIEWS
-          .map(v => look.views[v].outputId)
-          .filter((id): id is string => !!id);
+        // 5. Attach head renders from selected outputs
+        for (const viewKey of REQUIRED_VIEWS) {
+          const viewData = look.views[viewKey];
+          
+          // Skip if no head render selected for this view
+          if (!viewData.selectedUrl) continue;
 
-        if (outputIds.length > 0) {
-          // Mark these outputs as locked by setting a flag (we'll use is_selected as the lock)
-          // The outputs are already selected, so they're implicitly locked
+          const renderType = getHeadRenderType(viewKey);
+
+          const { data: renderArtifact, error: renderArtifactError } = await supabase
+            .from('unified_artifacts')
+            .insert({
+              project_id: projectId,
+              look_id: look.id,
+              type: renderType as any,
+              file_url: viewData.selectedUrl,
+              source_table: 'face_application_outputs',
+              source_id: viewData.outputId,
+              metadata: { view: viewKey },
+            })
+            .select()
+            .single();
+
+          if (renderArtifactError) {
+            console.error('Error creating render artifact:', renderArtifactError);
+          } else {
+            const viewLabel = viewKey.replace('_', ' ');
+            await supabase
+              .from('job_inputs')
+              .insert({
+                job_id: job.id,
+                artifact_id: renderArtifact.id,
+                label: `Head render ${viewLabel}`,
+              });
+          }
         }
       }
 
-      // 5. Create audit event
+      // 6. Create audit event
       await supabase
         .from('audit_events')
         .insert({
