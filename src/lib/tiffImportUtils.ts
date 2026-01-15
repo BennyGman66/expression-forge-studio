@@ -139,11 +139,16 @@ export function runPreflightCheck(
   // Build a set of existing lookCodes (for quick duplicate check)
   const existingLookCodes = new Set<string>();
   for (const look of existingLooks) {
+    // Use look_code if set
     if (look.look_code) {
       existingLookCodes.add(look.look_code.toUpperCase());
     }
-    // Also check by name as fallback
-    existingLookCodes.add(look.name.toUpperCase());
+    
+    // Also extract code from look name (handles "MW0MW43114GXR - short")
+    const extractedFromName = extractLookKey(look.name);
+    if (extractedFromName) {
+      existingLookCodes.add(extractedFromName.toUpperCase());
+    }
   }
   
   // Track new look codes we'll create
