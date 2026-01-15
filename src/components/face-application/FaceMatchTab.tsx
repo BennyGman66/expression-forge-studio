@@ -35,9 +35,10 @@ interface LookMatchCardProps {
   matches: Record<string, string>;
   viewToAngle: (view: string) => string;
   onSelectFace: (sourceImageId: string, faceUrl: string) => void;
+  onResetMatch: (sourceImageId: string) => void;
 }
 
-function LookMatchCard({ look, faceFoundations, matches, viewToAngle, onSelectFace }: LookMatchCardProps) {
+function LookMatchCard({ look, faceFoundations, matches, viewToAngle, onSelectFace, onResetMatch }: LookMatchCardProps) {
   return (
     <Card>
       <CardHeader className="py-3">
@@ -49,17 +50,29 @@ function LookMatchCard({ look, faceFoundations, matches, viewToAngle, onSelectFa
           const talentFoundations = faceFoundations.filter(
             (f) => f.digital_talent_id === look.digital_talent_id
           );
+          const isMatched = !!matches[img.id];
+          const selectedFaceUrl = matches[img.id];
           
           return (
             <div
               key={img.id}
               className="grid grid-cols-[140px_1fr] gap-4 p-3 border rounded-lg bg-muted/30"
             >
-              {/* Look Image */}
+              {/* Look Image with status indicator */}
               <div className="space-y-1">
-                <p className="text-xs font-medium capitalize text-muted-foreground">
-                  {img.view} View
-                </p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-medium capitalize text-muted-foreground">
+                    {img.view} View
+                  </p>
+                  {/* Large status indicator */}
+                  {isMatched ? (
+                    <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center">
+                      <Check className="h-4 w-4 text-white" />
+                    </div>
+                  ) : (
+                    <div className="w-6 h-6 rounded-full border-2 border-dashed border-muted-foreground/40" />
+                  )}
+                </div>
                 <img
                   src={img.head_cropped_url ? `${img.head_cropped_url}?t=${Date.now()}` : img.source_url}
                   alt={img.view}
@@ -69,45 +82,64 @@ function LookMatchCard({ look, faceFoundations, matches, viewToAngle, onSelectFa
 
               {/* Face Selection */}
               <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Select {viewToAngle(img.view)} face:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {talentFoundations.map((face) => (
-                    <button
-                      key={face.id}
-                      onClick={() => onSelectFace(img.id, face.stored_url)}
-                      className={`
-                        relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all
-                        ${matches[img.id] === face.stored_url
-                          ? "border-primary ring-2 ring-primary/30"
-                          : "border-transparent hover:border-muted-foreground/50"
-                        }
-                      `}
-                    >
+                {isMatched ? (
+                  // Show selected face prominently with reset option
+                  <div className="flex items-center gap-4">
+                    <div className="relative">
                       <img
-                        src={face.stored_url}
-                        alt={face.view}
-                        className="w-full h-full object-cover"
+                        src={selectedFaceUrl}
+                        alt="Selected face"
+                        className="w-20 h-20 object-cover rounded-lg border-2 border-emerald-500"
                       />
-                      {matches[img.id] === face.stored_url && (
-                        <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
-                          <Check className="h-5 w-5 text-primary" />
-                        </div>
-                      )}
-                      <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] py-0.5 text-center capitalize">
-                        {face.view}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                {talentFoundations.length === 0 && (
-                  <p className="text-xs text-yellow-600">
-                    No face foundations found for this talent. Create them in Talent Face Library first.
-                  </p>
-                )}
-                {!matches[img.id] && talentFoundations.length > 0 && (
-                  <p className="text-xs text-muted-foreground italic">No face selected</p>
+                      <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                        <Check className="h-3 w-3 text-white" />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm text-muted-foreground">Face matched</p>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="h-7 text-xs"
+                        onClick={() => onResetMatch(img.id)}
+                      >
+                        Reset & Choose Different
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  // Show all options to select from
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      Select {viewToAngle(img.view)} face:
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {talentFoundations.map((face) => (
+                        <button
+                          key={face.id}
+                          onClick={() => onSelectFace(img.id, face.stored_url)}
+                          className="relative w-16 h-16 rounded-lg overflow-hidden border-2 border-transparent hover:border-primary/50 transition-all"
+                        >
+                          <img
+                            src={face.stored_url}
+                            alt={face.view}
+                            className="w-full h-full object-cover"
+                          />
+                          <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] py-0.5 text-center capitalize">
+                            {face.view}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    {talentFoundations.length === 0 && (
+                      <p className="text-xs text-yellow-600">
+                        No face foundations found for this talent. Create them in Talent Face Library first.
+                      </p>
+                    )}
+                    {talentFoundations.length > 0 && (
+                      <p className="text-xs text-muted-foreground italic">Click to select a face</p>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -257,16 +289,16 @@ export function FaceMatchTab({ projectId, talentId, selectedLookIds, onContinue 
     fetchFaceFoundations();
   }, [talentIds, looks]);
 
-  // Toggle face selection (click again to deselect)
+  // Select face for a view
   const handleSelectFace = (sourceImageId: string, faceUrl: string) => {
+    setMatches((prev) => ({ ...prev, [sourceImageId]: faceUrl }));
+  };
+
+  // Reset/clear a face match
+  const handleResetMatch = (sourceImageId: string) => {
     setMatches((prev) => {
-      if (prev[sourceImageId] === faceUrl) {
-        // Deselect: remove from matches
-        const { [sourceImageId]: _, ...rest } = prev;
-        return rest;
-      }
-      // Select new face
-      return { ...prev, [sourceImageId]: faceUrl };
+      const { [sourceImageId]: _, ...rest } = prev;
+      return rest;
     });
   };
 
@@ -388,6 +420,7 @@ export function FaceMatchTab({ projectId, talentId, selectedLookIds, onContinue 
                 matches={matches}
                 viewToAngle={viewToAngle}
                 onSelectFace={handleSelectFace}
+                onResetMatch={handleResetMatch}
               />
             ))}
           </div>
@@ -410,18 +443,31 @@ export function FaceMatchTab({ projectId, talentId, selectedLookIds, onContinue 
                   matches={matches}
                   viewToAngle={viewToAngle}
                   onSelectFace={handleSelectFace}
+                  onResetMatch={handleResetMatch}
                 />
               ))}
             </CollapsibleContent>
           </Collapsible>
         )}
 
-        {/* Empty state */}
+        {/* Empty state with per-view checkmarks */}
         {needsActionLooks.length === 0 && workflowState.filterMode === 'needs_action' && (
           <Card>
-            <CardContent className="py-8 text-center">
-              <Check className="h-8 w-8 mx-auto mb-3 text-emerald-500" />
-              <p className="text-muted-foreground">All looks matched!</p>
+            <CardContent className="py-8 text-center space-y-4">
+              <div className="flex items-center justify-center gap-4">
+                {['front', 'back', 'side', 'detail'].map(view => (
+                  <div key={view} className="flex flex-col items-center gap-1">
+                    <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center">
+                      <Check className="h-5 w-5 text-white" />
+                    </div>
+                    <span className="text-xs capitalize text-muted-foreground">{view}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-muted-foreground">All views matched!</p>
+              <Button variant="outline" size="sm" onClick={() => workflowState.setFilterMode('all')}>
+                Review all looks
+              </Button>
             </CardContent>
           </Card>
         )}
