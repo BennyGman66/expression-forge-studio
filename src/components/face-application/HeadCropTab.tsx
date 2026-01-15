@@ -363,7 +363,14 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
         })
         .eq("id", currentImage.id);
 
-      // Update local state with cache-busted URL
+      // Update workflow state FIRST (optimistic update)
+      try {
+        await workflowState.updateViewState(currentImage.look_id, currentImage.view, 'crop', 'completed');
+      } catch (e) {
+        console.error('Failed to update workflow state:', e);
+      }
+
+      // Update local state with cache-busted URL AFTER workflow state
       const cacheBustedUrl = `${croppedUrl}?t=${Date.now()}`;
       setSourceImages((prev) =>
         prev.map((img) =>
@@ -381,13 +388,6 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
       );
 
       toast({ title: "Crop applied", description: `${currentImage.view} head cropped successfully.` });
-
-      // Update workflow state
-      try {
-        await workflowState.updateViewState(currentImage.look_id, currentImage.view, 'crop', 'completed');
-      } catch (e) {
-        console.error('Failed to update workflow state:', e);
-      }
 
       // Move to next image if available
       if (selectedIndex < sourceImages.length - 1) {
