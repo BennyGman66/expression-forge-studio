@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { ChevronDown, ChevronRight, MoreHorizontal, Trash2, Copy, Image as ImageIcon, Check, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -152,6 +152,11 @@ export function LooksTable({
     },
     overscan: 5,
   });
+
+  // Force virtualizer to recalculate row positions when expansion state changes
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [expandedLookId]);
 
   return (
     <div className="space-y-2">
