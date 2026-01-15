@@ -5,3 +5,4 @@ export { SmartSelectionToolbar } from './SmartSelectionToolbar';
 export { GenerationPlanPreview } from './GenerationPlanPreview';
 export { GenerationProgressPanel } from './GenerationProgressPanel';
 export { GeneratedImagesGallery } from './GeneratedImagesGallery';
+export { LiveGenerationFeed } from './LiveGenerationFeed';
