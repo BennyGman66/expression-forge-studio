@@ -109,11 +109,18 @@ serve(async (req) => {
       
       console.log(`Step 4 - Centered at: x=${offsetX}, y=${offsetY}`);
     } else {
-      // Standard mode: just crop
+      // Standard mode: crop and optionally resize with aspect ratio preservation
       const croppedImage = image.crop(safeX, safeY, safeWidth, safeHeight);
       
       if (targetSize) {
-        outputImage = croppedImage.resize(targetSize, targetSize);
+        // Preserve aspect ratio: fit into targetSize x targetSize, then center on white canvas
+        const fittedImage = croppedImage.fit(targetSize, targetSize);
+        outputImage = new Image(targetSize, targetSize);
+        outputImage.fill(0xFFFFFFFF); // White background
+        const offsetX = Math.floor((targetSize - fittedImage.width) / 2);
+        const offsetY = Math.floor((targetSize - fittedImage.height) / 2);
+        outputImage.composite(fittedImage, offsetX, offsetY);
+        console.log(`Standard mode with fit: ${fittedImage.width}x${fittedImage.height} centered at (${offsetX}, ${offsetY})`);
       } else {
         outputImage = croppedImage;
       }
