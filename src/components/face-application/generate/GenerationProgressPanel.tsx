@@ -17,6 +17,8 @@ interface GenerationProgressPanelProps {
   currentProcessingInfo: string;
   onCancel: () => void;
   onRetryFailed?: () => void;
+  setupPhase?: boolean;
+  setupProgress?: { current: number; total: number };
 }
 
 export function GenerationProgressPanel({
@@ -32,6 +34,8 @@ export function GenerationProgressPanel({
   currentProcessingInfo,
   onCancel,
   onRetryFailed,
+  setupPhase = false,
+  setupProgress = { current: 0, total: 0 },
 }: GenerationProgressPanelProps) {
   const overallProgress = total > 0 ? (progress / total) * 100 : 0;
 
@@ -52,10 +56,24 @@ export function GenerationProgressPanel({
             <LeapfrogLoader message="" size="sm" />
             <div className="flex-1">
               <div className="flex justify-between text-sm mb-1">
-                <span>Generating faces...</span>
-                <span className="font-medium">{progress} / {total}</span>
+                <span>
+                  {setupPhase 
+                    ? `Setting up job ${setupProgress.current} of ${setupProgress.total}...` 
+                    : "Generating faces..."}
+                </span>
+                <span className="font-medium">
+                  {setupPhase 
+                    ? `${setupProgress.current} / ${setupProgress.total} jobs`
+                    : `${progress} / ${total}`}
+                </span>
               </div>
-              <Progress value={overallProgress} className="h-2" />
+              <Progress 
+                value={setupPhase 
+                  ? (setupProgress.total > 0 ? (setupProgress.current / setupProgress.total) * 100 : 0)
+                  : overallProgress
+                } 
+                className="h-2" 
+              />
             </div>
             <Button 
               variant="destructive" 
@@ -68,22 +86,24 @@ export function GenerationProgressPanel({
           </div>
           
           {/* Activity indicators */}
-          <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
-            <span className="text-foreground/80">
-              Processing: {currentProcessingInfo}
-            </span>
-            <div className="flex items-center gap-3">
-              {elapsedTime && (
-                <span>Elapsed: {elapsedTime}</span>
-              )}
-              {lastActivitySeconds !== null && (
-                <span className="flex items-center gap-1.5">
-                  Last activity: {lastActivitySeconds}s ago
-                  <span className={`w-2 h-2 rounded-full ${getActivityStatusColor()} animate-pulse`} />
-                </span>
-              )}
+          {!setupPhase && (
+            <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
+              <span className="text-foreground/80">
+                Processing: {currentProcessingInfo}
+              </span>
+              <div className="flex items-center gap-3">
+                {elapsedTime && (
+                  <span>Elapsed: {elapsedTime}</span>
+                )}
+                {lastActivitySeconds !== null && (
+                  <span className="flex items-center gap-1.5">
+                    Last activity: {lastActivitySeconds}s ago
+                    <span className={`w-2 h-2 rounded-full ${getActivityStatusColor()} animate-pulse`} />
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
       

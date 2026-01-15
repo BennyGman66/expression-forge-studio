@@ -71,6 +71,8 @@ export function GenerateTabEnhanced({
   const [lastActivitySeconds, setLastActivitySeconds] = useState<number | null>(null);
   const [outputCounts, setOutputCounts] = useState<OutputCounts>({ completed: 0, failed: 0, pending: 0, generating: 0 });
   const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutput[]>([]);
+  const [setupPhase, setSetupPhase] = useState(false);
+  const [setupProgress, setSetupProgress] = useState({ current: 0, total: 0 });
   
   // Auxiliary data
   const [faceFoundations, setFaceFoundations] = useState<FaceFoundation[]>([]);
@@ -334,11 +336,13 @@ export function GenerateTabEnhanced({
     setGenerationStartTime(new Date());
     setLastRunTimestamp(new Date().toISOString());
     setCurrentBatchJobIds([]);
+    setSetupPhase(true);
+    setSetupProgress({ current: 0, total: selectedLooks.length });
 
     try {
-      const newBatchJobIds: string[] = [];
-
+      let lookIndex = 0;
       for (const look of selectedLooks) {
+        lookIndex++;
         // Skip if no talent assigned
         if (!look.digitalTalentId) continue;
 
@@ -388,12 +392,15 @@ export function GenerateTabEnhanced({
           .single();
 
         if (jobError) throw jobError;
-        newBatchJobIds.push(newJob.id);
+        
+        // Add job ID immediately to enable progress tracking
+        setCurrentBatchJobIds(prev => [...prev, newJob.id]);
+        setSetupProgress({ current: lookIndex, total: selectedLooks.length });
 
-        // Start generation
+        // Start generation - fire and forget (no await)
         const viewsToProcess = viewsToGenerate.map(v => v.view);
         
-        await supabase.functions.invoke("generate-ai-apply", {
+        supabase.functions.invoke("generate-ai-apply", {
           body: {
             projectId: projectId,
             lookId: look.lookId,
@@ -408,7 +415,7 @@ export function GenerateTabEnhanced({
         });
       }
 
-      setCurrentBatchJobIds(newBatchJobIds);
+      setSetupPhase(false);
       toast({ 
         title: "Generation started", 
         description: `Processing ${selectedLooks.length} looks` 
@@ -653,16 +660,18 @@ export function GenerateTabEnhanced({
         <GenerationProgressPanel
           isGenerating={isGenerating}
           progress={outputCounts.completed}
-          total={generationPlan.outputsToGenerate}
+          total={outputCounts.completed + outputCounts.failed + outputCounts.pending + outputCounts.generating}
           completedCount={outputCounts.completed}
           failedCount={outputCounts.failed}
           pendingCount={outputCounts.pending}
           runningCount={outputCounts.generating}
           elapsedTime={elapsedDisplay}
           lastActivitySeconds={lastActivitySeconds}
-          currentProcessingInfo="Processing..."
+          currentProcessingInfo={`${outputCounts.generating} generating, ${outputCounts.pending} queued`}
           onCancel={handleCancelGeneration}
           onRetryFailed={handleRetryFailed}
+          setupPhase={setupPhase}
+          setupProgress={setupProgress}
         />
 
         {/* Generated images gallery */}
