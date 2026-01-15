@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import type { 
@@ -24,6 +24,9 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
   const [isSyncing, setIsSyncing] = useState(false);
   const [detectedViews, setDetectedViews] = useState<string[]>([]);
   const [stateVersion, setStateVersion] = useState(0);
+  
+  // Track last optimistic update to skip realtime refetches briefly
+  const lastOptimisticUpdate = useRef<number>(0);
 
   // Fetch all view states for the project
   const fetchStates = useCallback(async () => {
@@ -266,7 +269,12 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
           table: 'look_view_states',
         },
         () => {
-          // Refetch on any change - use ref to avoid dependency issues
+          // Skip refetch if we just did an optimistic update (prevents overwriting local state)
+          const timeSinceOptimistic = Date.now() - lastOptimisticUpdate.current;
+          if (timeSinceOptimistic < 500) {
+            console.log('Skipping realtime refetch - recent optimistic update');
+            return;
+          }
           fetchStates();
         }
       )
@@ -360,6 +368,9 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
       newMap.set(lookId, [...existing]);
       return newMap;
     });
+    
+    // Mark optimistic update time to prevent realtime from overwriting
+    lastOptimisticUpdate.current = Date.now();
     
     // Increment version to force re-renders in consuming components
     setStateVersion(v => v + 1);
