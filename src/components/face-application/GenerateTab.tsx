@@ -303,6 +303,40 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
     return "bg-red-500";
   };
 
+  // Cancel generation and clear queue
+  const handleCancelGeneration = async () => {
+    if (currentBatchJobIds.length === 0) return;
+    
+    try {
+      // Update all current batch jobs to canceled
+      await supabase
+        .from("face_application_jobs")
+        .update({ status: "canceled" })
+        .in("id", currentBatchJobIds);
+      
+      // Delete any pending/generating outputs
+      await supabase
+        .from("face_application_outputs")
+        .delete()
+        .in("job_id", currentBatchJobIds)
+        .in("status", ["pending", "generating"]);
+      
+      setIsGenerating(false);
+      toast({ title: "Generation canceled", description: "The queue has been cleared." });
+      
+      // Refresh jobs
+      const { data } = await supabase
+        .from("face_application_jobs")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false });
+      if (data) setJobs(data as unknown as FaceApplicationJob[]);
+      
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
+
   // Retry only failed outputs
   const handleRetryFailed = async () => {
     if (currentBatchJobIds.length === 0) return;
@@ -331,6 +365,81 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
       }
 
       toast({ title: "Retrying failed outputs", description: "Regenerating only the failed images." });
+
+      // Refresh jobs
+      const { data } = await supabase
+        .from("face_application_jobs")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false });
+      if (data) setJobs(data as unknown as FaceApplicationJob[]);
+
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      setIsGenerating(false);
+    }
+  };
+
+  // Regenerate a specific view only
+  const handleRegenerateView = async (view: string) => {
+    if (looks.length === 0 || talentIds.length === 0) return;
+    
+    setIsGenerating(true);
+    setGenerationStartTime(new Date());
+
+    try {
+      const newBatchJobIds: string[] = [];
+
+      for (const look of looks) {
+        const talentId = look.digital_talent_id || talentIds[0];
+        
+        // Find source image for this view
+        const viewImage = look.sourceImages.find(img => img.view === view);
+        if (!viewImage) continue;
+        
+        // Auto-describe outfit for this view
+        const outfitDescriptions: Record<string, string> = {};
+        const imageToDescribe = viewImage.head_cropped_url || viewImage.source_url;
+        const response = await supabase.functions.invoke("generate-outfit-description", {
+          body: { imageUrl: imageToDescribe },
+        });
+        if (response.data?.description) {
+          outfitDescriptions[viewImage.id] = response.data.description;
+        }
+
+        // Create job for single view
+        const { data: newJob, error: jobError } = await supabase
+          .from("face_application_jobs")
+          .insert({
+            project_id: projectId,
+            look_id: look.id,
+            digital_talent_id: talentId,
+            attempts_per_view: attemptsPerView,
+            model: selectedModel,
+            total: attemptsPerView,
+            status: "pending",
+          })
+          .select()
+          .single();
+
+        if (jobError) throw jobError;
+        newBatchJobIds.push(newJob.id);
+
+        // Trigger generation for single view only
+        await supabase.functions.invoke("generate-face-application", {
+          body: {
+            jobId: newJob.id,
+            outfitDescriptions,
+            singleView: view,
+          },
+        });
+      }
+
+      setCurrentBatchJobIds(newBatchJobIds);
+      toast({ 
+        title: `Regenerating ${VIEW_LABELS[view] || view}`, 
+        description: `Creating ${attemptsPerView} new options.` 
+      });
 
       // Refresh jobs
       const { data } = await supabase
@@ -627,6 +736,15 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
                         </div>
                         <Progress value={overallProgress} className="h-2" />
                       </div>
+                      {/* Cancel button */}
+                      <Button 
+                        variant="destructive" 
+                        size="sm"
+                        onClick={handleCancelGeneration}
+                      >
+                        <XCircle className="w-4 h-4 mr-2" />
+                        Cancel
+                      </Button>
                     </div>
                     
                     {/* Live output counts */}
@@ -692,9 +810,23 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
                         }, {} as Record<string, GeneratedOutput[]>)
                       ).map(([view, outputs]) => (
                         <div key={view} className="space-y-2">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            {VIEW_LABELS[view] || view} ({outputs.length})
-                          </p>
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-medium text-muted-foreground">
+                              {VIEW_LABELS[view] || view} ({outputs.length})
+                            </p>
+                            {/* Per-view regenerate button */}
+                            {!isGenerating && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs"
+                                onClick={() => handleRegenerateView(view)}
+                              >
+                                <RefreshCw className="w-3 h-3 mr-1" />
+                                Regenerate {VIEW_LABELS[view] || view}
+                              </Button>
+                            )}
+                          </div>
                           <div className="flex flex-wrap gap-2">
                             {outputs.map((output) => (
                               <div 
