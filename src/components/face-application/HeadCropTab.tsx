@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage } from "@/types/face-application";
 import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
 import { LooksSwitcher } from "./shared/LooksSwitcher";
-import { isViewComplete } from "@/lib/workflowFilterUtils";
+import { isViewComplete, lookNeedsActionForTab } from "@/lib/workflowFilterUtils";
 
 interface HeadCropTabProps {
   projectId: string;
@@ -43,6 +43,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [expanding, setExpanding] = useState(false);
   const [expandingAll, setExpandingAll] = useState(false);
   const [expandProgress, setExpandProgress] = useState({ current: 0, total: 0 });
+  const [ignoringLook, setIgnoringLook] = useState(false);
   // Cached bounds to ensure consistent coordinate calculations
   const [cachedBounds, setCachedBounds] = useState<{
     offsetX: number;
@@ -583,6 +584,45 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     });
   };
 
+  const handleIgnoreLook = async () => {
+    if (!lookId) return;
+    
+    setIgnoringLook(true);
+    try {
+      // Get all unique views for this look
+      const views = [...new Set(sourceImages.map(img => img.view))];
+      
+      // Mark each view as 'completed' for the 'crop' tab
+      await Promise.all(
+        views.map(view => 
+          workflowState.updateViewState(lookId, view, 'crop', 'completed', 'user_ignored')
+        )
+      );
+      
+      toast({
+        title: "Look skipped",
+        description: `Marked ${views.length} views as complete.`,
+      });
+      
+      // Auto-advance to next look needing action
+      const nextLook = looks.find(l => 
+        l.id !== lookId && lookNeedsActionForTab(workflowState.lookStates, l.id, 'crop')
+      );
+      if (nextLook) {
+        onLookChange(nextLook.id);
+      }
+    } catch (error) {
+      console.error('Error ignoring look:', error);
+      toast({
+        title: "Error",
+        description: "Failed to skip look",
+        variant: "destructive",
+      });
+    } finally {
+      setIgnoringLook(false);
+    }
+  };
+
   const allCropped = sourceImages.every((img) => img.head_cropped_url);
 
   // Filter source images based on workflow filter mode
@@ -789,6 +829,15 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                 {expandingAll 
                   ? `Expanding ${expandProgress.current}/${expandProgress.total}...` 
                   : "Expand All Images"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleIgnoreLook}
+                disabled={ignoringLook || !lookId}
+              >
+                <ArrowRight className="h-4 w-4 mr-1" />
+                {ignoringLook ? "Skipping..." : "Skip Look"}
               </Button>
             </div>
             <div className="flex items-center gap-2">
