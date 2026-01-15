@@ -8,7 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, ArrowUpFromLine } from "lucide-react";
 import { LookSourceImage } from "@/types/face-application";
 
 interface InlineCropDialogProps {
@@ -42,15 +42,20 @@ export function InlineCropDialog({
     scaleY: number;
   } | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [expanding, setExpanding] = useState(false);
+  const [currentSourceUrl, setCurrentSourceUrl] = useState<string>("");
+  const [forceDefaultCrop, setForceDefaultCrop] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
   const { toast } = useToast();
 
   // Reset state when dialog opens
   useEffect(() => {
-    if (open) {
+    if (open && sourceImage) {
       setCropBox({ x: 0, y: 0, width: 0, height: 0 });
       setImageDimensions({ width: 0, height: 0 });
       setCachedBounds(null);
+      setCurrentSourceUrl(sourceImage.source_url);
+      setForceDefaultCrop(false);
     }
   }, [open, sourceImage?.id]);
 
@@ -87,14 +92,30 @@ export function InlineCropDialog({
     };
     setCachedBounds(bounds);
 
-    // Default crop to top-center
-    const defaultWidth = Math.min(newDimensions.width * 0.4, 400);
-    setCropBox({
-      x: (newDimensions.width - defaultWidth) / 2,
-      y: 20,
-      width: defaultWidth,
-      height: defaultWidth,
-    });
+    // If forceDefaultCrop is set (after expansion), use defaults
+    const shouldUseDefault = forceDefaultCrop || 
+      sourceImage?.head_crop_x === null || 
+      sourceImage?.head_crop_x === undefined;
+
+    if (shouldUseDefault) {
+      // Default crop to top-center
+      const defaultWidth = Math.min(newDimensions.width * 0.4, 400);
+      setCropBox({
+        x: (newDimensions.width - defaultWidth) / 2,
+        y: 20,
+        width: defaultWidth,
+        height: defaultWidth,
+      });
+      setForceDefaultCrop(false);
+    } else {
+      // Use saved crop data
+      setCropBox({
+        x: sourceImage.head_crop_x || 0,
+        y: sourceImage.head_crop_y || 0,
+        width: sourceImage.head_crop_width || 200,
+        height: sourceImage.head_crop_height || 200,
+      });
+    }
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -192,6 +213,58 @@ export function InlineCropDialog({
     setResizeCorner(null);
   };
 
+  const handleExpandImage = async () => {
+    if (!sourceImage) return;
+    setExpanding(true);
+
+    try {
+      const response = await supabase.functions.invoke("expand-image-top", {
+        body: {
+          imageUrl: currentSourceUrl,
+          imageId: sourceImage.id,
+          paddingPercent: 20,
+        },
+      });
+
+      if (response.error) throw response.error;
+
+      const { expandedUrl } = response.data;
+
+      // Update database - expanded image becomes new source, clear crop data
+      await supabase
+        .from("look_source_images")
+        .update({
+          source_url: expandedUrl,
+          head_crop_x: null,
+          head_crop_y: null,
+          head_crop_width: null,
+          head_crop_height: null,
+          head_cropped_url: null,
+        })
+        .eq("id", sourceImage.id);
+
+      // Set flag to force default crop on new image
+      setForceDefaultCrop(true);
+      
+      // Update local source URL with cache bust
+      setCurrentSourceUrl(`${expandedUrl}?t=${Date.now()}`);
+      
+      // Reset crop box (will be recalculated on image load)
+      setCropBox({ x: 0, y: 0, width: 0, height: 0 });
+      setCachedBounds(null);
+      setImageDimensions({ width: 0, height: 0 });
+
+      toast({
+        title: "Image expanded",
+        description: "Added 20% white space to top. Please reposition the crop box.",
+      });
+    } catch (error: any) {
+      toast({ title: "Error expanding image", description: error.message, variant: "destructive" });
+    } finally {
+      setExpanding(false);
+    }
+  };
+
   const handleApplyCrop = async () => {
     if (!imageDimensions.width || !imageDimensions.height) return;
     setProcessing(true);
@@ -199,7 +272,7 @@ export function InlineCropDialog({
     try {
       const response = await supabase.functions.invoke("crop-and-store-image", {
         body: {
-          imageUrl: sourceImage.source_url,
+          imageUrl: currentSourceUrl,
           cropX: (cropBox.x / imageDimensions.width) * 100,
           cropY: (cropBox.y / imageDimensions.height) * 100,
           cropWidth: (cropBox.width / imageDimensions.width) * 100,
@@ -216,6 +289,7 @@ export function InlineCropDialog({
       await supabase
         .from("look_source_images")
         .update({
+          source_url: currentSourceUrl.split('?')[0], // Store clean URL without cache bust
           head_crop_x: Math.round(cropBox.x),
           head_crop_y: Math.round(cropBox.y),
           head_crop_width: Math.round(cropBox.width),
@@ -226,6 +300,7 @@ export function InlineCropDialog({
 
       const updatedImage: LookSourceImage = {
         ...sourceImage,
+        source_url: currentSourceUrl.split('?')[0],
         head_crop_x: Math.round(cropBox.x),
         head_crop_y: Math.round(cropBox.y),
         head_crop_width: Math.round(cropBox.width),
@@ -258,8 +333,22 @@ export function InlineCropDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
+        <DialogHeader className="flex flex-row items-center justify-between">
           <DialogTitle>Crop Head - {sourceImage?.view?.toUpperCase()}</DialogTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExpandImage}
+            disabled={expanding || processing}
+            className="gap-2"
+          >
+            {expanding ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowUpFromLine className="h-4 w-4" />
+            )}
+            Extend Image
+          </Button>
         </DialogHeader>
 
         <div className="flex-1 min-h-0 flex flex-col gap-4">
@@ -273,7 +362,7 @@ export function InlineCropDialog({
           >
             <img
               ref={imageRef}
-              src={sourceImage?.source_url}
+              src={currentSourceUrl || sourceImage?.source_url}
               alt="Source"
               className="w-full h-full object-contain"
               onLoad={handleImageLoad}
@@ -309,10 +398,10 @@ export function InlineCropDialog({
 
           {/* Actions */}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={processing}>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={processing || expanding}>
               Cancel
             </Button>
-            <Button onClick={handleApplyCrop} disabled={processing || !cropBox.width}>
+            <Button onClick={handleApplyCrop} disabled={processing || expanding || !cropBox.width}>
               {processing ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
