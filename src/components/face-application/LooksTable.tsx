@@ -150,12 +150,21 @@ export function LooksTable({
       const row = flatRows[index];
       return row.type === 'expanded' ? EXPANDED_ROW_HEIGHT : ROW_HEIGHT;
     },
+    getItemKey: (index) => {
+      const row = flatRows[index];
+      return row.type === 'expanded' ? `${row.look.id}-expanded` : row.look.id;
+    },
     overscan: 5,
   });
 
   // Force virtualizer to recalculate row positions when expansion state changes
   useEffect(() => {
     rowVirtualizer.measure();
+    // Force re-render by scrolling to current position
+    const currentOffset = rowVirtualizer.scrollOffset ?? 0;
+    requestAnimationFrame(() => {
+      rowVirtualizer.scrollToOffset(currentOffset, { align: 'start' });
+    });
   }, [expandedLookId]);
 
   return (
@@ -238,12 +247,13 @@ export function LooksTable({
                 return (
                   <div
                     key={`${look.id}-expanded`}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
                     style={{
                       position: 'absolute',
                       top: 0,
                       left: 0,
                       width: '100%',
-                      height: `${virtualRow.size}px`,
                       transform: `translateY(${virtualRow.start}px)`,
                       zIndex: 10,
                     }}
