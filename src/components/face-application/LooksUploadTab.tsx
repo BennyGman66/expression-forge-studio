@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, ArrowRight, Image as ImageIcon, FolderOpen, FolderSearch } from "lucide-react";
+import { Plus, ArrowRight, Image as ImageIcon, FolderOpen, FolderSearch, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { BulkUploadZone } from "./BulkUploadZone";
 import { LooksTable, LookData, TalentOption } from "./LooksTable";
 import { TiffImportDialog, ProgressiveImageData } from "./TiffImportDialog";
 import { OrphanImageRecovery } from "./OrphanImageRecovery";
-import { isTiffFile } from "@/lib/tiffImportUtils";
+import { isTiffFile, extractLookKey } from "@/lib/tiffImportUtils";
+import { DeleteDuplicatesDialog, countDuplicates } from "./DeleteDuplicatesDialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -54,7 +55,11 @@ export function LooksUploadTab({
   const [tiffImportFiles, setTiffImportFiles] = useState<File[]>([]);
   const [showTiffImport, setShowTiffImport] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
+  const [showDeleteDuplicates, setShowDeleteDuplicates] = useState(false);
   const { toast } = useToast();
+
+  // Count duplicates for the button badge
+  const duplicateCount = useMemo(() => countDuplicates(looks), [looks]);
 
   // Handler to clear state when TIFF dialog closes
   const handleTiffDialogClose = useCallback((open: boolean) => {
@@ -84,7 +89,7 @@ export function LooksUploadTab({
     setLoading(true);
     const { data: looksData } = await supabase
       .from("talent_looks")
-      .select("id, name, product_type, digital_talent_id, created_at")
+      .select("id, name, product_type, digital_talent_id, created_at, look_code")
       .eq("project_id", projectId)
       .order("created_at", { ascending: false });
 
@@ -399,6 +404,7 @@ export function LooksUploadTab({
   // Helper to get or create a look, ensuring only one is created per lookKey
   const getOrCreateLook = useCallback(async (lookKey: string): Promise<string | null> => {
     const lookName = lookKey;
+    const lookKeyUpper = lookKey.toUpperCase();
     
     // Check if we already have this look cached
     const cachedId = progressiveLooksRef.current.get(lookName);
@@ -416,18 +422,24 @@ export function LooksUploadTab({
       const recheckedId = progressiveLooksRef.current.get(lookName);
       if (recheckedId) return recheckedId;
       
-      // Check if the look already exists in DB (by look_code or name)
+      // Check if the look already exists in DB - fetch all looks and check by code extraction
       const { data: existingLooks } = await supabase
         .from("talent_looks")
-        .select("id")
-        .eq("project_id", projectId)
-        .or(`look_code.eq.${lookKey},name.eq.${lookName}`)
-        .limit(1);
+        .select("id, name, look_code")
+        .eq("project_id", projectId);
       
-      if (existingLooks && existingLooks.length > 0) {
-        const existingId = existingLooks[0].id;
-        progressiveLooksRef.current.set(lookName, existingId);
-        return existingId;
+      // Find a match by look_code or by extracting code from name
+      const matchingLook = existingLooks?.find(look => {
+        // Direct match on look_code
+        if (look.look_code?.toUpperCase() === lookKeyUpper) return true;
+        // Extract code from name and compare
+        const extractedCode = extractLookKey(look.name);
+        return extractedCode?.toUpperCase() === lookKeyUpper;
+      });
+      
+      if (matchingLook) {
+        progressiveLooksRef.current.set(lookName, matchingLook.id);
+        return matchingLook.id;
       }
       
       // Create a new look with look_code
@@ -612,6 +624,37 @@ export function LooksUploadTab({
     }
   };
 
+  // Handler for bulk deleting duplicates
+  const handleDeleteDuplicates = async (lookIdsToDelete: string[]) => {
+    // Delete all looks in one batch
+    const { error } = await supabase
+      .from("talent_looks")
+      .delete()
+      .in("id", lookIdsToDelete);
+
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    // Update local state
+    setLooks((prev) => prev.filter((look) => !lookIdsToDelete.includes(look.id)));
+    
+    // Clear any selected looks that were deleted
+    setSelectedLookIds((prev) => {
+      const next = new Set(prev);
+      for (const id of lookIdsToDelete) {
+        next.delete(id);
+      }
+      return next;
+    });
+
+    toast({ 
+      title: "Duplicates deleted", 
+      description: `Removed ${lookIdsToDelete.length} duplicate look${lookIdsToDelete.length !== 1 ? "s" : ""}.` 
+    });
+  };
+
   const hasAnyLooksWithImages = looks.some((look) => look.sourceImages.length > 0);
   const completeLooksCount = looks.filter((look) => {
     const views = look.sourceImages.map((img) => img.view);
@@ -715,6 +758,17 @@ export function LooksUploadTab({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {duplicateCount > 0 && (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setShowDeleteDuplicates(true)}
+              className="text-amber-600 border-amber-300 hover:bg-amber-50 hover:text-amber-700"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Duplicates ({duplicateCount})
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => setShowRecovery(true)}>
             <FolderSearch className="h-4 w-4 mr-2" />
             Recover Lost Images
@@ -793,6 +847,13 @@ export function LooksUploadTab({
         onRecovered={fetchLooks}
         open={showRecovery}
         onOpenChange={setShowRecovery}
+      />
+
+      <DeleteDuplicatesDialog
+        open={showDeleteDuplicates}
+        onOpenChange={setShowDeleteDuplicates}
+        looks={looks}
+        onDeleteDuplicates={handleDeleteDuplicates}
       />
     </div>
   );

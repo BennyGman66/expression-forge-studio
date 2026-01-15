@@ -18,6 +18,7 @@ export interface LookData {
   product_type: string | null;
   digital_talent_id: string | null;
   created_at: string;
+  look_code?: string | null;
   sourceImages: {
     id: string;
     view: string;
