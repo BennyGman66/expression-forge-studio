@@ -70,10 +70,13 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
         .eq("project_id", projectId)
         .order("created_at");
       if (data) {
-        // Filter by selectedLookIds if provided
-        const filteredLooks = selectedLookIds && selectedLookIds.size > 0
-          ? data.filter(l => selectedLookIds.has(l.id))
-          : data;
+        // Filter by selectedLookIds if provided, AND only include looks with a model assigned
+        let filteredLooks = data.filter(l => l.digital_talent_id !== null);
+        
+        if (selectedLookIds && selectedLookIds.size > 0) {
+          filteredLooks = filteredLooks.filter(l => selectedLookIds.has(l.id));
+        }
+        
         setLooks(filteredLooks);
         // Auto-select first look if none selected or current is not in filtered list
         if (filteredLooks.length > 0) {
