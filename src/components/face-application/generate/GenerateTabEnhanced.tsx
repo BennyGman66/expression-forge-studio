@@ -593,14 +593,6 @@ export function GenerateTabEnhanced({
           </CardContent>
         </Card>
 
-        {/* Filters */}
-        <GenerationFilters
-          currentFilter={filterMode}
-          onFilterChange={setFilterMode}
-          counts={filterCounts}
-          disabled={isGenerating}
-        />
-
         {/* Smart selection toolbar */}
         <SmartSelectionToolbar
           onSelectAll={selectAllLooks}
@@ -614,6 +606,9 @@ export function GenerateTabEnhanced({
           newCount={summary.looksNew}
           failedCount={filterCounts.failed}
           disabled={isGenerating}
+          filterMode={filterMode}
+          onFilterChange={setFilterMode}
+          filterCounts={filterCounts}
         />
 
         {/* Looks grid */}
