@@ -9,6 +9,7 @@ export interface LookData {
     view: string;
     source_url: string;
     head_cropped_url: string | null;
+    head_crop_x?: number | null;
     digital_talent_id?: string | null;
   }>;
   outputs?: Array<{
@@ -41,8 +42,10 @@ export function inferViewState(
       return sourceImage?.source_url ? 'completed' : 'not_started';
       
     case 'crop':
-      // Completed if head crop exists
-      return sourceImage?.head_cropped_url ? 'completed' : 'not_started';
+      // Completed if head crop exists (check head_crop_x OR head_cropped_url)
+      const hasCrop = sourceImage?.head_crop_x !== null && sourceImage?.head_crop_x !== undefined;
+      const hasCroppedUrl = !!sourceImage?.head_cropped_url;
+      return (hasCrop || hasCroppedUrl) ? 'completed' : 'not_started';
       
     case 'match':
       // Completed if source image has digital_talent_id set (means it was matched)
