@@ -2322,6 +2322,7 @@ export type Database = {
           head_cropped_url: string | null
           id: string
           look_id: string
+          original_source_url: string | null
           source_url: string
           view: string
         }
@@ -2335,6 +2336,7 @@ export type Database = {
           head_cropped_url?: string | null
           id?: string
           look_id: string
+          original_source_url?: string | null
           source_url: string
           view: string
         }
@@ -2348,6 +2350,7 @@ export type Database = {
           head_cropped_url?: string | null
           id?: string
           look_id?: string
+          original_source_url?: string | null
           source_url?: string
           view?: string
         }
