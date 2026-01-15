@@ -46,20 +46,20 @@ export function LookPairingPanel({
     );
   }
 
-  // Filter out skipped images
-  const visibleImages = look.sourceImages.filter(img => !skippedImageIds.has(img.id));
-  
+  // Calculate status - count skipped as "complete" for progress
+  const nonSkippedImages = look.sourceImages.filter(img => !skippedImageIds.has(img.id));
   const status = getLookPairingStatus(
-    { ...look, sourceImages: visibleImages },
+    { ...look, sourceImages: nonSkippedImages },
     pairings
   );
+  const skippedCount = skippedImageIds.size;
   
   const talentFoundations = faceFoundations.filter(
     f => f.digital_talent_id === look.digital_talent_id
   );
 
-  // Count cropped images only for auto-match check
-  const croppedImages = visibleImages.filter(img => !!img.head_cropped_url);
+  // Count cropped images only for auto-match check (exclude skipped)
+  const croppedImages = nonSkippedImages.filter(img => !!img.head_cropped_url);
   
   // Check if auto-matching would add any new pairings
   const canAutoMatch = croppedImages.some(img => {
@@ -80,7 +80,8 @@ export function LookPairingPanel({
     setSkippedImageIds(prev => new Set([...prev, imageId]));
   };
 
-  const needsCropCount = visibleImages.filter(img => !img.head_cropped_url).length;
+  const needsCropCount = nonSkippedImages.filter(img => !img.head_cropped_url).length;
+  const isComplete = status.status === 'complete' || (nonSkippedImages.length === 0 && skippedCount > 0);
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
@@ -98,7 +99,10 @@ export function LookPairingPanel({
               </>
             )}
             {status.paired}/{status.cropped} views paired
-            {status.status === 'complete' && (
+            {skippedCount > 0 && (
+              <span className="text-muted-foreground"> · {skippedCount} skipped</span>
+            )}
+            {isComplete && (
               <span className="ml-2 text-primary font-medium">✓ Complete</span>
             )}
           </p>
@@ -120,7 +124,7 @@ export function LookPairingPanel({
       {/* View slots grid */}
       <div className="flex-1 overflow-auto p-4">
         <div className="grid grid-cols-2 gap-4">
-          {visibleImages.map((img) => (
+          {look.sourceImages.map((img) => (
             <ViewSlot
               key={img.id}
               sourceImage={img}
@@ -129,11 +133,12 @@ export function LookPairingPanel({
               onCropClick={() => handleCropClick(img)}
               onSkip={() => handleSkipImage(img.id)}
               isOver={dragOverSlotId === img.id}
+              isSkipped={skippedImageIds.has(img.id)}
             />
           ))}
         </div>
 
-        {visibleImages.length === 0 && (
+        {look.sourceImages.length === 0 && (
           <div className="text-center py-8 text-muted-foreground">
             <p>No source images found for this look.</p>
             <p className="text-sm">Upload images in the Looks tab first.</p>
