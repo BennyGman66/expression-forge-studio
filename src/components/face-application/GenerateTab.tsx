@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -61,6 +61,7 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
   const [lastActivitySeconds, setLastActivitySeconds] = useState<number | null>(null);
   const [outputCounts, setOutputCounts] = useState<OutputCounts>({ completed: 0, failed: 0, pending: 0, generating: 0 });
   const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutput[]>([]);
+  const [persistedOutputs, setPersistedOutputs] = useState<GeneratedOutput[]>([]);
   const { toast } = useToast();
 
   // Fetch ALL looks for this PROJECT with their source images
@@ -183,6 +184,53 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
     fetchJobs();
   }, [projectId]);
 
+  // Fetch existing completed outputs for current looks (persistence across sessions)
+  useEffect(() => {
+    if (looks.length === 0) {
+      setPersistedOutputs([]);
+      return;
+    }
+
+    const fetchExistingOutputs = async () => {
+      const lookIds = looks.map(l => l.id);
+      
+      // Get all jobs for these looks
+      const { data: jobsForLooks } = await supabase
+        .from("face_application_jobs")
+        .select("id")
+        .in("look_id", lookIds);
+      
+      if (!jobsForLooks || jobsForLooks.length === 0) {
+        setPersistedOutputs([]);
+        return;
+      }
+
+      const jobIds = jobsForLooks.map(j => j.id);
+      
+      // Get all completed outputs for these jobs
+      const { data: outputs } = await supabase
+        .from("face_application_outputs")
+        .select("id, stored_url, view, attempt_index, status, job_id")
+        .in("job_id", jobIds)
+        .eq("status", "completed")
+        .not("stored_url", "is", null)
+        .order("created_at", { ascending: true });
+
+      if (outputs) {
+        const existingOutputs = outputs.map(o => ({
+          id: o.id,
+          stored_url: o.stored_url!,
+          view: o.view,
+          attempt_index: o.attempt_index ?? 0,
+          status: o.status ?? "completed",
+        }));
+        setPersistedOutputs(existingOutputs);
+      }
+    };
+
+    fetchExistingOutputs();
+  }, [looks]);
+
   // Poll for job updates
   useEffect(() => {
     const runningJobs = jobs.filter(j => j.status === "running" || j.status === "pending");
@@ -284,6 +332,19 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
     const interval = setInterval(fetchOutputs, 2000);
     return () => clearInterval(interval);
   }, [currentBatchJobIds, jobs]);
+
+  // Combine persisted outputs with current batch outputs (deduplicated)
+  const allOutputs = useMemo(() => {
+    const outputMap = new Map<string, GeneratedOutput>();
+    
+    // Add persisted outputs first
+    persistedOutputs.forEach(o => outputMap.set(o.id, o));
+    
+    // Add/overwrite with current batch outputs (they may have updated status)
+    generatedOutputs.forEach(o => outputMap.set(o.id, o));
+    
+    return Array.from(outputMap.values());
+  }, [persistedOutputs, generatedOutputs]);
 
   // Get current processing info
   const getCurrentProcessingInfo = () => {
@@ -790,19 +851,19 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
                 )}
 
                 {/* Generated Images Preview */}
-                {generatedOutputs.length > 0 && (
+                {allOutputs.length > 0 && (
                   <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-medium">Generated Images</h4>
                       <span className="text-xs text-muted-foreground">
-                        {generatedOutputs.length} images
+                        {allOutputs.length} images
                       </span>
                     </div>
                     
                     {/* Group by view */}
                     <div className="space-y-4">
                       {Object.entries(
-                        generatedOutputs.reduce((acc, output) => {
+                        allOutputs.reduce((acc, output) => {
                           const viewKey = output.view || 'unknown';
                           if (!acc[viewKey]) acc[viewKey] = [];
                           acc[viewKey].push(output);
@@ -848,8 +909,8 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
                       ))}
                     </div>
 
-                    {/* Action buttons */}
-                    {!isGenerating && (outputCounts.completed > 0 || outputCounts.failed > 0) && (
+                    {/* Action buttons - show when we have outputs or failed items */}
+                    {!isGenerating && allOutputs.length > 0 && (
                       <div className="flex gap-2 pt-3 border-t border-border/50">
                         {outputCounts.failed > 0 && (
                           <Button 
