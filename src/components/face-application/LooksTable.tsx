@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useEffect } from "react";
+import { useState, useRef, useMemo } from "react";
 import { ChevronDown, ChevronRight, MoreHorizontal, Trash2, Copy, Image as ImageIcon, Check, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -118,7 +118,6 @@ export function LooksTable({
 }: LooksTableProps) {
   const [expandedLookId, setExpandedLookId] = useState<string | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
-  const prevExpandedRef = useRef<string | null>(null);
 
   const toggleExpand = (lookId: string) => {
     setExpandedLookId((prev) => (prev === lookId ? null : lookId));
@@ -132,13 +131,13 @@ export function LooksTable({
   const allSelected = hasSelection && looks.length > 0 && selectedIds.size === looks.length;
   const someSelected = hasSelection && selectedIds.size > 0 && selectedIds.size < looks.length;
 
-  // Build flat list with expansion rows
+  // Build flat list with expansion rows - key is used by virtualizer to track items
   const flatRows = useMemo(() => {
-    const rows: { type: 'look' | 'expanded'; look: LookData }[] = [];
+    const rows: { type: 'look' | 'expanded'; look: LookData; key: string }[] = [];
     for (const look of looks) {
-      rows.push({ type: 'look', look });
+      rows.push({ type: 'look', look, key: look.id });
       if (expandedLookId === look.id) {
-        rows.push({ type: 'expanded', look });
+        rows.push({ type: 'expanded', look, key: `${look.id}-expanded` });
       }
     }
     return rows;
@@ -151,24 +150,9 @@ export function LooksTable({
       const row = flatRows[index];
       return row.type === 'expanded' ? EXPANDED_ROW_HEIGHT : ROW_HEIGHT;
     },
-    getItemKey: (index) => {
-      const row = flatRows[index];
-      return row.type === 'expanded' ? `${row.look.id}-expanded` : row.look.id;
-    },
+    getItemKey: (index) => flatRows[index].key,
     overscan: 5,
   });
-
-  // Force virtualizer to recalculate only when expansion actually changes
-  useEffect(() => {
-    if (prevExpandedRef.current !== expandedLookId) {
-      prevExpandedRef.current = expandedLookId;
-      // Defer measure to next tick to avoid render-cycle issues
-      const timeoutId = setTimeout(() => {
-        rowVirtualizer.measure();
-      }, 0);
-      return () => clearTimeout(timeoutId);
-    }
-  }, [expandedLookId, rowVirtualizer]);
 
   return (
     <div className="space-y-2">
