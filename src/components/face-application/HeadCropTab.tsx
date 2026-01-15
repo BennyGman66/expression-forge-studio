@@ -550,25 +550,29 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     };
   };
 
-  // The live preview shows: top half = white, bottom half = the selection
-  // This matches the actual output from the edge function
+  // The live preview shows the cropped selection centered with aspect ratio preserved
+  // This matches the backend's "fit + center on white canvas" behavior
   const getLivePreviewStyle = () => {
     if (!imageDimensions.width || !cropBox.width || !cropBox.height) return null;
     
     // Preview container is 160x160 (w-40 h-40)
-    // Bottom half is 80px tall - we show the square selection scaled to fit
-    const previewBottomHalfHeight = 80;
+    // We fit the crop selection into this space, preserving aspect ratio
+    const previewSize = 160;
     
-    // Since cropBox is always square (1:1), scale to fit the 80px height
-    // The selection will render as 80x80 in the bottom half
-    const scale = previewBottomHalfHeight / cropBox.height;
+    // Calculate scale to fit the crop box into the preview while preserving aspect ratio
+    const scale = Math.min(previewSize / cropBox.width, previewSize / cropBox.height);
     
-    // Position offset to center the selection horizontally in the 160px wide container
-    const scaledWidth = cropBox.width * scale; // Will be 80 for square
-    const horizontalOffset = (160 - scaledWidth) / 2;
+    // The rendered crop selection dimensions
+    const renderedCropWidth = cropBox.width * scale;
+    const renderedCropHeight = cropBox.height * scale;
     
+    // Center the crop selection in the preview
+    const horizontalOffset = (previewSize - renderedCropWidth) / 2;
+    const verticalOffset = (previewSize - renderedCropHeight) / 2;
+    
+    // Position the full image so that the crop area is visible and centered
     const left = -cropBox.x * scale + horizontalOffset;
-    const top = -cropBox.y * scale;
+    const top = -cropBox.y * scale + verticalOffset;
     
     return {
       width: imageDimensions.width * scale,
@@ -792,26 +796,23 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                         src={currentImage.head_cropped_url}
                         alt="Cropped result"
                         className="w-full h-full object-contain"
+                      draggable={false}
+                    />
+                  ) : imageReady && getLivePreviewStyle() ? (
+                    <div className="absolute inset-0 overflow-hidden">
+                      <img
+                        src={currentImage.source_url}
+                        alt="Live preview"
+                        className="absolute"
+                        style={{
+                          width: getLivePreviewStyle()!.width,
+                          height: getLivePreviewStyle()!.height,
+                          left: getLivePreviewStyle()!.left,
+                          top: getLivePreviewStyle()!.top,
+                        }}
                         draggable={false}
                       />
-                    ) : imageReady && getLivePreviewStyle() ? (
-                      <div 
-                        className="absolute left-0 right-0 overflow-hidden"
-                        style={{ top: '80px', height: '80px' }}
-                      >
-                        <img
-                          src={currentImage.source_url}
-                          alt="Live preview"
-                          className="absolute"
-                          style={{
-                            width: getLivePreviewStyle()!.width,
-                            height: getLivePreviewStyle()!.height,
-                            left: getLivePreviewStyle()!.left,
-                            top: getLivePreviewStyle()!.top,
-                          }}
-                          draggable={false}
-                        />
-                      </div>
+                    </div>
                     ) : (
                       <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
                         Loading...
