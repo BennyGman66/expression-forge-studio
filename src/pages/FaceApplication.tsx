@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LooksUploadTab } from "@/components/face-application/LooksUploadTab";
 import { HeadCropTab } from "@/components/face-application/HeadCropTab";
 import { FaceMatchTab } from "@/components/face-application/FaceMatchTab";
-import { GenerateTab } from "@/components/face-application/GenerateTab";
+import { GenerateTabEnhanced } from "@/components/face-application/generate";
 import { ReviewTab } from "@/components/face-application/ReviewTab";
 import { AIApplyTab } from "@/components/face-application/AIApplyTab";
 import { SendToJobBoardTab } from "@/components/face-application/SendToJobBoardTab";
@@ -226,7 +226,7 @@ function FaceApplicationWorkspace({
           </TabsContent>
 
           <TabsContent value="generate" className="mt-0">
-            <GenerateTab
+            <GenerateTabEnhanced
               projectId={projectId}
               lookId={selectedLookId}
               talentId={selectedTalentId}
