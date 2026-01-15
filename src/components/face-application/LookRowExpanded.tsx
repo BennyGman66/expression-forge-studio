@@ -34,7 +34,7 @@ export function LookRowExpanded({
   };
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-4 overflow-hidden">
       {/* Name editing */}
       <div className="flex items-center gap-2">
         <Label className="text-xs text-muted-foreground w-20">Look Name:</Label>
