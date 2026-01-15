@@ -172,50 +172,17 @@ serve(async (req) => {
     // Determine which views to process
     const viewsToProcess = view ? [view] : ['full_front', 'cropped_front', 'back', 'detail'];
 
-    // Get source images for pairing (body images)
+    // Get source images with matched_face_url (from Face Match stage)
     const { data: sourceImages } = await supabase
       .from('look_source_images')
-      .select('id, look_id, view, source_url, head_cropped_url')
+      .select('id, look_id, view, source_url, head_cropped_url, matched_face_url')
       .eq('look_id', lookId);
 
     console.log(`[AI Apply] Found ${sourceImages?.length || 0} source images for look`);
-
-    // Get selected head renders from face_application_outputs (Stage 2)
-    const { data: faceAppJobs } = await supabase
-      .from('face_application_jobs')
-      .select('id')
-      .eq('project_id', projectId)
-      .eq('look_id', lookId);
-
-    const faceAppJobIds = faceAppJobs?.map(j => j.id) || [];
     
-    const { data: headRenders } = await supabase
-      .from('face_application_outputs')
-      .select('id, job_id, view, stored_url')
-      .in('job_id', faceAppJobIds)
-      .eq('is_selected', true);
-
-    console.log(`[AI Apply] Found ${headRenders?.length || 0} selected head renders from Stage 2`);
-
-    // Get face foundation from face_pairing_outputs (clean face for identity reference)
-    let faceFoundationUrl: string | null = null;
-    if (digitalTalentId) {
-      const { data: foundations } = await supabase
-        .from('face_pairing_outputs')
-        .select(`
-          id,
-          stored_url,
-          pairing:face_pairings!inner(digital_talent_id)
-        `)
-        .eq('is_face_foundation', true)
-        .eq('status', 'completed')
-        .not('stored_url', 'is', null);
-
-      const talentFoundations = foundations?.filter(
-        (f: any) => f.pairing?.digital_talent_id === digitalTalentId
-      );
-      faceFoundationUrl = talentFoundations?.[0]?.stored_url || null;
-      console.log(`[AI Apply] Face foundation for talent ${digitalTalentId}: ${faceFoundationUrl ? 'FOUND' : 'NOT FOUND'}`);
+    // Log what we have for debugging
+    for (const img of sourceImages || []) {
+      console.log(`[AI Apply] Source image ${img.view}: body=${img.source_url ? 'YES' : 'NO'}, matched_face=${img.matched_face_url ? 'YES' : 'NO'}`);
     }
 
     // View name mapping: generation views -> database views
@@ -248,38 +215,24 @@ serve(async (req) => {
         continue;
       }
 
-      // Use head_cropped_url if available, otherwise source_url
-      const bodyImageUrl = bodyImage.head_cropped_url || bodyImage.source_url;
-      console.log(`[AI Apply] Body image for ${currentView}: ${bodyImageUrl.substring(0, 60)}...`);
+      // CORRECT INPUTS:
+      // - bodyImageUrl: Full body outfit from source_url
+      // - modelPortraitUrl: Model face from matched_face_url (set in Face Match stage)
+      const bodyImageUrl = bodyImage.source_url;
+      const modelPortraitUrl = bodyImage.matched_face_url;
 
-      // Get head render for this view - prefer exact match, fallback to similar views
-      const frontViews = ['full_front', 'front', 'cropped_front', 'detail'];
-      let headRender = headRenders?.find(h => h.view === currentView);
-      let angleMatch: 'exact' | 'reused' | 'risk' = 'exact';
-
-      if (!headRender) {
-        if (frontViews.includes(currentView)) {
-          headRender = headRenders?.find(h => frontViews.includes(h.view));
-          angleMatch = 'reused';
-        } else if (currentView === 'back') {
-          headRender = headRenders?.find(h => h.view === 'back' || h.view === 'side');
-          if (!headRender) {
-            headRender = headRenders?.find(h => frontViews.includes(h.view));
-            angleMatch = 'risk';
-          }
-        }
-      }
-
-      // Determine which head image to use: prefer face foundation, fallback to head render
-      const headImageUrl = faceFoundationUrl || headRender?.stored_url;
-
-      if (!headImageUrl) {
-        console.log(`[AI Apply] SKIP: No head image (foundation or render) for ${currentView}`);
+      if (!bodyImageUrl) {
+        console.log(`[AI Apply] SKIP: No body source_url for ${currentView}`);
         continue;
       }
 
-      console.log(`[AI Apply] Head image for ${currentView}: ${headImageUrl.substring(0, 60)}... (${faceFoundationUrl ? 'foundation' : 'render'})`);
+      if (!modelPortraitUrl) {
+        console.log(`[AI Apply] SKIP: No matched_face_url for ${currentView} - Face Match stage not completed`);
+        continue;
+      }
 
+      console.log(`[AI Apply] Body image (source_url) for ${currentView}: ${bodyImageUrl.substring(0, 80)}...`);
+      console.log(`[AI Apply] Model portrait (matched_face_url) for ${currentView}: ${modelPortraitUrl.substring(0, 80)}...`);
       // Determine how many attempts to create
       let attemptsToCreate = attemptsPerView;
 
@@ -321,12 +274,12 @@ serve(async (req) => {
           look_id: lookId,
           view: currentView,
           attempt_index: attemptIndex,
-          head_image_id: headRender?.id || null,
-          head_image_url: headImageUrl,
+          head_image_id: null,
+          head_image_url: modelPortraitUrl,  // Model portrait from Face Match
           body_image_id: bodyImage.id,
-          body_image_url: bodyImageUrl,
+          body_image_url: bodyImageUrl,      // Full body from source_url
           status: 'generating',
-          prompt_version: 'v2-face-swap',
+          prompt_version: 'v3-matched-face',
         });
       }
 
