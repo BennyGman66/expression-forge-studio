@@ -268,7 +268,7 @@ export function LooksTable({
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
                   className={cn(
-                    "flex items-center border-b cursor-pointer transition-colors hover:bg-muted/50",
+                    "flex items-center flex-nowrap overflow-hidden border-b cursor-pointer transition-colors hover:bg-muted/50",
                     isExpanded && "bg-muted/30",
                     hasSelection && selectedIds.has(look.id) && "bg-primary/5"
                   )}

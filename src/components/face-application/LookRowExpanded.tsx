@@ -71,7 +71,7 @@ export function LookRowExpanded({
       {/* All images with view selector */}
       <div className="space-y-3">
         <Label className="text-xs text-muted-foreground">All Images ({look.sourceImages.length})</Label>
-        <div className="grid grid-cols-6 gap-3">
+        <div className="grid grid-cols-6 gap-3 min-w-0">
           {look.sourceImages.map((image) => (
             <div key={image.id} className="space-y-1.5">
               <div className="relative aspect-[3/4] rounded-lg overflow-hidden border group">
