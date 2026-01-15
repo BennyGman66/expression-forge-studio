@@ -136,60 +136,39 @@ export function runPreflightCheck(
 ): { files: PreflightFile[]; summary: PreflightSummary } {
   const files: PreflightFile[] = [];
   
-  // Build a map of existing lookCode -> look data
-  const lookCodeMap = new Map<string, ExistingLookData>();
-  const lookNameMap = new Map<string, ExistingLookData>();
-  
+  // Build a set of existing lookCodes (for quick duplicate check)
+  const existingLookCodes = new Set<string>();
   for (const look of existingLooks) {
     if (look.look_code) {
-      lookCodeMap.set(look.look_code.toUpperCase(), look);
+      existingLookCodes.add(look.look_code.toUpperCase());
     }
-    lookNameMap.set(look.name.toUpperCase(), look);
+    // Also check by name as fallback
+    existingLookCodes.add(look.name.toUpperCase());
   }
   
-  // Track which lookCodes we'll create in this import
+  // Track new look codes we'll create
   const newLookCodes = new Set<string>();
   
   for (const parsed of parsedFiles) {
     const lookKey = parsed.lookKey?.toUpperCase() || null;
-    const view = parsed.inferredView;
     
-    // Check if look already exists (by look_code or name)
-    const existingByCode = lookKey ? lookCodeMap.get(lookKey) : null;
-    const existingByName = lookKey ? lookNameMap.get(lookKey) : null;
-    const existingLook = existingByCode || existingByName;
-    
-    if (existingLook) {
-      // Look exists - check if this view is already populated
-      const viewNormalized = view === 'unassigned' ? 'front' : view;
-      const hasView = existingLook.views.includes(viewNormalized);
-      
-      if (hasView) {
-        files.push({
-          ...parsed,
-          action: 'skip',
-          skipReason: `${viewNormalized} view already exists for ${existingLook.name}`,
-          existingLookId: existingLook.id,
-        });
-      } else {
-        files.push({
-          ...parsed,
-          action: 'add',
-          existingLookId: existingLook.id,
-        });
-      }
-    } else if (view === 'unassigned') {
-      // New look but view is unassigned - needs review
+    if (!lookKey) {
+      // No look code extracted - needs manual review
       files.push({
         ...parsed,
         action: 'needs_review',
-        skipReason: 'View could not be determined from filename',
+        skipReason: 'Could not extract product code from filename',
+      });
+    } else if (existingLookCodes.has(lookKey)) {
+      // Look code already exists in project - SKIP
+      files.push({
+        ...parsed,
+        action: 'skip',
+        skipReason: `Product ${lookKey} already exists in this project`,
       });
     } else {
-      // New look - will be created
-      if (lookKey) {
-        newLookCodes.add(lookKey);
-      }
+      // New look code - ADD (regardless of view assignment)
+      newLookCodes.add(lookKey);
       files.push({
         ...parsed,
         action: 'add',
@@ -203,7 +182,7 @@ export function runPreflightCheck(
     willSkip: files.filter(f => f.action === 'skip').length,
     needsReview: files.filter(f => f.action === 'needs_review').length,
     newLooks: newLookCodes.size,
-    existingLooks: new Set(files.filter(f => f.existingLookId).map(f => f.existingLookId)).size,
+    existingLooks: 0,
   };
   
   return { files, summary };
