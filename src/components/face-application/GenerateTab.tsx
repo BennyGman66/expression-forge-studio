@@ -41,6 +41,9 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
   const [talentInfo, setTalentInfo] = useState<{ name: string; front_face_url: string | null } | null>(null);
   const [talentIds, setTalentIds] = useState<string[]>([]);
   const [currentBatchJobIds, setCurrentBatchJobIds] = useState<string[]>([]);
+  const [generationStartTime, setGenerationStartTime] = useState<Date | null>(null);
+  const [elapsedDisplay, setElapsedDisplay] = useState("");
+  const [lastActivitySeconds, setLastActivitySeconds] = useState<number | null>(null);
   const { toast } = useToast();
 
   // Fetch ALL looks for this PROJECT with their source images
@@ -191,10 +194,60 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
     return () => clearInterval(interval);
   }, [jobs, projectId, toast]);
 
+  // Elapsed time counter effect
+  useEffect(() => {
+    if (!generationStartTime || !isGenerating) {
+      setElapsedDisplay("");
+      return;
+    }
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - generationStartTime.getTime()) / 1000);
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      setElapsedDisplay(`${mins}m ${secs.toString().padStart(2, '0')}s`);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [generationStartTime, isGenerating]);
+
+  // Last activity tracker effect
+  useEffect(() => {
+    if (!isGenerating || currentBatchJobIds.length === 0) {
+      setLastActivitySeconds(null);
+      return;
+    }
+    const interval = setInterval(() => {
+      const currentBatchJobs = jobs.filter(j => currentBatchJobIds.includes(j.id));
+      if (currentBatchJobs.length === 0) return;
+      const latestUpdate = Math.max(...currentBatchJobs.map(j => new Date(j.updated_at).getTime()));
+      const seconds = Math.floor((Date.now() - latestUpdate) / 1000);
+      setLastActivitySeconds(seconds);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isGenerating, currentBatchJobIds, jobs]);
+
+  // Get current processing info
+  const getCurrentProcessingInfo = () => {
+    if (batchProgress === 0 || batchTotal === 0) return "Starting...";
+    const views = ['Front', 'Cropped Front', 'Back', 'Detail'];
+    const viewIndex = Math.floor(batchProgress / attemptsPerView) % views.length;
+    const attemptIndex = (batchProgress % attemptsPerView) + 1;
+    const viewName = views[viewIndex] || `View ${viewIndex + 1}`;
+    return `${viewName} (attempt ${attemptIndex} of ${attemptsPerView})`;
+  };
+
+  // Get activity status color
+  const getActivityStatusColor = () => {
+    if (lastActivitySeconds === null) return "bg-muted";
+    if (lastActivitySeconds < 30) return "bg-green-500";
+    if (lastActivitySeconds < 60) return "bg-yellow-500";
+    return "bg-red-500";
+  };
+
   // Auto-describe and start generation for all looks
   const handleStartGeneration = async () => {
     if (looks.length === 0 || talentIds.length === 0) return;
     setIsGenerating(true);
+    setGenerationStartTime(new Date());
     setCurrentBatchJobIds([]); // Reset current batch
 
     try {
@@ -390,6 +443,24 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
                           <span className="font-medium">{batchProgress} / {batchTotal}</span>
                         </div>
                         <Progress value={overallProgress} className="h-2" />
+                      </div>
+                    </div>
+                    
+                    {/* Activity indicators */}
+                    <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
+                      <span className="text-foreground/80">
+                        Processing: {getCurrentProcessingInfo()}
+                      </span>
+                      <div className="flex items-center gap-3">
+                        {elapsedDisplay && (
+                          <span>Elapsed: {elapsedDisplay}</span>
+                        )}
+                        {lastActivitySeconds !== null && (
+                          <span className="flex items-center gap-1.5">
+                            Last activity: {lastActivitySeconds}s ago
+                            <span className={`w-2 h-2 rounded-full ${getActivityStatusColor()} animate-pulse`} />
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
