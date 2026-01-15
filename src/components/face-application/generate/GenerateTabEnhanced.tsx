@@ -15,6 +15,7 @@ import { SmartSelectionToolbar } from "./SmartSelectionToolbar";
 import { GenerationPlanPreview } from "./GenerationPlanPreview";
 import { GenerationProgressPanel } from "./GenerationProgressPanel";
 import { GeneratedImagesGallery } from "./GeneratedImagesGallery";
+import { LiveGenerationFeed } from "./LiveGenerationFeed";
 
 interface GenerateTabEnhancedProps {
   projectId: string;
@@ -674,14 +675,14 @@ export function GenerateTabEnhanced({
           setupProgress={setupProgress}
         />
 
-        {/* Generated images gallery */}
-        {generatedOutputs.length > 0 && (
-          <GeneratedImagesGallery
-            outputs={generatedOutputs}
-            isGenerating={isGenerating}
-            onRegenerateView={handleRegenerateView}
-          />
-        )}
+        {/* Live generation feed - shows images streaming in */}
+        <LiveGenerationFeed
+          projectId={projectId}
+          isGenerating={isGenerating}
+          onCleanupStalled={(stalledIds) => {
+            refreshTracking();
+          }}
+        />
 
         {/* Generate button */}
         <Button
