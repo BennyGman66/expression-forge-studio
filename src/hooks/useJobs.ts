@@ -333,7 +333,8 @@ export function useClaimJob() {
         .from("unified_jobs")
         .update({ 
           assigned_user_id: userId,
-          status: 'IN_PROGRESS'
+          status: 'IN_PROGRESS',
+          started_at: new Date().toISOString()
         })
         .eq("id", jobId)
         .eq("status", "OPEN") // Only claim if still OPEN
@@ -343,6 +344,15 @@ export function useClaimJob() {
 
       if (error) throw error;
       if (!data) throw new Error("Job is no longer available");
+      
+      // Log the claim event
+      await supabase.from("audit_events").insert({
+        action: "job_claimed",
+        job_id: jobId,
+        user_id: userId,
+        metadata: { timestamp: new Date().toISOString() }
+      });
+      
       return data;
     },
     onSuccess: (_, { jobId }) => {
@@ -353,6 +363,112 @@ export function useClaimJob() {
     },
     onError: (error) => {
       toast.error(`Failed to claim job: ${error.message}`);
+    },
+  });
+}
+
+// Hook for freelancer to abandon a job and return it to the pool
+export function useAbandonJob() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ jobId, userId }: { jobId: string; userId: string }) => {
+      // First get the current job to calculate time spent
+      const { data: currentJob } = await supabase
+        .from("unified_jobs")
+        .select("started_at, total_active_ms")
+        .eq("id", jobId)
+        .single();
+      
+      // Calculate time spent on this session
+      let additionalTimeMs = 0;
+      if (currentJob?.started_at) {
+        additionalTimeMs = Date.now() - new Date(currentJob.started_at).getTime();
+      }
+      const newTotalActiveMs = (currentJob?.total_active_ms || 0) + additionalTimeMs;
+
+      const { data, error } = await supabase
+        .from("unified_jobs")
+        .update({ 
+          assigned_user_id: null,
+          status: 'OPEN',
+          started_at: null,
+          total_active_ms: newTotalActiveMs
+        })
+        .eq("id", jobId)
+        .eq("assigned_user_id", userId) // Only abandon if assigned to this user
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (!data) throw new Error("Cannot abandon this job");
+      
+      // Log the abandonment event
+      await supabase.from("audit_events").insert({
+        action: "job_abandoned",
+        job_id: jobId,
+        user_id: userId,
+        metadata: { 
+          time_spent_ms: additionalTimeMs,
+          total_active_ms: newTotalActiveMs,
+          timestamp: new Date().toISOString()
+        }
+      });
+      
+      return data;
+    },
+    onSuccess: (_, { jobId }) => {
+      queryClient.invalidateQueries({ queryKey: ["unified-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["unified-job", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["freelancer-jobs"] });
+      toast.success("Job returned to pool. Another freelancer can now claim it.");
+    },
+    onError: (error) => {
+      toast.error(`Failed to return job: ${error.message}`);
+    },
+  });
+}
+
+// Hook for admin to force-reset a job to OPEN state
+export function useResetJob() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (jobId: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data, error } = await supabase
+        .from("unified_jobs")
+        .update({ 
+          assigned_user_id: null,
+          status: 'OPEN',
+          started_at: null
+        })
+        .eq("id", jobId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      // Log the admin reset event
+      await supabase.from("audit_events").insert({
+        action: "job_admin_reset",
+        job_id: jobId,
+        user_id: user.id,
+        metadata: { timestamp: new Date().toISOString() }
+      });
+      
+      return data;
+    },
+    onSuccess: (_, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ["unified-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["unified-job", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["freelancer-jobs"] });
+      toast.success("Job reset to Open status");
+    },
+    onError: (error) => {
+      toast.error(`Failed to reset job: ${error.message}`);
     },
   });
 }

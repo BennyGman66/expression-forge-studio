@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useJob, useJobInputs, useJobOutputs, useJobNotes, useUpdateJobStatus, useAddJobNote } from '@/hooks/useJobs';
+import { useJob, useJobInputs, useJobOutputs, useJobNotes, useUpdateJobStatus, useAddJobNote, useClaimJob, useAbandonJob } from '@/hooks/useJobs';
 import { useCreateSubmission, useLatestSubmission, useCreateResubmission } from '@/hooks/useReviewSystem';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, Download, Upload, Send, Clock, CheckCircle, Play, FileImage, ArrowRight, AlertTriangle, DownloadCloud, X, Eye } from 'lucide-react';
+import { ArrowLeft, Download, Upload, Send, Clock, CheckCircle, Play, FileImage, ArrowRight, AlertTriangle, DownloadCloud, X, Eye, RotateCcw, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { SubmissionReviewViewer } from '@/components/freelancer/SubmissionReviewViewer';
 import { FreelancerNeedsChangesView } from '@/components/freelancer/FreelancerNeedsChangesView';
@@ -63,6 +63,11 @@ export default function FreelancerJobDetail() {
   const addNote = useAddJobNote();
   const createSubmission = useCreateSubmission();
   const createResubmission = useCreateResubmission();
+  const claimJob = useClaimJob();
+  const abandonJob = useAbandonJob();
+  
+  const [isClaimingJob, setIsClaimingJob] = useState(false);
+  const [isAbandoningJob, setIsAbandoningJob] = useState(false);
   
   const [noteText, setNoteText] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -114,11 +119,33 @@ export default function FreelancerJobDetail() {
   const expectedOutputs = job?.type === 'FOUNDATION_FACE_REPLACE' ? 3 : 1;
   const uploadProgress = Math.round((outputs.length / expectedOutputs) * 100);
 
-  const handleStartJob = () => {
-    updateStatus.mutate(
-      { jobId: jobId!, status: 'IN_PROGRESS', assignedUserId: user?.id },
-      { onSuccess: () => toast.success('Job started!') }
-    );
+  const handleStartJob = async () => {
+    if (!user?.id) return;
+    
+    setIsClaimingJob(true);
+    try {
+      await claimJob.mutateAsync({ jobId: jobId!, userId: user.id });
+      toast.success('Job started! It\'s now locked to you.');
+    } catch (error: any) {
+      if (error.message?.includes('no longer available')) {
+        toast.error('This job was claimed by someone else');
+        navigate('/freelancer');
+      }
+    } finally {
+      setIsClaimingJob(false);
+    }
+  };
+
+  const handleAbandonJob = async () => {
+    if (!user?.id) return;
+    
+    setIsAbandoningJob(true);
+    try {
+      await abandonJob.mutateAsync({ jobId: jobId!, userId: user.id });
+      navigate('/freelancer');
+    } finally {
+      setIsAbandoningJob(false);
+    }
   };
 
   const handleSubmitJob = async () => {
@@ -441,11 +468,27 @@ export default function FreelancerJobDetail() {
     );
   }
 
-  const isReadOnly = job.status === 'SUBMITTED' || job.status === 'APPROVED' || job.status === 'CLOSED';
+  const isPreviewMode = job.status === 'OPEN' || job.status === 'ASSIGNED';
+  const isReadOnly = job.status === 'SUBMITTED' || job.status === 'APPROVED' || job.status === 'CLOSED' || isPreviewMode;
   const canUpload = job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES';
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Open Job Preview Banner */}
+      {isPreviewMode && (
+        <div className="bg-blue-500/20 border-b border-blue-500/30 px-6 py-3">
+          <div className="container mx-auto flex items-center gap-3">
+            <Eye className="h-5 w-5 text-blue-400" />
+            <div>
+              <p className="font-medium text-blue-200">Preview Mode</p>
+              <p className="text-sm text-blue-300/80">
+                Review job details and click "Start Working" when ready to claim this job.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Needs Changes Banner */}
       {job.status === 'NEEDS_CHANGES' && (
         <div className="bg-orange-500/20 border-b border-orange-500/30 px-6 py-3">
@@ -925,11 +968,33 @@ export default function FreelancerJobDetail() {
                 <CardTitle className="text-lg">Actions</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
+                {/* OPEN Job - Preview Mode */}
                 {(job.status === 'OPEN' || job.status === 'ASSIGNED') && (
-                  <Button onClick={handleStartJob} className="w-full" disabled={updateStatus.isPending}>
-                    <Play className="mr-2 h-4 w-4" /> Start Working
-                  </Button>
+                  <>
+                    <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-sm">
+                      <p className="text-blue-200 font-medium mb-1">Preview Mode</p>
+                      <p className="text-blue-300/80 text-xs">
+                        Review the job details before committing. Once you start, this job will be locked to you.
+                      </p>
+                    </div>
+                    <Button 
+                      onClick={handleStartJob} 
+                      className="w-full" 
+                      disabled={isClaimingJob}
+                    >
+                      {isClaimingJob ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Claiming...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="mr-2 h-4 w-4" /> Start Working
+                        </>
+                      )}
+                    </Button>
+                  </>
                 )}
+
                 {job.status === 'IN_PROGRESS' && (
                   <>
                     {/* Pre-submit checklist */}
@@ -951,6 +1016,29 @@ export default function FreelancerJobDetail() {
                     >
                       <CheckCircle className="mr-2 h-4 w-4" /> {createSubmission.isPending ? 'Submitting...' : 'Submit for Review'}
                     </Button>
+                    
+                    {/* Return to Pool button */}
+                    <div className="pt-2 border-t border-border">
+                      <Button 
+                        variant="outline" 
+                        onClick={handleAbandonJob} 
+                        className="w-full text-muted-foreground hover:text-orange-400 hover:border-orange-400/50"
+                        disabled={isAbandoningJob}
+                      >
+                        {isAbandoningJob ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Returning...
+                          </>
+                        ) : (
+                          <>
+                            <RotateCcw className="mr-2 h-4 w-4" /> Return to Pool
+                          </>
+                        )}
+                      </Button>
+                      <p className="text-xs text-muted-foreground mt-1 text-center">
+                        Job will become available to others
+                      </p>
+                    </div>
                   </>
                 )}
                 {job.status === 'SUBMITTED' && (
