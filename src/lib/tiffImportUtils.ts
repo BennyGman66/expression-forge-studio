@@ -18,6 +18,30 @@ export interface LookGroup {
   files: ParsedFile[];
 }
 
+// Types for deduplication / preflight
+export type FileAction = 'add' | 'skip' | 'needs_review';
+
+export interface PreflightFile extends ParsedFile {
+  action: FileAction;
+  skipReason?: string;
+  existingLookId?: string;
+}
+
+export interface PreflightSummary {
+  willAdd: number;
+  willSkip: number;
+  needsReview: number;
+  newLooks: number;
+  existingLooks: number;
+}
+
+export interface ExistingLookData {
+  id: string;
+  name: string;
+  look_code: string | null;
+  views: string[];
+}
+
 /**
  * Extract SKU-like look key from filename
  * Matches 8+ character alphanumeric codes like MW0MW43114GXR, XAOXA00059DW6
@@ -100,6 +124,89 @@ export function parseFile(file: File): ParsedFile {
     sequenceNumber: extractSequenceNumber(file.name),
     inferredView: inferViewType(file.name),
   };
+}
+
+/**
+ * Run preflight check for deduplication
+ * Determines which files should be added, skipped, or need manual review
+ */
+export function runPreflightCheck(
+  parsedFiles: ParsedFile[],
+  existingLooks: ExistingLookData[]
+): { files: PreflightFile[]; summary: PreflightSummary } {
+  const files: PreflightFile[] = [];
+  
+  // Build a map of existing lookCode -> look data
+  const lookCodeMap = new Map<string, ExistingLookData>();
+  const lookNameMap = new Map<string, ExistingLookData>();
+  
+  for (const look of existingLooks) {
+    if (look.look_code) {
+      lookCodeMap.set(look.look_code.toUpperCase(), look);
+    }
+    lookNameMap.set(look.name.toUpperCase(), look);
+  }
+  
+  // Track which lookCodes we'll create in this import
+  const newLookCodes = new Set<string>();
+  
+  for (const parsed of parsedFiles) {
+    const lookKey = parsed.lookKey?.toUpperCase() || null;
+    const view = parsed.inferredView;
+    
+    // Check if look already exists (by look_code or name)
+    const existingByCode = lookKey ? lookCodeMap.get(lookKey) : null;
+    const existingByName = lookKey ? lookNameMap.get(lookKey) : null;
+    const existingLook = existingByCode || existingByName;
+    
+    if (existingLook) {
+      // Look exists - check if this view is already populated
+      const viewNormalized = view === 'unassigned' ? 'front' : view;
+      const hasView = existingLook.views.includes(viewNormalized);
+      
+      if (hasView) {
+        files.push({
+          ...parsed,
+          action: 'skip',
+          skipReason: `${viewNormalized} view already exists for ${existingLook.name}`,
+          existingLookId: existingLook.id,
+        });
+      } else {
+        files.push({
+          ...parsed,
+          action: 'add',
+          existingLookId: existingLook.id,
+        });
+      }
+    } else if (view === 'unassigned') {
+      // New look but view is unassigned - needs review
+      files.push({
+        ...parsed,
+        action: 'needs_review',
+        skipReason: 'View could not be determined from filename',
+      });
+    } else {
+      // New look - will be created
+      if (lookKey) {
+        newLookCodes.add(lookKey);
+      }
+      files.push({
+        ...parsed,
+        action: 'add',
+      });
+    }
+  }
+  
+  // Calculate summary
+  const summary: PreflightSummary = {
+    willAdd: files.filter(f => f.action === 'add').length,
+    willSkip: files.filter(f => f.action === 'skip').length,
+    needsReview: files.filter(f => f.action === 'needs_review').length,
+    newLooks: newLookCodes.size,
+    existingLooks: new Set(files.filter(f => f.existingLookId).map(f => f.existingLookId)).size,
+  };
+  
+  return { files, summary };
 }
 
 /**
@@ -200,4 +307,92 @@ export function updateFileView(
       ),
     };
   });
+}
+
+/**
+ * Recursively get all files from a FileSystemDirectoryEntry
+ */
+export async function getAllFilesFromDirectory(
+  entry: FileSystemDirectoryEntry
+): Promise<File[]> {
+  const files: File[] = [];
+  
+  const readEntries = (dirEntry: FileSystemDirectoryEntry): Promise<FileSystemEntry[]> => {
+    return new Promise((resolve, reject) => {
+      const reader = dirEntry.createReader();
+      const allEntries: FileSystemEntry[] = [];
+      
+      const readBatch = () => {
+        reader.readEntries((entries) => {
+          if (entries.length === 0) {
+            resolve(allEntries);
+          } else {
+            allEntries.push(...entries);
+            readBatch();
+          }
+        }, reject);
+      };
+      
+      readBatch();
+    });
+  };
+  
+  const processEntry = async (entry: FileSystemEntry): Promise<void> => {
+    if (entry.isFile) {
+      const fileEntry = entry as FileSystemFileEntry;
+      const file = await new Promise<File>((resolve, reject) => {
+        fileEntry.file(resolve, reject);
+      });
+      
+      if (isSupportedImage(file)) {
+        files.push(file);
+      }
+    } else if (entry.isDirectory) {
+      const dirEntry = entry as FileSystemDirectoryEntry;
+      const entries = await readEntries(dirEntry);
+      await Promise.all(entries.map(processEntry));
+    }
+  };
+  
+  const entries = await readEntries(entry);
+  await Promise.all(entries.map(processEntry));
+  
+  return files;
+}
+
+/**
+ * Get files from DataTransfer (handles both files and folders)
+ */
+export async function getFilesFromDataTransfer(
+  dataTransfer: DataTransfer
+): Promise<File[]> {
+  const files: File[] = [];
+  const items = Array.from(dataTransfer.items);
+  
+  for (const item of items) {
+    if (item.kind !== 'file') continue;
+    
+    // Try to get entry for folder support
+    const entry = item.webkitGetAsEntry?.();
+    
+    if (entry) {
+      if (entry.isDirectory) {
+        const dirFiles = await getAllFilesFromDirectory(entry as FileSystemDirectoryEntry);
+        files.push(...dirFiles);
+      } else if (entry.isFile) {
+        const file = item.getAsFile();
+        if (file && isSupportedImage(file)) {
+          files.push(file);
+        }
+      }
+    } else {
+      // Fallback for browsers without webkitGetAsEntry
+      const file = item.getAsFile();
+      if (file && isSupportedImage(file)) {
+        files.push(file);
+      }
+    }
+  }
+  
+  return files;
 }

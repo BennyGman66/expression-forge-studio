@@ -30,6 +30,9 @@ import {
   Image as ImageIcon,
   RefreshCw,
   Play,
+  SkipForward,
+  FileCheck,
+  FileWarning,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -37,11 +40,15 @@ import { toast } from "sonner";
 import {
   ParsedFile,
   LookGroup,
+  PreflightFile,
+  PreflightSummary,
+  ExistingLookData,
   parseFile,
   groupFilesByLook,
   renameLookGroup,
   updateFileView,
   isTiffFile,
+  runPreflightCheck,
 } from "@/lib/tiffImportUtils";
 import {
   Select,
@@ -75,18 +82,18 @@ interface TiffImportDialogProps {
   onImageReady?: (imageData: ProgressiveImageData) => Promise<void>;
 }
 
-type ConversionStatus = "queued" | "uploading" | "converting" | "done" | "failed";
+type ConversionStatus = "queued" | "uploading" | "converting" | "done" | "failed" | "skipped";
 
 interface FileConversionState {
-  file: ParsedFile;
+  file: PreflightFile;
   status: ConversionStatus;
   pngUrl: string | null;
   error: string | null;
   tiffStoragePath: string | null;
-  uploadProgress: number; // 0-100 percentage
+  uploadProgress: number;
 }
 
-type Step = "converting" | "grouping" | "committing";
+type Step = "preflight" | "converting" | "grouping" | "committing";
 
 export function TiffImportDialog({
   open,
@@ -96,7 +103,7 @@ export function TiffImportDialog({
   onComplete,
   onImageReady,
 }: TiffImportDialogProps) {
-  const [step, setStep] = useState<Step>("converting");
+  const [step, setStep] = useState<Step>("preflight");
   const [conversionStates, setConversionStates] = useState<FileConversionState[]>([]);
   const [lookGroups, setLookGroups] = useState<LookGroup[]>([]);
   const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
@@ -104,6 +111,8 @@ export function TiffImportDialog({
   const [editingName, setEditingName] = useState("");
   const [isCommitting, setIsCommitting] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
+  const [preflightSummary, setPreflightSummary] = useState<PreflightSummary | null>(null);
+  const [isLoadingPreflight, setIsLoadingPreflight] = useState(false);
   
   // Use ref to track if conversion has started to prevent double-triggering
   const conversionStartedRef = useRef(false);
@@ -112,7 +121,7 @@ export function TiffImportDialog({
 
   // Reset all dialog state
   const resetState = useCallback(() => {
-    setStep("converting");
+    setStep("preflight");
     setConversionStates([]);
     setLookGroups([]);
     setSelectedGroupKey(null);
@@ -120,6 +129,8 @@ export function TiffImportDialog({
     setEditingName("");
     setIsCommitting(false);
     setIsConverting(false);
+    setPreflightSummary(null);
+    setIsLoadingPreflight(false);
     conversionStartedRef.current = false;
     prevFilesRef.current = [];
   }, []);
@@ -131,40 +142,88 @@ export function TiffImportDialog({
     }
   }, [open, resetState]);
 
-  // Initialize conversion states when files change
+  // Fetch existing looks and run preflight when files change
   useEffect(() => {
     if (open && files.length > 0) {
-      // Check if files actually changed
       const filesChanged = 
         files.length !== prevFilesRef.current.length ||
         files.some((f, i) => f !== prevFilesRef.current[i]);
       
       if (filesChanged) {
-        console.log("[TiffImport] Files changed, initializing", files.length, "files");
+        console.log("[TiffImport] Files changed, running preflight for", files.length, "files");
         prevFilesRef.current = files;
-        
-        const parsed = files.map(parseFile);
-        setConversionStates(
-          parsed.map((file) => ({
-            file,
-            status: "queued",
-            pngUrl: null,
-            error: null,
-            tiffStoragePath: null,
-            uploadProgress: 0,
-          }))
-        );
-        setStep("converting");
-        setLookGroups([]);
-        setSelectedGroupKey(null);
-        // Reset the conversion started flag when dialog opens with new files
-        conversionStartedRef.current = false;
-        setIsConverting(false);
+        runPreflightAnalysis();
       }
     }
   }, [open, files]);
 
-  // Start conversion when dialog opens - use ref to prevent re-triggering
+  const runPreflightAnalysis = async () => {
+    setIsLoadingPreflight(true);
+    setStep("preflight");
+    
+    try {
+      // Parse all files
+      const parsed = files.map(parseFile);
+      
+      // Get unique lookKeys to query
+      const lookKeys = [...new Set(parsed.map(p => p.lookKey).filter(Boolean))] as string[];
+      
+      // Fetch existing looks by look_code or name
+      const { data: existingLooks } = await supabase
+        .from("talent_looks")
+        .select("id, name, look_code")
+        .eq("project_id", projectId);
+      
+      // Fetch existing views for those looks
+      const lookIds = existingLooks?.map(l => l.id) || [];
+      const { data: existingImages } = lookIds.length > 0
+        ? await supabase
+            .from("look_source_images")
+            .select("look_id, view")
+            .in("look_id", lookIds)
+        : { data: [] };
+      
+      // Build ExistingLookData array
+      const existingLookData: ExistingLookData[] = (existingLooks || []).map(look => ({
+        id: look.id,
+        name: look.name,
+        look_code: look.look_code,
+        views: (existingImages || [])
+          .filter(img => img.look_id === look.id)
+          .map(img => img.view),
+      }));
+      
+      // Run preflight check
+      const { files: preflightFiles, summary } = runPreflightCheck(parsed, existingLookData);
+      
+      setPreflightSummary(summary);
+      setConversionStates(
+        preflightFiles.map((file) => ({
+          file,
+          status: file.action === 'skip' ? 'skipped' : 'queued',
+          pngUrl: null,
+          error: file.skipReason || null,
+          tiffStoragePath: null,
+          uploadProgress: 0,
+        }))
+      );
+      
+      console.log("[TiffImport] Preflight complete:", summary);
+    } catch (error) {
+      console.error("[TiffImport] Preflight error:", error);
+      toast.error("Failed to analyze files");
+    } finally {
+      setIsLoadingPreflight(false);
+    }
+  };
+
+  const handleStartImport = () => {
+    setStep("converting");
+    conversionStartedRef.current = false;
+    setIsConverting(false);
+  };
+
+  // Start conversion when entering conversion step
   useEffect(() => {
     if (
       open &&
@@ -175,7 +234,7 @@ export function TiffImportDialog({
     ) {
       const hasQueued = conversionStates.some((s) => s.status === "queued");
       if (hasQueued) {
-        console.log("[TiffImport] Starting conversion for", conversionStates.length, "files");
+        console.log("[TiffImport] Starting conversion for", conversionStates.filter(s => s.status === "queued").length, "files");
         conversionStartedRef.current = true;
         startConversion();
       }
@@ -198,15 +257,12 @@ export function TiffImportDialog({
       xhr.setRequestHeader("Content-Type", contentType);
       xhr.setRequestHeader("x-upsert", "true");
       
-      // Add timeout (5 minutes for large TIFF files)
       xhr.timeout = 300000;
       
-      // Stall detection
       let lastProgress = 0;
       let lastProgressTime = Date.now();
       let progressCheckInterval: number | undefined;
       
-      // Check for stalled progress every 10 seconds
       progressCheckInterval = window.setInterval(() => {
         const timeSinceProgress = Date.now() - lastProgressTime;
         if (timeSinceProgress > 30000 && lastProgress < 100) {
@@ -220,7 +276,6 @@ export function TiffImportDialog({
         if (event.lengthComputable) {
           const percent = Math.round((event.loaded / event.total) * 100);
           
-          // Update stall detection
           if (percent > lastProgress) {
             lastProgress = percent;
             lastProgressTime = Date.now();
@@ -257,7 +312,6 @@ export function TiffImportDialog({
     });
   };
 
-  // Upload TIFF to storage first (client-side, no memory issues)
   const uploadTiffToStorage = async (file: File, index: number): Promise<string> => {
     const timestamp = Date.now();
     const randomId = Math.random().toString(36).substring(2, 8);
@@ -267,13 +321,10 @@ export function TiffImportDialog({
     return path;
   };
 
-  // Convert single file (handles both TIFF and non-TIFF)
-  // Takes states as parameter to avoid stale closure issues
   const convertSingleFile = async (index: number, states: FileConversionState[]) => {
     const item = states[index];
     
-    if (!item) {
-      console.error(`[TiffImport] No item at index ${index}, states length: ${states.length}`);
+    if (!item || item.status === 'skipped') {
       return;
     }
     
@@ -281,7 +332,6 @@ export function TiffImportDialog({
       let pngUrl: string;
 
       if (isTiffFile(item.file.file)) {
-        // Step 1: Upload TIFF to storage first
         setConversionStates((prev) =>
           prev.map((s, i) => (i === index ? { ...s, status: "uploading", uploadProgress: 0 } : s))
         );
@@ -292,7 +342,6 @@ export function TiffImportDialog({
           prev.map((s, i) => (i === index ? { ...s, tiffStoragePath, status: "converting" } : s))
         );
 
-        // Step 2: Call edge function with storage path (no base64!)
         const { data, error } = await supabase.functions.invoke("convert-tiff", {
           body: {
             tiffStoragePath,
@@ -306,7 +355,6 @@ export function TiffImportDialog({
         
         pngUrl = data.pngUrl;
       } else {
-        // Upload non-TIFF files directly
         setConversionStates((prev) =>
           prev.map((s, i) => (i === index ? { ...s, status: "uploading", uploadProgress: 0 } : s))
         );
@@ -319,7 +367,6 @@ export function TiffImportDialog({
         )
       );
 
-      // Progressive save: call onImageReady immediately after successful conversion
       if (onImageReady) {
         try {
           await onImageReady({
@@ -330,7 +377,6 @@ export function TiffImportDialog({
           });
         } catch (saveError) {
           console.warn(`[TiffImport] Failed to save ${item.file.originalFilename} to DB:`, saveError);
-          // Don't fail the conversion - the image is still uploaded and can be recovered
         }
       }
     } catch (error) {
@@ -356,7 +402,6 @@ export function TiffImportDialog({
     console.log("[TiffImport] startConversion called");
     
     try {
-      // Get fresh state snapshot at call time
       const currentStates = await new Promise<FileConversionState[]>((resolve) => {
         setConversionStates((prev) => {
           resolve(prev);
@@ -383,7 +428,6 @@ export function TiffImportDialog({
         if (currentQueueIndex >= queuedIndices.length) return;
         
         const index = queuedIndices[currentQueueIndex++];
-        // Pass currentStates to avoid stale closure
         await convertSingleFile(index, currentStates);
         await processNext();
       };
@@ -415,11 +459,13 @@ export function TiffImportDialog({
 
   const completedCount = conversionStates.filter((s) => s.status === "done").length;
   const failedCount = conversionStates.filter((s) => s.status === "failed").length;
+  const skippedCount = conversionStates.filter((s) => s.status === "skipped").length;
   const totalCount = conversionStates.length;
+  const toProcessCount = totalCount - skippedCount;
   const processingCount = conversionStates.filter(
     (s) => s.status === "uploading" || s.status === "converting"
   ).length;
-  const allDone = completedCount + failedCount === totalCount && processingCount === 0;
+  const allDone = completedCount + failedCount === toProcessCount && processingCount === 0;
 
   const handleProceedToGrouping = () => {
     const successfulFiles = conversionStates
@@ -446,9 +492,7 @@ export function TiffImportDialog({
     setStep("grouping");
   };
 
-  // Retry a single failed file
   const handleRetrySingle = async (index: number) => {
-    // Update state and get fresh reference
     const freshStates = await new Promise<FileConversionState[]>((resolve) => {
       setConversionStates((prev) => {
         const updated = prev.map((s, i) =>
@@ -467,7 +511,6 @@ export function TiffImportDialog({
       .map((s, i) => (s.status === "failed" ? i : -1))
       .filter((i) => i >= 0);
 
-    // Reset all failed to queued and get fresh state
     const freshStates = await new Promise<FileConversionState[]>((resolve) => {
       setConversionStates((prev) => {
         const updated = prev.map((s, i) =>
@@ -478,7 +521,6 @@ export function TiffImportDialog({
       });
     });
 
-    // Process in parallel with concurrency limit
     const CONCURRENCY = 6;
     let currentIndex = 0;
 
@@ -564,10 +606,11 @@ export function TiffImportDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5" />
-            TIFF Bulk Import
+            Folder Import
           </DialogTitle>
           <DialogDescription>
-            {step === "converting" && "Converting TIFF files to PNG..."}
+            {step === "preflight" && "Analyzing files for duplicates..."}
+            {step === "converting" && "Converting files to PNG..."}
             {step === "grouping" && "Review and adjust look groupings before importing"}
             {step === "committing" && "Creating looks..."}
           </DialogDescription>
@@ -575,18 +618,138 @@ export function TiffImportDialog({
 
         {/* Step indicator */}
         <div className="flex items-center gap-2 py-2 border-b">
+          <Badge variant={step === "preflight" ? "default" : "secondary"}>
+            1. Preflight
+          </Badge>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
           <Badge variant={step === "converting" ? "default" : "secondary"}>
-            1. Convert
+            2. Convert
           </Badge>
           <ChevronRight className="h-4 w-4 text-muted-foreground" />
           <Badge variant={step === "grouping" ? "default" : "secondary"}>
-            2. Group
+            3. Group
           </Badge>
           <ChevronRight className="h-4 w-4 text-muted-foreground" />
           <Badge variant={step === "committing" ? "default" : "secondary"}>
-            3. Create
+            4. Create
           </Badge>
         </div>
+
+        {/* Step 0: Preflight */}
+        {step === "preflight" && (
+          <div className="flex-1 overflow-hidden flex flex-col gap-4 min-h-0">
+            {isLoadingPreflight ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-4">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Analyzing {files.length} files...</p>
+              </div>
+            ) : preflightSummary ? (
+              <>
+                {/* Summary panel */}
+                <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+                  <h3 className="font-medium text-sm">Import Summary</h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="flex items-center gap-2">
+                      <FileCheck className="h-5 w-5 text-green-500" />
+                      <div>
+                        <p className="text-2xl font-bold">{preflightSummary.willAdd}</p>
+                        <p className="text-xs text-muted-foreground">Will add</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <SkipForward className="h-5 w-5 text-amber-500" />
+                      <div>
+                        <p className="text-2xl font-bold">{preflightSummary.willSkip}</p>
+                        <p className="text-xs text-muted-foreground">Will skip (duplicates)</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <FileWarning className="h-5 w-5 text-orange-500" />
+                      <div>
+                        <p className="text-2xl font-bold">{preflightSummary.needsReview}</p>
+                        <p className="text-xs text-muted-foreground">Needs review</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground pt-2 border-t">
+                    {preflightSummary.newLooks} new looks · {preflightSummary.existingLooks} existing looks will be updated
+                  </div>
+                </div>
+
+                {/* File list */}
+                <ScrollArea className="border rounded-lg flex-1">
+                  <div className="p-2 space-y-1">
+                    {conversionStates.map((state, index) => (
+                      <div
+                        key={index}
+                        className={cn(
+                          "flex items-center gap-2 py-1.5 px-2 rounded",
+                          state.file.action === 'skip' && "opacity-50"
+                        )}
+                      >
+                        {state.file.action === 'add' && (
+                          <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                        )}
+                        {state.file.action === 'skip' && (
+                          <SkipForward className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                        )}
+                        {state.file.action === 'needs_review' && (
+                          <AlertCircle className="h-4 w-4 text-orange-500 flex-shrink-0" />
+                        )}
+                        
+                        <span className="text-sm truncate flex-1">
+                          {state.file.originalFilename}
+                        </span>
+                        
+                        {state.file.lookKey && (
+                          <Badge variant="outline" className="text-xs">
+                            {state.file.lookKey}
+                          </Badge>
+                        )}
+                        
+                        <Badge 
+                          variant="secondary" 
+                          className={cn(
+                            "text-xs",
+                            state.file.inferredView === 'unassigned' && "bg-orange-100 text-orange-700"
+                          )}
+                        >
+                          {state.file.inferredView}
+                        </Badge>
+                        
+                        {state.file.skipReason && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                                {state.file.skipReason}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="text-xs">{state.file.skipReason}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </>
+            ) : null}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleStartImport}
+                disabled={isLoadingPreflight || !preflightSummary || preflightSummary.willAdd === 0}
+              >
+                Start Import ({preflightSummary?.willAdd || 0} files)
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
 
         {/* Step 1: Conversion */}
         {step === "converting" && (
@@ -595,21 +758,26 @@ export function TiffImportDialog({
               <div className="text-sm text-muted-foreground">
                 {processingCount > 0 || completedCount > 0 ? (
                   <>
-                    Converting {completedCount} of {totalCount} images
+                    Converting {completedCount} of {toProcessCount} images
                     {failedCount > 0 && (
                       <span className="text-destructive ml-2">
                         ({failedCount} failed)
                       </span>
                     )}
+                    {skippedCount > 0 && (
+                      <span className="text-amber-600 ml-2">
+                        ({skippedCount} skipped)
+                      </span>
+                    )}
                   </>
                 ) : (
                   <>
-                    {totalCount} images ready to convert
+                    {toProcessCount} images ready to convert
+                    {skippedCount > 0 && ` (${skippedCount} skipped)`}
                   </>
                 )}
               </div>
               <div className="flex items-center gap-2">
-                {/* Reset button for stuck states */}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -618,7 +786,6 @@ export function TiffImportDialog({
                 >
                   <RefreshCw className="h-4 w-4" />
                 </Button>
-                {/* Show Start Conversion when there are queued files and not currently converting */}
                 {!isConverting && conversionStates.some(s => s.status === "queued") && (
                   <Button 
                     size="sm" 
@@ -632,7 +799,7 @@ export function TiffImportDialog({
                   </Button>
                 )}
                 <Progress
-                  value={(completedCount / totalCount) * 100}
+                  value={(completedCount / toProcessCount) * 100}
                   className="w-48"
                 />
               </div>
@@ -643,10 +810,16 @@ export function TiffImportDialog({
                 {conversionStates.map((state, index) => (
                   <div
                     key={index}
-                    className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50"
+                    className={cn(
+                      "flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/50",
+                      state.status === "skipped" && "opacity-50"
+                    )}
                   >
                     {state.status === "queued" && (
                       <div className="h-4 w-4 rounded-full bg-muted" />
+                    )}
+                    {state.status === "skipped" && (
+                      <SkipForward className="h-4 w-4 text-amber-500" />
                     )}
                     {(state.status === "uploading" || state.status === "converting") && (
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -669,7 +842,6 @@ export function TiffImportDialog({
                       {state.file.originalFilename}
                     </span>
                     
-                    {/* Show upload progress percentage */}
                     {state.status === "uploading" && (
                       <div className="flex items-center gap-1.5">
                         <Progress value={state.uploadProgress} className="w-16 h-1.5" />
@@ -685,14 +857,20 @@ export function TiffImportDialog({
                       </span>
                     )}
                     
-                  {state.file.lookKey && state.status !== "failed" && state.status !== "uploading" && state.status !== "converting" && (
-                    <Badge 
-                      variant="outline" 
-                      className={`text-xs ${state.status === "done" ? "border-green-500 text-green-600 bg-green-50" : ""}`}
-                    >
-                      {state.file.lookKey}
-                    </Badge>
-                  )}
+                    {state.status === "skipped" && (
+                      <span className="text-xs text-amber-600">
+                        Skipped
+                      </span>
+                    )}
+                    
+                    {state.file.lookKey && state.status !== "failed" && state.status !== "uploading" && state.status !== "converting" && state.status !== "skipped" && (
+                      <Badge 
+                        variant="outline" 
+                        className={`text-xs ${state.status === "done" ? "border-green-500 text-green-600 bg-green-50" : ""}`}
+                      >
+                        {state.file.lookKey}
+                      </Badge>
+                    )}
                     
                     {state.status === "failed" && (
                       <Button
@@ -754,6 +932,12 @@ export function TiffImportDialog({
                 <ImageIcon className="h-4 w-4 inline mr-1" />
                 {completedCount} images
               </span>
+              {skippedCount > 0 && (
+                <span className="text-amber-600">
+                  <SkipForward className="h-4 w-4 inline mr-1" />
+                  {skippedCount} skipped (duplicates)
+                </span>
+              )}
             </div>
 
             <div className="flex-1 grid grid-cols-[280px_1fr] gap-4 overflow-hidden">
@@ -914,9 +1098,11 @@ export function TiffImportDialog({
             )}
 
             {lookGroups.some((g) => g.lookKey === "UNMATCHED" && g.files.length > 0) && (
-              <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 rounded-lg">
-                <AlertCircle className="h-4 w-4" />
-                Some files couldn't be grouped automatically. Review the "Unmatched" group.
+              <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                {lookGroups.find((g) => g.lookKey === "UNMATCHED")?.files.length} files
+                couldn't be matched to a look code. Review the "Unmatched Files"
+                group.
               </div>
             )}
 
@@ -925,8 +1111,9 @@ export function TiffImportDialog({
                 <ChevronLeft className="h-4 w-4 mr-1" />
                 Back
               </Button>
-              <Button onClick={handleCommit}>
-                Create {lookGroups.filter((g) => g.lookKey !== "UNMATCHED").length} Looks
+              <Button onClick={handleCommit} disabled={lookGroups.filter(g => g.lookKey !== "UNMATCHED").length === 0}>
+                Create {lookGroups.filter(g => g.lookKey !== "UNMATCHED").length} Looks
+                <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
             </DialogFooter>
           </div>
@@ -934,10 +1121,10 @@ export function TiffImportDialog({
 
         {/* Step 3: Committing */}
         {step === "committing" && (
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex-1 flex items-center justify-center py-12">
             <div className="text-center space-y-4">
-              <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-              <p className="text-muted-foreground">Creating looks...</p>
+              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+              <p className="text-sm text-muted-foreground">Creating looks...</p>
             </div>
           </div>
         )}

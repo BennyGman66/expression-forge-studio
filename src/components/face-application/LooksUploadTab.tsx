@@ -406,14 +406,14 @@ export function LooksUploadTab({
     let lookId = progressiveLooksRef.current.get(lookName);
     
     if (!lookId) {
-      // Check if the look already exists in the current looks state
-      const existingLook = looks.find(l => l.name === lookName);
+      // Check if the look already exists in the current looks state (by look_code or name)
+      const existingLook = looks.find(l => l.name === lookName || (lookKey && l.name.includes(lookKey)));
       
       if (existingLook) {
         lookId = existingLook.id;
         progressiveLooksRef.current.set(lookName, lookId);
       } else {
-        // Create a new look
+        // Create a new look with look_code
         const talentId = await getDefaultTalentId();
         if (!talentId) {
           console.error("[TiffImport] No talent found for progressive save");
@@ -422,7 +422,13 @@ export function LooksUploadTab({
         
         const { data: lookData, error } = await supabase
           .from("talent_looks")
-          .insert({ name: lookName, talent_id: talentId, project_id: projectId, digital_talent_id: null })
+          .insert({ 
+            name: lookName, 
+            talent_id: talentId, 
+            project_id: projectId, 
+            digital_talent_id: null,
+            look_code: lookKey, // Save the look_code for deduplication
+          })
           .select()
           .single();
         
@@ -450,10 +456,16 @@ export function LooksUploadTab({
       return;
     }
     
-    // Insert the image
+    // Insert the image with original_filename for traceability
     const { data: imageResult, error: imageError } = await supabase
       .from("look_source_images")
-      .insert({ look_id: lookId, view: viewToUse, source_url: url, original_source_url: url })
+      .insert({ 
+        look_id: lookId, 
+        view: viewToUse, 
+        source_url: url, 
+        original_source_url: url,
+        original_filename: originalFilename, // Save original filename
+      })
       .select()
       .single();
     

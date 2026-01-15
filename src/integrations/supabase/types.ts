@@ -2322,6 +2322,7 @@ export type Database = {
           head_cropped_url: string | null
           id: string
           look_id: string
+          original_filename: string | null
           original_source_url: string | null
           source_url: string
           view: string
@@ -2336,6 +2337,7 @@ export type Database = {
           head_cropped_url?: string | null
           id?: string
           look_id: string
+          original_filename?: string | null
           original_source_url?: string | null
           source_url: string
           view: string
@@ -2350,6 +2352,7 @@ export type Database = {
           head_cropped_url?: string | null
           id?: string
           look_id?: string
+          original_filename?: string | null
           original_source_url?: string | null
           source_url?: string
           view?: string
@@ -3297,6 +3300,7 @@ export type Database = {
           created_at: string
           digital_talent_id: string | null
           id: string
+          look_code: string | null
           name: string
           product_type: string | null
           project_id: string | null
@@ -3309,6 +3313,7 @@ export type Database = {
           created_at?: string
           digital_talent_id?: string | null
           id?: string
+          look_code?: string | null
           name: string
           product_type?: string | null
           project_id?: string | null
@@ -3321,6 +3326,7 @@ export type Database = {
           created_at?: string
           digital_talent_id?: string | null
           id?: string
+          look_code?: string | null
           name?: string
           product_type?: string | null
           project_id?: string | null
