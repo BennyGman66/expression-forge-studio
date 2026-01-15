@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
-import { Upload } from "lucide-react";
+import { useState, useCallback, useRef } from "react";
+import { Upload, FolderOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { isSupportedImage } from "@/lib/tiffImportUtils";
+import { isSupportedImage, getFilesFromDataTransfer } from "@/lib/tiffImportUtils";
+import { Button } from "@/components/ui/button";
 
 interface BulkUploadZoneProps {
   onFilesSelected: (files: File[]) => void;
@@ -17,15 +18,17 @@ export function BulkUploadZone({
   compact = false,
 }: BulkUploadZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const handleDrop = useCallback(
-    (e: React.DragEvent) => {
+    async (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
       setIsDragOver(false);
 
-      // Filter to supported image files (including TIFF)
-      const files = Array.from(e.dataTransfer.files).filter(isSupportedImage);
+      // Use the new helper that handles folders
+      const files = await getFilesFromDataTransfer(e.dataTransfer);
       if (files.length > 0) {
         onFilesSelected(files);
       }
@@ -40,6 +43,18 @@ export function BulkUploadZone({
         onFilesSelected(files);
       }
       // Reset input so same file can be selected again
+      e.target.value = "";
+    },
+    [onFilesSelected]
+  );
+
+  const handleFolderInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files || []).filter(isSupportedImage);
+      if (files.length > 0) {
+        onFilesSelected(files);
+      }
+      // Reset input so same folder can be selected again
       e.target.value = "";
     },
     [onFilesSelected]
@@ -62,9 +77,9 @@ export function BulkUploadZone({
   }
 
   return (
-    <label
+    <div
       className={cn(
-        "border-2 border-dashed rounded-lg cursor-pointer transition-all flex items-center justify-center gap-3",
+        "border-2 border-dashed rounded-lg transition-all",
         isDragOver
           ? "border-primary bg-primary/5 scale-[1.01]"
           : "border-muted-foreground/30 hover:border-primary hover:bg-muted/50",
@@ -84,24 +99,74 @@ export function BulkUploadZone({
       }}
       onDrop={handleDrop}
     >
-      <Upload className={cn("text-muted-foreground", compact ? "h-5 w-5" : "h-8 w-8")} />
-      <div className={cn("text-center", compact ? "" : "space-y-1")}>
-        <p className={cn("font-medium", compact ? "text-sm" : "")}>
-          {isDragOver ? "Drop images here" : "Drag images here or click to upload"}
-        </p>
+      <div className={cn(
+        "flex items-center gap-3",
+        compact ? "justify-center" : "flex-col justify-center"
+      )}>
         {!compact && (
-          <p className="text-xs text-muted-foreground">
-            Supports TIFF, PNG, and JPG files
-          </p>
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <Upload className="h-8 w-8" />
+            <FolderOpen className="h-8 w-8" />
+          </div>
         )}
+        
+        <div className={cn("text-center", compact ? "" : "space-y-1")}>
+          <p className={cn("font-medium", compact ? "text-sm" : "")}>
+            {isDragOver ? "Drop files or folder here" : "Drag files or folder here"}
+          </p>
+          {!compact && (
+            <p className="text-xs text-muted-foreground">
+              Supports TIFF, PNG, and JPG files • Drop a folder for bulk import
+            </p>
+          )}
+        </div>
+
+        <div className={cn(
+          "flex items-center gap-2",
+          compact ? "" : "mt-3"
+        )}>
+          <Button
+            variant="outline"
+            size={compact ? "sm" : "default"}
+            onClick={() => fileInputRef.current?.click()}
+            type="button"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Upload Files
+          </Button>
+          <Button
+            variant="outline"
+            size={compact ? "sm" : "default"}
+            onClick={() => folderInputRef.current?.click()}
+            type="button"
+          >
+            <FolderOpen className="h-4 w-4 mr-2" />
+            Upload Folder
+          </Button>
+        </div>
       </div>
+
+      {/* Hidden file input for individual files */}
       <input
+        ref={fileInputRef}
         type="file"
         accept=".tif,.tiff,.png,.jpg,.jpeg,image/*"
         multiple
         className="hidden"
         onChange={handleFileInput}
       />
-    </label>
+      
+      {/* Hidden folder input */}
+      <input
+        ref={folderInputRef}
+        type="file"
+        // @ts-expect-error - webkitdirectory is not in the type definition
+        webkitdirectory=""
+        directory=""
+        multiple
+        className="hidden"
+        onChange={handleFolderInput}
+      />
+    </div>
   );
 }
