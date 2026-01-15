@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { ArrowRight, Play, User, CheckCircle, XCircle, Clock, RefreshCw, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { LookSourceImage, FaceApplicationJob, FaceFoundation } from "@/types/face-application";
+import { LookSourceImage, FaceApplicationJob, FaceFoundation, VIEW_LABELS } from "@/types/face-application";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 
 interface LookWithImages {
@@ -31,6 +31,14 @@ interface OutputCounts {
   generating: number;
 }
 
+interface GeneratedOutput {
+  id: string;
+  stored_url: string;
+  view: string;
+  attempt_index: number;
+  status: string;
+}
+
 const ATTEMPT_OPTIONS = [1, 2, 4, 6, 8, 12, 24];
 
 const MODEL_OPTIONS = [
@@ -52,6 +60,7 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
   const [elapsedDisplay, setElapsedDisplay] = useState("");
   const [lastActivitySeconds, setLastActivitySeconds] = useState<number | null>(null);
   const [outputCounts, setOutputCounts] = useState<OutputCounts>({ completed: 0, failed: 0, pending: 0, generating: 0 });
+  const [generatedOutputs, setGeneratedOutputs] = useState<GeneratedOutput[]>([]);
   const { toast } = useToast();
 
   // Fetch ALL looks for this PROJECT with their source images
@@ -233,31 +242,46 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
     return () => clearInterval(interval);
   }, [isGenerating, currentBatchJobIds, jobs]);
 
-  // Poll for output counts when we have batch jobs
+  // Poll for output counts and generated images when we have batch jobs
   useEffect(() => {
     if (currentBatchJobIds.length === 0) {
       setOutputCounts({ completed: 0, failed: 0, pending: 0, generating: 0 });
+      setGeneratedOutputs([]);
       return;
     }
 
-    const fetchOutputCounts = async () => {
+    const fetchOutputs = async () => {
       const { data: outputs } = await supabase
         .from("face_application_outputs")
-        .select("status")
-        .in("job_id", currentBatchJobIds);
+        .select("id, stored_url, view, attempt_index, status")
+        .in("job_id", currentBatchJobIds)
+        .order("created_at", { ascending: true });
 
       if (outputs) {
+        // Update counts
         setOutputCounts({
           completed: outputs.filter(o => o.status === "completed").length,
           failed: outputs.filter(o => o.status === "failed").length,
           pending: outputs.filter(o => o.status === "pending").length,
           generating: outputs.filter(o => o.status === "generating").length,
         });
+        
+        // Store completed outputs with images for preview
+        const completedWithImages = outputs
+          .filter(o => o.status === "completed" && o.stored_url)
+          .map(o => ({
+            id: o.id,
+            stored_url: o.stored_url!,
+            view: o.view,
+            attempt_index: o.attempt_index ?? 0,
+            status: o.status ?? "pending",
+          }));
+        setGeneratedOutputs(completedWithImages);
       }
     };
 
-    fetchOutputCounts();
-    const interval = setInterval(fetchOutputCounts, 2000);
+    fetchOutputs();
+    const interval = setInterval(fetchOutputs, 2000);
     return () => clearInterval(interval);
   }, [currentBatchJobIds, jobs]);
 
@@ -647,46 +671,74 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
                   </div>
                 )}
 
-                {/* Post-generation actions */}
-                {!isGenerating && currentBatchJobIds.length > 0 && (outputCounts.completed > 0 || outputCounts.failed > 0) && (
+                {/* Generated Images Preview */}
+                {generatedOutputs.length > 0 && (
                   <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
-                    {/* Status summary */}
-                    <div className="flex items-center gap-4 text-sm">
-                      {outputCounts.completed > 0 && (
-                        <span className="flex items-center gap-1.5">
-                          <CheckCircle className="w-4 h-4 text-green-500" />
-                          {outputCounts.completed} completed
-                        </span>
-                      )}
-                      {outputCounts.failed > 0 && (
-                        <span className="flex items-center gap-1.5">
-                          <XCircle className="w-4 h-4 text-red-500" />
-                          {outputCounts.failed} failed
-                        </span>
-                      )}
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-medium">Generated Images</h4>
+                      <span className="text-xs text-muted-foreground">
+                        {generatedOutputs.length} images
+                      </span>
                     </div>
                     
+                    {/* Group by view */}
+                    <div className="space-y-4">
+                      {Object.entries(
+                        generatedOutputs.reduce((acc, output) => {
+                          const viewKey = output.view || 'unknown';
+                          if (!acc[viewKey]) acc[viewKey] = [];
+                          acc[viewKey].push(output);
+                          return acc;
+                        }, {} as Record<string, GeneratedOutput[]>)
+                      ).map(([view, outputs]) => (
+                        <div key={view} className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {VIEW_LABELS[view] || view} ({outputs.length})
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {outputs.map((output) => (
+                              <div 
+                                key={output.id} 
+                                className="relative group"
+                              >
+                                <img
+                                  src={output.stored_url}
+                                  alt={`${view} attempt ${output.attempt_index + 1}`}
+                                  className="w-20 h-20 object-cover rounded-lg border transition-transform hover:scale-105"
+                                />
+                                <span className="absolute bottom-0 left-0 right-0 text-[10px] text-center bg-black/60 text-white rounded-b-lg py-0.5">
+                                  #{output.attempt_index + 1}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
                     {/* Action buttons */}
-                    <div className="flex gap-2">
-                      {outputCounts.failed > 0 && (
+                    {!isGenerating && (outputCounts.completed > 0 || outputCounts.failed > 0) && (
+                      <div className="flex gap-2 pt-3 border-t border-border/50">
+                        {outputCounts.failed > 0 && (
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={handleRetryFailed}
+                          >
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Retry Failed ({outputCounts.failed})
+                          </Button>
+                        )}
                         <Button 
                           size="sm" 
                           variant="outline"
-                          onClick={handleRetryFailed}
+                          onClick={handleRegenerateAll}
                         >
-                          <RefreshCw className="w-4 h-4 mr-2" />
-                          Retry Failed ({outputCounts.failed})
+                          <Sparkles className="w-4 h-4 mr-2" />
+                          Generate More Options
                         </Button>
-                      )}
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        onClick={handleRegenerateAll}
-                      >
-                        <Sparkles className="w-4 h-4 mr-2" />
-                        Generate More Options
-                      </Button>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
