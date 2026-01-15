@@ -3498,8 +3498,10 @@ export type Database = {
           look_id: string | null
           priority: number | null
           project_id: string | null
+          started_at: string | null
           status: Database["public"]["Enums"]["job_status"] | null
           title: string | null
+          total_active_ms: number | null
           type: Database["public"]["Enums"]["job_type"]
           updated_at: string | null
         }
@@ -3518,8 +3520,10 @@ export type Database = {
           look_id?: string | null
           priority?: number | null
           project_id?: string | null
+          started_at?: string | null
           status?: Database["public"]["Enums"]["job_status"] | null
           title?: string | null
+          total_active_ms?: number | null
           type: Database["public"]["Enums"]["job_type"]
           updated_at?: string | null
         }
@@ -3538,8 +3542,10 @@ export type Database = {
           look_id?: string | null
           priority?: number | null
           project_id?: string | null
+          started_at?: string | null
           status?: Database["public"]["Enums"]["job_status"] | null
           title?: string | null
+          total_active_ms?: number | null
           type?: Database["public"]["Enums"]["job_type"]
           updated_at?: string | null
         }

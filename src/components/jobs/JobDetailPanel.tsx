@@ -26,6 +26,7 @@ import {
   useUpdateJobStatus,
   useAssignJob,
   useAddJobNote,
+  useResetJob,
 } from "@/hooks/useJobs";
 import { useFreelancers } from "@/hooks/useUsers";
 import { useReposeBatchByJobId, useCreateReposeBatch } from "@/hooks/useReposeBatches";
@@ -39,6 +40,7 @@ import {
   FileImage,
   Upload,
   Sparkles,
+  RotateCcw,
 } from "lucide-react";
 import { format } from "date-fns";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -79,6 +81,13 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
   const assignJob = useAssignJob();
   const addNote = useAddJobNote();
   const createBatch = useCreateReposeBatch();
+  const resetJob = useResetJob();
+
+  const handleResetToOpen = () => {
+    if (jobId) {
+      resetJob.mutate(jobId);
+    }
+  };
 
   const handleCreateReposeBatch = async () => {
     if (!jobId || !job) return;
@@ -199,6 +208,19 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
                   </Select>
                 </div>
               </div>
+
+              {/* Admin Reset Button - Show when job is IN_PROGRESS or ASSIGNED */}
+              {(job.status === 'IN_PROGRESS' || job.status === 'ASSIGNED') && (
+                <Button
+                  variant="outline"
+                  onClick={handleResetToOpen}
+                  disabled={resetJob.isPending}
+                  className="w-full text-orange-400 border-orange-500/30 hover:bg-orange-500/10"
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  {resetJob.isPending ? 'Resetting...' : 'Reset to Open'}
+                </Button>
+              )}
 
               {/* Meta info */}
               <div className="flex items-center gap-4 text-sm text-muted-foreground">
