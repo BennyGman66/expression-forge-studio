@@ -1,8 +1,10 @@
-import { Check, Wand2 } from "lucide-react";
+import { useState } from "react";
+import { Check, Wand2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LookWithImages, getLookPairingStatus } from "./types";
-import { FaceFoundation } from "@/types/face-application";
+import { FaceFoundation, LookSourceImage } from "@/types/face-application";
 import { ViewSlot } from "./ViewSlot";
+import { InlineCropDialog } from "./InlineCropDialog";
 
 interface LookPairingPanelProps {
   look: LookWithImages | null;
@@ -10,8 +12,8 @@ interface LookPairingPanelProps {
   pairings: Map<string, string>;
   onSetPairing: (sourceImageId: string, faceUrl: string) => void;
   onClearPairing: (sourceImageId: string) => void;
-  onCropClick: (sourceImageId: string) => void;
   onApplyAutoMatches: () => void;
+  onCropComplete: (updatedImage: LookSourceImage) => void;
   dragOverSlotId: string | null;
 }
 
@@ -21,10 +23,12 @@ export function LookPairingPanel({
   pairings,
   onSetPairing,
   onClearPairing,
-  onCropClick,
   onApplyAutoMatches,
+  onCropComplete,
   dragOverSlotId,
 }: LookPairingPanelProps) {
+  const [cropDialogImage, setCropDialogImage] = useState<LookSourceImage | null>(null);
+
   if (!look) {
     return (
       <div className="flex-1 flex items-center justify-center text-center p-8">
@@ -46,11 +50,23 @@ export function LookPairingPanel({
     f => f.digital_talent_id === look.digital_talent_id
   );
 
+  // Count cropped images only for auto-match check
+  const croppedImages = look.sourceImages.filter(img => !!img.head_cropped_url);
+  
   // Check if auto-matching would add any new pairings
-  const canAutoMatch = look.sourceImages.some(img => {
+  const canAutoMatch = croppedImages.some(img => {
     if (pairings.has(img.id)) return false;
     return talentFoundations.some(f => f.view === img.view) || talentFoundations.length > 0;
   });
+
+  const handleCropClick = (sourceImage: LookSourceImage) => {
+    setCropDialogImage(sourceImage);
+  };
+
+  const handleCropDialogComplete = (updatedImage: LookSourceImage) => {
+    onCropComplete(updatedImage);
+    setCropDialogImage(null);
+  };
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
@@ -59,7 +75,15 @@ export function LookPairingPanel({
         <div>
           <h3 className="text-lg font-semibold">{look.name}</h3>
           <p className="text-sm text-muted-foreground">
-            {status.paired}/{status.total} views paired
+            {status.cropped < status.total ? (
+              <>
+                <span className="text-rose-600 font-medium">
+                  {status.total - status.cropped} need cropping
+                </span>
+                {" · "}
+              </>
+            ) : null}
+            {status.paired}/{status.cropped} views paired
             {status.status === 'complete' && (
               <span className="ml-2 text-emerald-600 font-medium">✓ Complete</span>
             )}
@@ -79,6 +103,17 @@ export function LookPairingPanel({
         )}
       </div>
 
+      {/* Needs crop banner */}
+      {status.cropped < status.total && (
+        <div className="px-4 py-2 bg-rose-50 border-b border-rose-100 flex items-center gap-2 text-rose-700 text-sm">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>
+            {status.total - status.cropped} image(s) need cropping before they can be matched. 
+            Click "Crop Now" on each to crop inline.
+          </span>
+        </div>
+      )}
+
       {/* View slots grid */}
       <div className="flex-1 overflow-auto p-4">
         <div className="grid grid-cols-2 gap-4">
@@ -88,7 +123,7 @@ export function LookPairingPanel({
               sourceImage={img}
               pairedFaceUrl={pairings.get(img.id) || null}
               onClearPairing={() => onClearPairing(img.id)}
-              onCropClick={() => onCropClick(img.id)}
+              onCropClick={() => handleCropClick(img)}
               isOver={dragOverSlotId === img.id}
             />
           ))}
@@ -101,6 +136,16 @@ export function LookPairingPanel({
           </div>
         )}
       </div>
+
+      {/* Inline crop dialog */}
+      {cropDialogImage && (
+        <InlineCropDialog
+          open={!!cropDialogImage}
+          onOpenChange={(open) => !open && setCropDialogImage(null)}
+          sourceImage={cropDialogImage}
+          onCropComplete={handleCropDialogComplete}
+        />
+      )}
     </div>
   );
 }
