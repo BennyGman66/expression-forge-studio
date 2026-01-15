@@ -323,6 +323,40 @@ export function useDeleteJob() {
   });
 }
 
+// Hook for freelancer to claim an open job
+export function useClaimJob() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ jobId, userId }: { jobId: string; userId: string }) => {
+      const { data, error } = await supabase
+        .from("unified_jobs")
+        .update({ 
+          assigned_user_id: userId,
+          status: 'IN_PROGRESS'
+        })
+        .eq("id", jobId)
+        .eq("status", "OPEN") // Only claim if still OPEN
+        .is("assigned_user_id", null) // Only claim if not assigned
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (!data) throw new Error("Job is no longer available");
+      return data;
+    },
+    onSuccess: (_, { jobId }) => {
+      queryClient.invalidateQueries({ queryKey: ["unified-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["unified-job", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["freelancer-jobs"] });
+      toast.success("Job claimed! It's now yours to work on.");
+    },
+    onError: (error) => {
+      toast.error(`Failed to claim job: ${error.message}`);
+    },
+  });
+}
+
 // Hook for freelancer dashboard: fetches claimable open jobs + user's assigned jobs
 export function useFreelancerJobs(userId: string | undefined) {
   return useQuery({

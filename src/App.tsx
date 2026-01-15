@@ -28,6 +28,7 @@ import BrandPoseLibrary from "./pages/BrandPoseLibrary";
 import ReposeProduction from "./pages/ReposeProduction";
 import PublicJobWorkspace from "./pages/PublicJobWorkspace";
 import PublicFreelancerBoard from "./pages/PublicFreelancerBoard";
+import FreelancerAuth from "./pages/FreelancerAuth";
 
 const queryClient = new QueryClient();
 
@@ -44,10 +45,13 @@ const App = () => (
             <Route path="/setup-admin" element={<SetupAdmin />} />
             <Route path="/unauthorized" element={<Unauthorized />} />
             
+            {/* Freelancer signup - public */}
+            <Route path="/freelancer/join" element={<FreelancerAuth />} />
+            
             {/* Client review - has its own password protection */}
             <Route path="/review/:reviewId" element={<ClientReview />} />
             
-            {/* Public freelancer board - single link access */}
+            {/* Public freelancer board - single link access (legacy) */}
             <Route path="/work" element={<PublicFreelancerBoard />} />
             <Route path="/work/:jobId" element={<PublicJobWorkspace />} />
             <Route 
