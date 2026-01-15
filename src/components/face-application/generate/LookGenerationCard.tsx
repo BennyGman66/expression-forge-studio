@@ -19,48 +19,47 @@ function ViewStatusBadge({
   viewStat: ViewOutputStats; 
   requiredOptions: number;
 }) {
-  const { completedCount, failedCount, runningCount, pendingCount, isComplete, view, viewLabel } = viewStat;
+  const { completedCount, failedCount, runningCount, pendingCount, isComplete, viewLabel } = viewStat;
   const hasActivity = runningCount > 0 || pendingCount > 0;
   const hasFailed = failedCount > 0;
 
-  // Determine status icon
+  // Determine status icon and color
   let statusIcon: React.ReactNode = null;
-  let statusColor = "bg-muted border-dashed border-muted-foreground/30";
+  let statusColor = "bg-muted border border-dashed border-muted-foreground/30";
 
   if (isComplete) {
-    statusIcon = <Check className="w-3 h-3 text-white" />;
-    statusColor = "bg-emerald-500";
+    statusIcon = <Check className="w-2.5 h-2.5 text-white" />;
+    statusColor = "bg-emerald-500 border-emerald-500";
   } else if (hasActivity) {
-    statusIcon = <Loader2 className="w-3 h-3 text-white animate-spin" />;
-    statusColor = "bg-blue-500";
+    statusIcon = <Loader2 className="w-2.5 h-2.5 text-white animate-spin" />;
+    statusColor = "bg-blue-500 border-blue-500";
   } else if (hasFailed && completedCount === 0) {
-    statusIcon = <AlertCircle className="w-3 h-3 text-white" />;
-    statusColor = "bg-red-500";
+    statusIcon = <AlertCircle className="w-2.5 h-2.5 text-white" />;
+    statusColor = "bg-red-500 border-red-500";
   } else if (completedCount > 0) {
-    // Partial - has some but not complete
-    statusIcon = <Clock className="w-3 h-3 text-white" />;
-    statusColor = "bg-amber-500";
+    statusIcon = <Clock className="w-2.5 h-2.5 text-white" />;
+    statusColor = "bg-amber-500 border-amber-500";
   }
 
   return (
-    <div className="flex flex-col items-center gap-0.5">
-      <div className={cn(
-        "w-5 h-5 rounded-full flex items-center justify-center border",
-        statusColor
-      )}>
-        {statusIcon}
-      </div>
-      <span className="text-[10px] text-muted-foreground capitalize">
+    <div className="flex flex-col items-center w-14">
+      <span className="text-[10px] text-muted-foreground capitalize mb-1">
         {viewLabel}
       </span>
       <span className={cn(
-        "text-[9px] font-medium",
+        "text-[10px] font-medium tabular-nums",
         isComplete ? "text-emerald-600" : 
         completedCount > 0 ? "text-amber-600" : 
         "text-muted-foreground"
       )}>
         {completedCount}/{requiredOptions}
       </span>
+      <div className={cn(
+        "w-4 h-4 rounded-full flex items-center justify-center mt-1",
+        statusColor
+      )}>
+        {statusIcon}
+      </div>
     </div>
   );
 }
@@ -94,32 +93,29 @@ export function LookGenerationCard({
         !isFullyComplete && !needsGeneration && "bg-muted/30"
       )}
     >
-      {/* Header row */}
-      <div className="flex items-start gap-3">
+      {/* Header row - aligned */}
+      <div className="flex items-center gap-3">
         <Checkbox
           checked={isSelected}
           onCheckedChange={() => onToggleSelect(lookId)}
           disabled={disabled}
-          className="mt-0.5"
+          className="shrink-0"
         />
         
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-sm truncate">{lookName}</span>
-            
-            {/* Status badges */}
-            {isNewSinceLastRun && (
-              <Badge variant="outline" className="h-5 text-[10px] bg-blue-50 text-blue-700 border-blue-200">
-                <Sparkles className="w-2.5 h-2.5 mr-1" />
-                New
-              </Badge>
-            )}
-          </div>
+        {/* Look name and badges */}
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <span className="font-medium text-sm truncate">{lookName}</span>
+          {isNewSinceLastRun && (
+            <Badge variant="outline" className="h-5 text-[10px] bg-blue-50 text-blue-700 border-blue-200 shrink-0">
+              <Sparkles className="w-2.5 h-2.5 mr-1" />
+              New
+            </Badge>
+          )}
         </div>
 
-        {/* Generation count badge */}
+        {/* Generation status badge - fixed width for alignment */}
         <div className={cn(
-          "flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium",
+          "flex items-center justify-center gap-1 px-2 py-1 rounded-full text-xs font-medium min-w-[120px] shrink-0",
           isFullyComplete 
             ? "bg-emerald-100 text-emerald-700" 
             : totalCompletedOutputs > 0 
@@ -129,42 +125,42 @@ export function LookGenerationCard({
           {isFullyComplete ? (
             <>
               <Check className="w-3 h-3" />
-              Generated {totalCompletedOutputs}
+              <span>Complete ({totalCompletedOutputs})</span>
             </>
           ) : totalCompletedOutputs > 0 ? (
             <>
               <Clock className="w-3 h-3" />
-              {viewsComplete}/{totalViews} views
+              <span>{viewsComplete}/{totalViews} views</span>
             </>
           ) : (
-            "Not generated"
+            <span>Not generated</span>
           )}
         </div>
       </div>
 
-      {/* Views row */}
-      <div className="flex items-center gap-3 mt-3 pl-7">
+      {/* Views row - cleaner layout */}
+      <div className="flex items-start gap-4 mt-3 ml-7 pt-2 border-t border-border/50">
         {views.map((viewStat) => {
           const sourceImage = sourceImages.find(s => s.view === viewStat.view);
           const imageUrl = sourceImage?.head_cropped_url || sourceImage?.source_url;
 
           return (
-            <div key={viewStat.view} className="relative">
+            <div key={viewStat.view} className="flex gap-2">
+              {/* Thumbnail */}
               {imageUrl && (
                 <img
                   src={imageUrl}
                   alt={viewStat.viewLabel}
                   className={cn(
-                    "w-14 h-14 object-cover rounded border",
+                    "w-12 h-12 object-cover rounded border-2",
                     viewStat.isComplete && "border-emerald-400",
-                    !viewStat.isComplete && viewStat.completedCount > 0 && "border-amber-400"
+                    !viewStat.isComplete && viewStat.completedCount > 0 && "border-amber-400",
+                    !viewStat.isComplete && viewStat.completedCount === 0 && "border-border"
                   )}
                 />
               )}
-              {/* Overlay badge */}
-              <div className="absolute -top-1 -right-1">
-                <ViewStatusBadge viewStat={viewStat} requiredOptions={requiredOptions} />
-              </div>
+              {/* Status below thumbnail */}
+              <ViewStatusBadge viewStat={viewStat} requiredOptions={requiredOptions} />
             </div>
           );
         })}
