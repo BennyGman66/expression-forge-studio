@@ -269,13 +269,20 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
 
   // Handle skip image - persist to database
   const handleSkipImage = useCallback(async (imageId: string) => {
+    console.log("handleSkipImage called with imageId:", imageId);
     setSkippedImageIds(prev => new Set([...prev, imageId]));
     
     // Persist to database
-    await supabase
+    const { error } = await supabase
       .from("look_source_images")
       .update({ is_skipped: true, matched_face_url: null })
       .eq("id", imageId);
+    
+    if (error) {
+      console.error("Error updating is_skipped:", error);
+    } else {
+      console.log("Successfully skipped image:", imageId);
+    }
     
     // Also clear any pairing for this image
     setPairings(prev => {
