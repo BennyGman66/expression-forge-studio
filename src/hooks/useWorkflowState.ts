@@ -104,10 +104,10 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
 
       const lookIds = looks.map(l => l.id);
 
-      // Fetch source images for all looks
+      // Fetch source images for all looks (include head_crop_x to check if cropped)
       const { data: sourceImages } = await supabase
         .from('look_source_images')
-        .select('id, look_id, view, source_url, head_cropped_url, digital_talent_id')
+        .select('id, look_id, view, source_url, head_cropped_url, head_crop_x, digital_talent_id')
         .in('look_id', lookIds);
 
       // Map source images by look_id
@@ -187,6 +187,7 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
             view: img.view,
             source_url: img.source_url,
             head_cropped_url: img.head_cropped_url,
+            head_crop_x: img.head_crop_x,
             digital_talent_id: img.digital_talent_id,
           })),
           outputs: outputsByLook[look.id] || [],
@@ -211,16 +212,69 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
       }
 
       if (statesToUpsert.length > 0) {
-        // Upsert with ON CONFLICT - only insert if doesn't exist
-        const { error: upsertError } = await supabase
+        // Fetch existing states to compare
+        const lookIds = [...new Set(statesToUpsert.map(s => s.look_id))];
+        const { data: existingStates } = await supabase
           .from('look_view_states')
-          .upsert(statesToUpsert, {
-            onConflict: 'look_id,view,tab',
-            ignoreDuplicates: true, // Only insert if doesn't exist
-          });
+          .select('look_id, view, tab, status')
+          .in('look_id', lookIds);
+        
+        // Build a set of existing state keys
+        const existingStateMap = new Map<string, string>();
+        for (const state of (existingStates || [])) {
+          const key = `${state.look_id}:${state.view}:${state.tab}`;
+          existingStateMap.set(key, state.status);
+        }
+        
+        // Only insert missing states OR update states where data shows completion but DB shows not_started
+        const statesToInsert: typeof statesToUpsert = [];
+        const statesToUpdate: typeof statesToUpsert = [];
+        
+        for (const state of statesToUpsert) {
+          const key = `${state.look_id}:${state.view}:${state.tab}`;
+          const existingStatus = existingStateMap.get(key);
+          
+          if (!existingStatus) {
+            // State doesn't exist - insert it
+            statesToInsert.push(state);
+          } else if (existingStatus === 'not_started' && state.status === 'completed') {
+            // Data shows completed but DB shows not_started - update it
+            statesToUpdate.push(state);
+          }
+          // Otherwise, leave existing state as-is (don't overwrite user actions)
+        }
+        
+        // Insert new states
+        if (statesToInsert.length > 0) {
+          const { error: insertError } = await supabase
+            .from('look_view_states')
+            .upsert(statesToInsert, {
+              onConflict: 'look_id,view,tab',
+              ignoreDuplicates: true,
+            });
 
-        if (upsertError) {
-          console.error('Error upserting states:', upsertError);
+          if (insertError) {
+            console.error('Error inserting states:', insertError);
+          }
+        }
+        
+        // Update stale states (not_started -> completed based on actual data)
+        if (statesToUpdate.length > 0) {
+          for (const state of statesToUpdate) {
+            const { error: updateError } = await supabase
+              .from('look_view_states')
+              .update({
+                status: state.status,
+                completion_source: 'system_sync',
+              })
+              .eq('look_id', state.look_id)
+              .eq('view', state.view)
+              .eq('tab', state.tab);
+              
+            if (updateError) {
+              console.error('Error updating state:', updateError);
+            }
+          }
         }
       }
 
