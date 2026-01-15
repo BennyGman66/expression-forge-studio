@@ -709,7 +709,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     }
 
     return { needsActionImages: needsAction, completedImages: completed };
-  }, [sourceImages, workflowState.lookStates]);
+  }, [sourceImages, workflowState.lookStates, workflowState.stateVersion]);
 
   // Calculate crop box position using CACHED bounds for consistency
   const getCropStyle = () => {

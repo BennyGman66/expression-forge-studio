@@ -16,6 +16,7 @@ const defaultContext: WorkflowStateContextValue = {
   refetch: async () => {},
   isLoading: false,
   isSyncing: false,
+  stateVersion: 0,
 };
 
 const WorkflowStateContext = createContext<WorkflowStateContextValue>(defaultContext);
