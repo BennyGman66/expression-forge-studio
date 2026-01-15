@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFreelancerIdentity } from '@/hooks/useFreelancerIdentity';
 import { usePublicFreelancerJobs } from '@/hooks/usePublicJob';
@@ -30,24 +30,58 @@ export default function PublicFreelancerBoard() {
     job.freelancer_identity_id === identity?.id
   );
 
+  // Real-time subscription for job updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('unified-jobs-realtime-public')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'unified_jobs'
+        },
+        () => {
+          // Refetch jobs when any job changes
+          queryClient.invalidateQueries({ queryKey: ['public-freelancer-jobs'] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
   const claimJob = useMutation({
     mutationFn: async (jobId: string) => {
-      const { error } = await supabase
+      // Atomic claim: only update if job is still OPEN and unassigned
+      const { data, error } = await supabase
         .from('unified_jobs')
         .update({ 
           status: 'IN_PROGRESS',
-          freelancer_identity_id: identity?.id 
+          freelancer_identity_id: identity?.id,
+          started_at: new Date().toISOString()
         })
-        .eq('id', jobId);
+        .eq('id', jobId)
+        .eq('status', 'OPEN')
+        .is('freelancer_identity_id', null)
+        .select()
+        .single();
+      
       if (error) throw error;
+      if (!data) throw new Error('Job is no longer available - it may have been claimed by someone else');
+      return data;
     },
     onSuccess: (_, jobId) => {
       queryClient.invalidateQueries({ queryKey: ['public-freelancer-jobs'] });
       toast.success('Job claimed! Redirecting...');
       navigate(`/work/${jobId}`);
     },
-    onError: (error) => {
-      toast.error(`Failed to claim job: ${error.message}`);
+    onError: (error: any) => {
+      // Refetch to update the UI
+      queryClient.invalidateQueries({ queryKey: ['public-freelancer-jobs'] });
+      toast.error(error.message || 'Failed to claim job');
       setClaimingJobId(null);
     },
   });
