@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -39,6 +39,7 @@ export default function FaceApplication() {
   const activeTab = searchParams.get("tab") || "upload";
   const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
   const [selectedTalentId, setSelectedTalentId] = useState<string | null>(null);
+  const [selectedLookIds, setSelectedLookIds] = useState<Set<string>>(new Set());
 
   // Fetch project name if we have a projectId
   useEffect(() => {
@@ -105,6 +106,8 @@ export default function FaceApplication() {
         setSelectedLookId={setSelectedLookId}
         selectedTalentId={selectedTalentId}
         setSelectedTalentId={setSelectedTalentId}
+        selectedLookIds={selectedLookIds}
+        setSelectedLookIds={setSelectedLookIds}
         onBackToProjects={handleBackToProjects}
       />
     </WorkflowStateProvider>
@@ -121,6 +124,8 @@ interface WorkspaceProps {
   setSelectedLookId: (id: string | null) => void;
   selectedTalentId: string | null;
   setSelectedTalentId: (id: string | null) => void;
+  selectedLookIds: Set<string>;
+  setSelectedLookIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   onBackToProjects: () => void;
 }
 
@@ -133,6 +138,8 @@ function FaceApplicationWorkspace({
   setSelectedLookId,
   selectedTalentId,
   setSelectedTalentId,
+  selectedLookIds,
+  setSelectedLookIds,
   onBackToProjects,
 }: WorkspaceProps) {
   const workflowState = useWorkflowStateContext();
@@ -190,6 +197,8 @@ function FaceApplicationWorkspace({
               setSelectedLookId={setSelectedLookId}
               selectedTalentId={selectedTalentId}
               setSelectedTalentId={setSelectedTalentId}
+              selectedLookIds={selectedLookIds}
+              setSelectedLookIds={setSelectedLookIds}
               onContinue={() => setActiveTab("crop")}
             />
           </TabsContent>
@@ -199,6 +208,7 @@ function FaceApplicationWorkspace({
               projectId={projectId}
               lookId={selectedLookId}
               talentId={selectedTalentId}
+              selectedLookIds={selectedLookIds}
               onLookChange={setSelectedLookId}
               onContinue={() => setActiveTab("match")}
             />
@@ -208,6 +218,7 @@ function FaceApplicationWorkspace({
             <FaceMatchTab
               projectId={projectId}
               talentId={selectedTalentId}
+              selectedLookIds={selectedLookIds}
               onContinue={() => setActiveTab("generate")}
             />
           </TabsContent>
@@ -217,6 +228,7 @@ function FaceApplicationWorkspace({
               projectId={projectId}
               lookId={selectedLookId}
               talentId={selectedTalentId}
+              selectedLookIds={selectedLookIds}
               onContinue={() => setActiveTab("review")}
             />
           </TabsContent>
@@ -226,15 +238,16 @@ function FaceApplicationWorkspace({
               projectId={projectId}
               lookId={selectedLookId}
               talentId={selectedTalentId}
+              selectedLookIds={selectedLookIds}
             />
           </TabsContent>
 
           <TabsContent value="ai_apply" className="mt-0">
-            <AIApplyTab projectId={projectId} />
+            <AIApplyTab projectId={projectId} selectedLookIds={selectedLookIds} />
           </TabsContent>
 
           <TabsContent value="handoff" className="mt-0">
-            <SendToJobBoardTab projectId={projectId} />
+            <SendToJobBoardTab projectId={projectId} selectedLookIds={selectedLookIds} />
           </TabsContent>
         </main>
       </Tabs>

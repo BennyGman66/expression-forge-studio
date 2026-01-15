@@ -8,6 +8,7 @@ import { LooksTable, LookData, TalentOption } from "./LooksTable";
 import { TiffImportDialog, ProgressiveImageData } from "./TiffImportDialog";
 import { OrphanImageRecovery } from "./OrphanImageRecovery";
 import { isTiffFile } from "@/lib/tiffImportUtils";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,8 @@ interface LooksUploadTabProps {
   setSelectedLookId: (id: string | null) => void;
   selectedTalentId: string | null;
   setSelectedTalentId: (id: string | null) => void;
+  selectedLookIds: Set<string>;
+  setSelectedLookIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   onContinue: () => void;
 }
 
@@ -34,6 +37,8 @@ export function LooksUploadTab({
   setSelectedLookId,
   selectedTalentId,
   setSelectedTalentId,
+  selectedLookIds,
+  setSelectedLookIds,
   onContinue,
 }: LooksUploadTabProps) {
   const [talents, setTalents] = useState<TalentOption[]>([]);
@@ -556,6 +561,39 @@ export function LooksUploadTab({
     looks.filter((l) => l.digital_talent_id).map((l) => l.digital_talent_id)
   ).size;
 
+  // Selection handlers
+  const handleToggleSelection = (lookId: string) => {
+    setSelectedLookIds(prev => {
+      const next = new Set(prev);
+      if (next.has(lookId)) {
+        next.delete(lookId);
+      } else {
+        next.add(lookId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedLookIds.size === looks.length) {
+      setSelectedLookIds(new Set());
+    } else {
+      setSelectedLookIds(new Set(looks.map(l => l.id)));
+    }
+  };
+
+  const handleSelectReady = () => {
+    const readyLooks = looks.filter((look) => {
+      const views = look.sourceImages.map((img) => img.view);
+      return views.includes("front") && views.includes("back");
+    });
+    setSelectedLookIds(new Set(readyLooks.map(l => l.id)));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedLookIds(new Set());
+  };
+
   // Empty state
   if (!loading && looks.length === 0) {
     return (
@@ -644,6 +682,11 @@ export function LooksUploadTab({
         <LooksTable
           looks={looks}
           talents={talents}
+          selectedIds={selectedLookIds}
+          onToggleSelection={handleToggleSelection}
+          onSelectAll={handleSelectAll}
+          onSelectReady={handleSelectReady}
+          onClearSelection={handleClearSelection}
           onUpdateLook={handleUpdateLook}
           onDeleteLook={handleDeleteLook}
           onDuplicateLook={handleDuplicateLook}
@@ -656,8 +699,12 @@ export function LooksUploadTab({
 
       {/* Continue button */}
       <div className="flex justify-end pt-4">
-        <Button size="lg" disabled={!hasAnyLooksWithImages} onClick={onContinue}>
-          Continue to Head Crop
+        <Button 
+          size="lg" 
+          disabled={selectedLookIds.size === 0} 
+          onClick={onContinue}
+        >
+          Continue with {selectedLookIds.size} Look{selectedLookIds.size !== 1 ? 's' : ''}
           <ArrowRight className="h-4 w-4 ml-2" />
         </Button>
       </div>

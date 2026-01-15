@@ -13,6 +13,7 @@ interface HeadCropTabProps {
   projectId: string;
   lookId: string | null;
   talentId: string | null;
+  selectedLookIds?: Set<string>;
   onLookChange: (lookId: string) => void;
   onContinue: () => void;
 }
@@ -25,7 +26,7 @@ interface TalentLook {
 
 const OUTPUT_SIZE = 1000; // Final crop size
 
-export function HeadCropTab({ projectId, lookId, talentId, onLookChange, onContinue }: HeadCropTabProps) {
+export function HeadCropTab({ projectId, lookId, talentId, selectedLookIds, onLookChange, onContinue }: HeadCropTabProps) {
   const [looks, setLooks] = useState<TalentLook[]>([]);
   const [sourceImages, setSourceImages] = useState<LookSourceImage[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -64,15 +65,21 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
         .eq("project_id", projectId)
         .order("created_at");
       if (data) {
-        setLooks(data);
-        // Auto-select first look if none selected
-        if (!lookId && data.length > 0) {
-          onLookChange(data[0].id);
+        // Filter by selectedLookIds if provided
+        const filteredLooks = selectedLookIds && selectedLookIds.size > 0
+          ? data.filter(l => selectedLookIds.has(l.id))
+          : data;
+        setLooks(filteredLooks);
+        // Auto-select first look if none selected or current is not in filtered list
+        if (filteredLooks.length > 0) {
+          if (!lookId || !filteredLooks.find(l => l.id === lookId)) {
+            onLookChange(filteredLooks[0].id);
+          }
         }
       }
     };
     fetchLooks();
-  }, [projectId, lookId, onLookChange]);
+  }, [projectId, lookId, onLookChange, selectedLookIds]);
 
   // Fetch source images for current look
   useEffect(() => {

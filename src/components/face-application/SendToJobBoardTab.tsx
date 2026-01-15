@@ -12,9 +12,10 @@ import { DEFAULT_BRIEF } from '@/types/job-handoff';
 
 interface SendToJobBoardTabProps {
   projectId: string;
+  selectedLookIds?: Set<string>;
 }
 
-export function SendToJobBoardTab({ projectId }: SendToJobBoardTabProps) {
+export function SendToJobBoardTab({ projectId, selectedLookIds }: SendToJobBoardTabProps) {
   const navigate = useNavigate();
   const [projectName, setProjectName] = useState('');
   const [jobGroupName, setJobGroupName] = useState('');

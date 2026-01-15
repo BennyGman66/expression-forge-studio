@@ -21,6 +21,7 @@ interface ReviewTabProps {
   projectId: string;
   lookId: string | null;
   talentId: string | null;
+  selectedLookIds?: Set<string>;
 }
 
 interface TalentInfo {
@@ -82,7 +83,7 @@ function calculateViewStatus(outputs: FaceApplicationOutput[], view: string): Vi
   };
 }
 
-export function ReviewTab({ projectId }: ReviewTabProps) {
+export function ReviewTab({ projectId, selectedLookIds }: ReviewTabProps) {
   const [looks, setLooks] = useState<LookWithViews[]>([]);
   const [selectedLookId, setSelectedLookId] = useState<string | null>(null);
   const [selectedView, setSelectedView] = useState<string | null>(null);

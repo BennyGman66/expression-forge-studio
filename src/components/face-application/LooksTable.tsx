@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { LookRowExpanded } from "./LookRowExpanded";
 import { OptimizedImage } from "@/components/shared/OptimizedImage";
@@ -31,6 +32,11 @@ export interface TalentOption {
 interface LooksTableProps {
   looks: LookData[];
   talents: TalentOption[];
+  selectedIds?: Set<string>;
+  onToggleSelection?: (lookId: string) => void;
+  onSelectAll?: () => void;
+  onSelectReady?: () => void;
+  onClearSelection?: () => void;
   onUpdateLook: (lookId: string, updates: Partial<LookData>) => void;
   onDeleteLook: (lookId: string) => void;
   onDuplicateLook: (lookId: string) => void;
@@ -86,6 +92,11 @@ function getStatus(look: LookData): { label: string; variant: "default" | "secon
 export function LooksTable({
   looks,
   talents,
+  selectedIds,
+  onToggleSelection,
+  onSelectAll,
+  onSelectReady,
+  onClearSelection,
   onUpdateLook,
   onDeleteLook,
   onDuplicateLook,
@@ -104,23 +115,64 @@ export function LooksTable({
     return look.sourceImages.find((img) => img.view === view)?.source_url;
   };
 
+  const hasSelection = selectedIds !== undefined && onToggleSelection !== undefined;
+  const allSelected = hasSelection && looks.length > 0 && selectedIds.size === looks.length;
+  const someSelected = hasSelection && selectedIds.size > 0 && selectedIds.size < looks.length;
+
   return (
-    <div className="border rounded-lg overflow-hidden">
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-muted/50">
-            <TableHead className="w-[40px]"></TableHead>
-            <TableHead>Look Name</TableHead>
-            <TableHead className="w-[60px] text-center">Front</TableHead>
-            <TableHead className="w-[60px] text-center">Back</TableHead>
-            <TableHead className="w-[60px] text-center">Side</TableHead>
-            <TableHead className="w-[60px] text-center">Detail</TableHead>
-            <TableHead className="w-[180px]">Model</TableHead>
-            <TableHead className="w-[140px]">Status</TableHead>
-            <TableHead className="w-[150px]">Date Added</TableHead>
-            <TableHead className="w-[50px]"></TableHead>
-          </TableRow>
-        </TableHeader>
+    <div className="space-y-2">
+      {/* Selection controls */}
+      {hasSelection && (
+        <div className="flex items-center gap-2 text-sm">
+          <Button variant="outline" size="sm" onClick={onSelectAll} className="h-7 text-xs">
+            {allSelected ? 'Deselect All' : 'Select All'}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onSelectReady} className="h-7 text-xs">
+            Select Ready ({looks.filter(l => {
+              const views = l.sourceImages.map(img => img.view);
+              return views.includes('front') && views.includes('back');
+            }).length})
+          </Button>
+          {selectedIds.size > 0 && (
+            <Button variant="ghost" size="sm" onClick={onClearSelection} className="h-7 text-xs text-muted-foreground">
+              Clear
+            </Button>
+          )}
+          {selectedIds.size > 0 && (
+            <span className="text-muted-foreground ml-2">{selectedIds.size} selected</span>
+          )}
+        </div>
+      )}
+
+      <div className="border rounded-lg overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/50">
+              {hasSelection && (
+                <TableHead className="w-[40px]">
+                  <Checkbox
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) {
+                        (el as any).indeterminate = someSelected;
+                      }
+                    }}
+                    onCheckedChange={() => onSelectAll?.()}
+                  />
+                </TableHead>
+              )}
+              <TableHead className="w-[40px]"></TableHead>
+              <TableHead>Look Name</TableHead>
+              <TableHead className="w-[60px] text-center">Front</TableHead>
+              <TableHead className="w-[60px] text-center">Back</TableHead>
+              <TableHead className="w-[60px] text-center">Side</TableHead>
+              <TableHead className="w-[60px] text-center">Detail</TableHead>
+              <TableHead className="w-[180px]">Model</TableHead>
+              <TableHead className="w-[140px]">Status</TableHead>
+              <TableHead className="w-[150px]">Date Added</TableHead>
+              <TableHead className="w-[50px]"></TableHead>
+            </TableRow>
+          </TableHeader>
         <TableBody>
           {looks.map((look) => {
             const isExpanded = expandedLookId === look.id;
@@ -133,10 +185,19 @@ export function LooksTable({
                   key={look.id}
                   className={cn(
                     "cursor-pointer transition-colors",
-                    isExpanded && "bg-muted/30"
+                    isExpanded && "bg-muted/30",
+                    hasSelection && selectedIds.has(look.id) && "bg-primary/5"
                   )}
                   onClick={() => toggleExpand(look.id)}
                 >
+                  {hasSelection && (
+                    <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.has(look.id)}
+                        onCheckedChange={() => onToggleSelection?.(look.id)}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="py-2">
                     {isExpanded ? (
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -214,7 +275,7 @@ export function LooksTable({
                 </TableRow>
                 {isExpanded && (
                   <TableRow key={`${look.id}-expanded`}>
-                    <TableCell colSpan={10} className="p-0 bg-muted/20">
+                    <TableCell colSpan={hasSelection ? 11 : 10} className="p-0 bg-muted/20">
                       <LookRowExpanded
                         look={look}
                         talents={talents}
@@ -233,5 +294,6 @@ export function LooksTable({
         </TableBody>
       </Table>
     </div>
+  </div>
   );
 }
