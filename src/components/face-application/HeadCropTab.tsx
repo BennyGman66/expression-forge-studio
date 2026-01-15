@@ -44,6 +44,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [expandingAll, setExpandingAll] = useState(false);
   const [expandProgress, setExpandProgress] = useState({ current: 0, total: 0 });
   const [ignoringLook, setIgnoringLook] = useState(false);
+  const [skippingImage, setSkippingImage] = useState(false);
   // Cached bounds to ensure consistent coordinate calculations
   const [cachedBounds, setCachedBounds] = useState<{
     offsetX: number;
@@ -623,6 +624,35 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     }
   };
 
+  const handleSkipImage = async () => {
+    if (!currentImage) return;
+    
+    setSkippingImage(true);
+    try {
+      // Mark this specific view as 'completed' without requiring a crop
+      await workflowState.updateViewState(currentImage.look_id, currentImage.view, 'crop', 'completed', 'user_skipped');
+      
+      toast({
+        title: "Image skipped",
+        description: `${currentImage.view} marked as complete without cropping.`,
+      });
+      
+      // Move to next image if available
+      if (selectedIndex < sourceImages.length - 1) {
+        setSelectedIndex(selectedIndex + 1);
+      }
+    } catch (error) {
+      console.error('Error skipping image:', error);
+      toast({
+        title: "Error",
+        description: "Failed to skip image",
+        variant: "destructive",
+      });
+    } finally {
+      setSkippingImage(false);
+    }
+  };
+
   const allCropped = sourceImages.every((img) => img.head_cropped_url);
 
   // Filter source images based on workflow filter mode
@@ -838,6 +868,14 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
               >
                 <ArrowRight className="h-4 w-4 mr-1" />
                 {ignoringLook ? "Skipping..." : "Skip Look"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSkipImage}
+                disabled={skippingImage || !currentImage}
+              >
+                {skippingImage ? "Skipping..." : "Skip Image"}
               </Button>
               <Button
                 size="sm"
