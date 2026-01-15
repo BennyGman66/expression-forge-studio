@@ -50,6 +50,7 @@ export interface WorkflowStateContextValue {
   refetch: () => Promise<void>;
   isLoading: boolean;
   isSyncing: boolean;
+  stateVersion: number;
 }
 
 // View types used in the pipeline - matches actual database values

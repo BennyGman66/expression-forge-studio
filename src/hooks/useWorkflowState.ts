@@ -23,6 +23,7 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [detectedViews, setDetectedViews] = useState<string[]>([]);
+  const [stateVersion, setStateVersion] = useState(0);
 
   // Fetch all view states for the project
   const fetchStates = useCallback(async () => {
@@ -72,6 +73,7 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
       
       setDetectedViews(Array.from(viewsSet));
       setLookStates(statesMap);
+      setStateVersion(v => v + 1);
     } catch (error) {
       console.error('Error fetching workflow states:', error);
     } finally {
@@ -358,6 +360,9 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
       newMap.set(lookId, [...existing]);
       return newMap;
     });
+    
+    // Increment version to force re-renders in consuming components
+    setStateVersion(v => v + 1);
   }, [user?.id]);
 
   // Sign off a view (mark as signed_off)
@@ -459,5 +464,6 @@ export function useWorkflowState({ projectId }: UseWorkflowStateProps): Workflow
     refetch: fetchStates,
     isLoading,
     isSyncing,
+    stateVersion,
   };
 }
