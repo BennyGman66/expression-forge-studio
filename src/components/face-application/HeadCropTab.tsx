@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage } from "@/types/face-application";
 import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
 import { LooksSwitcher } from "./shared/LooksSwitcher";
-import { isViewComplete, lookNeedsActionForTab } from "@/lib/workflowFilterUtils";
+import { isViewComplete, lookNeedsActionForTab, lookNeedsActionForCropTab } from "@/lib/workflowFilterUtils";
 
 interface HeadCropTabProps {
   projectId: string;
@@ -621,9 +621,9 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
         description: `Marked ${views.length} views as complete.`,
       });
       
-      // Auto-advance to next look needing action
+      // Auto-advance to next look needing action (using crop-specific logic)
       const nextLook = looks.find(l => 
-        l.id !== lookId && lookNeedsActionForTab(workflowState.lookStates, l.id, 'crop')
+        l.id !== lookId && lookNeedsActionForCropTab(workflowState.lookStates, l.id, allLooksViews.get(l.id) || [])
       );
       if (nextLook) {
         onLookChange(nextLook.id);
@@ -681,6 +681,53 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
       setSkippingImage(false);
     }
   };
+
+  // Build map of look -> available views for crop-specific filtering
+  const availableViewsByLook = useMemo(() => {
+    const map = new Map<string, string[]>();
+    
+    // Group source images by look across all looks
+    // We need to fetch this from the source images we have
+    // For now, we'll build from current sourceImages (for current look)
+    // The LooksSwitcher will use this for the current look's sibling looks
+    for (const look of looks) {
+      // We only have sourceImages for the current look loaded
+      // For other looks, we'll need to track this differently
+      if (look.id === lookId) {
+        map.set(look.id, sourceImages.map(img => img.view));
+      }
+    }
+    
+    return map;
+  }, [looks, lookId, sourceImages]);
+  
+  // Effect to fetch all looks' views for accurate filtering
+  const [allLooksViews, setAllLooksViews] = useState<Map<string, string[]>>(new Map());
+  
+  useEffect(() => {
+    if (!projectId || looks.length === 0) return;
+    
+    const fetchAllViews = async () => {
+      const lookIds = looks.map(l => l.id);
+      const { data } = await supabase
+        .from("look_source_images")
+        .select("look_id, view")
+        .in("look_id", lookIds);
+      
+      if (data) {
+        const map = new Map<string, string[]>();
+        for (const row of data) {
+          if (!map.has(row.look_id)) {
+            map.set(row.look_id, []);
+          }
+          map.get(row.look_id)!.push(row.view);
+        }
+        setAllLooksViews(map);
+      }
+    };
+    
+    fetchAllViews();
+  }, [projectId, looks]);
 
   const allCropped = sourceImages.every((img) => img.head_cropped_url);
 
@@ -868,6 +915,7 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                 selectedLookId={lookId}
                 tab="crop"
                 onLookChange={onLookChange}
+                availableViewsByLook={allLooksViews}
               />
             </div>
           )}
