@@ -187,6 +187,8 @@ function FaceApplicationWorkspace({
           totalCount={currentTabSummary.total}
           completeCount={currentTabSummary.complete}
           currentTab={activeTab as TabName}
+          isLoading={workflowState.isLoading}
+          isSyncing={workflowState.isSyncing}
         />
 
         <main className="flex-1 p-6 overflow-auto">
