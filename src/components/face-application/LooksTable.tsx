@@ -1,15 +1,17 @@
-import { useState } from "react";
+import { useState, useRef, useMemo } from "react";
 import { ChevronDown, ChevronRight, MoreHorizontal, Trash2, Copy, Image as ImageIcon, Check, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { LookRowExpanded } from "./LookRowExpanded";
-import { OptimizedImage } from "@/components/shared/OptimizedImage";
+import { getImageUrl } from "@/lib/imageUtils";
 import { cn } from "@/lib/utils";
+
 export interface LookData {
   id: string;
   name: string;
@@ -47,15 +49,23 @@ interface LooksTableProps {
 }
 
 const VIEWS = ["front", "back", "side", "detail"] as const;
+const ROW_HEIGHT = 56; // pixels
+const EXPANDED_ROW_HEIGHT = 320; // approximate height for expanded row
 
-function ViewThumbnail({ url, isRequired }: { url?: string; isRequired: boolean }) {
+/**
+ * TinyThumbnail - Lightweight thumbnail without IntersectionObserver overhead
+ * Uses native browser lazy loading for tiny images
+ */
+function TinyThumbnail({ url, isRequired }: { url?: string; isRequired: boolean }) {
   if (url) {
+    const tinyUrl = getImageUrl(url, "tiny");
     return (
       <div className="w-10 h-10 rounded overflow-hidden bg-muted">
-        <OptimizedImage 
-          src={url} 
-          tier="tiny" 
-          containerClassName="w-full h-full"
+        <img
+          src={tinyUrl}
+          alt=""
+          loading="lazy"
+          className="w-full h-full object-cover"
         />
       </div>
     );
@@ -106,6 +116,7 @@ export function LooksTable({
   uploadingViews,
 }: LooksTableProps) {
   const [expandedLookId, setExpandedLookId] = useState<string | null>(null);
+  const parentRef = useRef<HTMLDivElement>(null);
 
   const toggleExpand = (lookId: string) => {
     setExpandedLookId((prev) => (prev === lookId ? null : lookId));
@@ -118,6 +129,28 @@ export function LooksTable({
   const hasSelection = selectedIds !== undefined && onToggleSelection !== undefined;
   const allSelected = hasSelection && looks.length > 0 && selectedIds.size === looks.length;
   const someSelected = hasSelection && selectedIds.size > 0 && selectedIds.size < looks.length;
+
+  // Build flat list with expansion rows
+  const flatRows = useMemo(() => {
+    const rows: { type: 'look' | 'expanded'; look: LookData }[] = [];
+    for (const look of looks) {
+      rows.push({ type: 'look', look });
+      if (expandedLookId === look.id) {
+        rows.push({ type: 'expanded', look });
+      }
+    }
+    return rows;
+  }, [looks, expandedLookId]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: flatRows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (index) => {
+      const row = flatRows[index];
+      return row.type === 'expanded' ? EXPANDED_ROW_HEIGHT : ROW_HEIGHT;
+    },
+    overscan: 5,
+  });
 
   return (
     <div className="space-y-2">
@@ -145,6 +178,7 @@ export function LooksTable({
       )}
 
       <div className="border rounded-lg overflow-hidden">
+        {/* Fixed Header */}
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50">
@@ -173,52 +207,112 @@ export function LooksTable({
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
-        <TableBody>
-          {looks.map((look) => {
-            const isExpanded = expandedLookId === look.id;
-            const status = getStatus(look);
-            const talentName = talents.find((t) => t.id === look.digital_talent_id)?.name;
+        </Table>
 
-            return (
-              <>
-                <TableRow
+        {/* Virtualized Body */}
+        <div
+          ref={parentRef}
+          className="overflow-auto"
+          style={{ maxHeight: 'calc(100vh - 300px)' }}
+        >
+          <div
+            style={{
+              height: `${rowVirtualizer.getTotalSize()}px`,
+              width: '100%',
+              position: 'relative',
+            }}
+          >
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const row = flatRows[virtualRow.index];
+              const look = row.look;
+              const isExpanded = expandedLookId === look.id;
+              const status = getStatus(look);
+
+              if (row.type === 'expanded') {
+                return (
+                  <div
+                    key={`${look.id}-expanded`}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className="bg-muted/20 border-b"
+                  >
+                    <LookRowExpanded
+                      look={look}
+                      talents={talents}
+                      onUpdateLook={onUpdateLook}
+                      onUploadImage={onUploadImage}
+                      onRemoveImage={onRemoveImage}
+                      onChangeImageView={onChangeImageView}
+                      uploadingViews={uploadingViews}
+                    />
+                  </div>
+                );
+              }
+
+              return (
+                <div
                   key={look.id}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
                   className={cn(
-                    "cursor-pointer transition-colors",
+                    "flex items-center border-b cursor-pointer transition-colors hover:bg-muted/50",
                     isExpanded && "bg-muted/30",
                     hasSelection && selectedIds.has(look.id) && "bg-primary/5"
                   )}
                   onClick={() => toggleExpand(look.id)}
                 >
+                  {/* Checkbox */}
                   {hasSelection && (
-                    <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="w-[40px] flex-shrink-0 px-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.has(look.id)}
                         onCheckedChange={() => onToggleSelection?.(look.id)}
                       />
-                    </TableCell>
+                    </div>
                   )}
-                  <TableCell className="py-2">
+
+                  {/* Expand icon */}
+                  <div className="w-[40px] flex-shrink-0 px-3">
                     {isExpanded ? (
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     ) : (
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     )}
-                  </TableCell>
-                  <TableCell className="py-2 font-medium">{look.name}</TableCell>
-                  <TableCell className="py-2">
-                    <ViewThumbnail url={getViewUrl(look, "front")} isRequired />
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <ViewThumbnail url={getViewUrl(look, "back")} isRequired />
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <ViewThumbnail url={getViewUrl(look, "side")} isRequired={false} />
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <ViewThumbnail url={getViewUrl(look, "detail")} isRequired={false} />
-                  </TableCell>
-                  <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
+                  </div>
+
+                  {/* Look Name */}
+                  <div className="flex-1 min-w-0 px-3 font-medium truncate">
+                    {look.name}
+                  </div>
+
+                  {/* View Thumbnails */}
+                  <div className="w-[60px] flex-shrink-0 px-3 flex justify-center">
+                    <TinyThumbnail url={getViewUrl(look, "front")} isRequired />
+                  </div>
+                  <div className="w-[60px] flex-shrink-0 px-3 flex justify-center">
+                    <TinyThumbnail url={getViewUrl(look, "back")} isRequired />
+                  </div>
+                  <div className="w-[60px] flex-shrink-0 px-3 flex justify-center">
+                    <TinyThumbnail url={getViewUrl(look, "side")} isRequired={false} />
+                  </div>
+                  <div className="w-[60px] flex-shrink-0 px-3 flex justify-center">
+                    <TinyThumbnail url={getViewUrl(look, "detail")} isRequired={false} />
+                  </div>
+
+                  {/* Model Select */}
+                  <div className="w-[180px] flex-shrink-0 px-3" onClick={(e) => e.stopPropagation()}>
                     <Select
                       value={look.digital_talent_id || "none"}
                       onValueChange={(value) =>
@@ -239,18 +333,24 @@ export function LooksTable({
                         ))}
                       </SelectContent>
                     </Select>
-                  </TableCell>
-                  <TableCell className="py-2">
+                  </div>
+
+                  {/* Status */}
+                  <div className="w-[140px] flex-shrink-0 px-3">
                     <Badge variant={status.variant} className="text-xs">
                       {status.variant === "default" && <Check className="h-3 w-3 mr-1" />}
                       {status.variant === "destructive" && <AlertCircle className="h-3 w-3 mr-1" />}
                       {status.label}
                     </Badge>
-                  </TableCell>
-                  <TableCell className="py-2 text-sm text-muted-foreground">
+                  </div>
+
+                  {/* Date Added */}
+                  <div className="w-[150px] flex-shrink-0 px-3 text-sm text-muted-foreground">
                     {look.created_at ? format(new Date(look.created_at), "MMM d, yyyy h:mm a") : "—"}
-                  </TableCell>
-                  <TableCell className="py-2" onClick={(e) => e.stopPropagation()}>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="w-[50px] flex-shrink-0 px-3" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -271,29 +371,13 @@ export function LooksTable({
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-                {isExpanded && (
-                  <TableRow key={`${look.id}-expanded`}>
-                    <TableCell colSpan={hasSelection ? 11 : 10} className="p-0 bg-muted/20">
-                      <LookRowExpanded
-                        look={look}
-                        talents={talents}
-                        onUpdateLook={onUpdateLook}
-                        onUploadImage={onUploadImage}
-                        onRemoveImage={onRemoveImage}
-                        onChangeImageView={onChangeImageView}
-                        uploadingViews={uploadingViews}
-                      />
-                    </TableCell>
-                  </TableRow>
-                )}
-              </>
-            );
-          })}
-        </TableBody>
-      </Table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
   );
 }

@@ -32,7 +32,7 @@ export const OptimizedImage = memo(function OptimizedImage({
   className,
   containerClassName,
   aspectRatio,
-  rootMargin = "100px",
+  rootMargin = "200px",
   showPlaceholder = true,
   onLoad,
   onError,
