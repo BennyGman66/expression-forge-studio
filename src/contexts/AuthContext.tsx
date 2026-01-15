@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isClient = roles.includes('client');
 
   // Fetch user profile and roles
-  const fetchUserData = async (userId: string) => {
+  const fetchUserData = async (userId: string, userMetadata?: Record<string, any>) => {
     try {
       // Fetch profile
       const { data: profileData, error: profileError } = await supabase
@@ -67,7 +67,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (rolesError) {
         console.error('Error fetching roles:', rolesError);
       } else if (rolesData) {
-        setRoles(rolesData.map(r => r.role as AppRole));
+        const userRoles = rolesData.map(r => r.role as AppRole);
+        setRoles(userRoles);
+        
+        // Auto-assign freelancer role if user has freelancer metadata but no roles yet
+        if (userRoles.length === 0 && userMetadata?.role === 'freelancer') {
+          try {
+            const { error: assignError } = await supabase.functions.invoke('assign-role', {
+              body: { userId, role: 'freelancer' },
+            });
+            
+            if (!assignError) {
+              setRoles(['freelancer']);
+              console.log('Auto-assigned freelancer role');
+            } else {
+              console.error('Error auto-assigning freelancer role:', assignError);
+            }
+          } catch (e) {
+            console.error('Failed to auto-assign freelancer role:', e);
+          }
+        }
       }
     } catch (error) {
       console.error('Error in fetchUserData:', error);
@@ -84,7 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Defer Supabase calls with setTimeout to prevent deadlock
         if (session?.user) {
           setTimeout(() => {
-            fetchUserData(session.user.id);
+            fetchUserData(session.user.id, session.user.user_metadata);
           }, 0);
         } else {
           setProfile(null);
@@ -101,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(session?.user ?? null);
       
       if (session?.user) {
-        fetchUserData(session.user.id);
+        fetchUserData(session.user.id, session.user.user_metadata);
       }
       
       setIsLoading(false);

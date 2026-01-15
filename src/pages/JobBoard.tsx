@@ -179,10 +179,10 @@ export default function JobBoard() {
             <Button
               variant="outline"
               onClick={() => {
-                const shareUrl = `${window.location.origin}/work`;
+                const shareUrl = `${window.location.origin}/freelancer/join`;
                 navigator.clipboard.writeText(shareUrl);
                 setShareLinkCopied(true);
-                toast.success('Freelancer link copied!');
+                toast.success('Freelancer signup link copied!');
                 setTimeout(() => setShareLinkCopied(false), 2000);
               }}
             >
@@ -191,7 +191,7 @@ export default function JobBoard() {
               ) : (
                 <Share2 className="h-4 w-4 mr-2" />
               )}
-              Share Board
+              Invite Freelancers
             </Button>
             <Button onClick={() => setCreateDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />

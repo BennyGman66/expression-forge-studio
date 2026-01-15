@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useFreelancerJobs, useDeleteJob } from '@/hooks/useJobs';
+import { useFreelancerJobs, useDeleteJob, useClaimJob } from '@/hooks/useJobs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Briefcase, Clock, CheckCircle, ArrowRight, AlertCircle, AlertTriangle, Trash2 } from 'lucide-react';
+import { Briefcase, Clock, CheckCircle, ArrowRight, AlertCircle, AlertTriangle, Trash2, Play, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import type { UnifiedJob } from '@/types/jobs';
 import {
@@ -23,7 +23,9 @@ export default function FreelancerDashboard() {
   const { user, profile, isFreelancer, isInternal, isAdmin } = useAuth();
   const navigate = useNavigate();
   const deleteJob = useDeleteJob();
+  const claimJob = useClaimJob();
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
+  const [claimingJobId, setClaimingJobId] = useState<string | null>(null);
   
   // Fetch claimable (open/unassigned) jobs + user's assigned jobs
   const { data, isLoading } = useFreelancerJobs(user?.id);
@@ -77,6 +79,20 @@ export default function FreelancerDashboard() {
   const handleDeleteClick = (e: React.MouseEvent, jobId: string) => {
     e.stopPropagation();
     setJobToDelete(jobId);
+  };
+
+  const handleClaimJob = async (e: React.MouseEvent, jobId: string) => {
+    e.stopPropagation();
+    if (!user?.id) return;
+    
+    setClaimingJobId(jobId);
+    try {
+      await claimJob.mutateAsync({ jobId, userId: user.id });
+      // Navigate to the job after claiming
+      navigate(`/freelancer/jobs/${jobId}`);
+    } finally {
+      setClaimingJobId(null);
+    }
   };
 
   const renderJobRow = (job: UnifiedJob, variant: 'default' | 'orange' = 'default') => {
@@ -217,21 +233,58 @@ export default function FreelancerDashboard() {
             </Card>
           )}
 
-          {/* Open Jobs */}
+          {/* Open Jobs - Claimable */}
           <Card className="bg-card border-border">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <AlertCircle className="h-5 w-5 text-blue-400" />
                 Open Jobs
+                <span className="text-xs font-normal text-muted-foreground ml-1">
+                  (click to claim)
+                </span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {isLoading ? (
                 <p className="text-muted-foreground">Loading...</p>
               ) : openJobs.length === 0 ? (
-                <p className="text-muted-foreground text-sm">No open jobs assigned</p>
+                <p className="text-muted-foreground text-sm">No open jobs available</p>
               ) : (
-                openJobs.slice(0, 5).map(job => renderJobRow(job))
+                openJobs.slice(0, 5).map(job => (
+                  <div
+                    key={job.id}
+                    className="p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors h-[56px] flex items-center"
+                  >
+                    <div className="flex items-center justify-between w-full gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground flex items-center">
+                          <span className="truncate">{getJobTitle(job)}</span>
+                          {getPriorityBadge(job.priority)}
+                        </p>
+                        {job.due_date && (
+                          <p className="text-xs text-muted-foreground">
+                            Due: {format(new Date(job.due_date), 'MMM d')}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        className="h-8"
+                        onClick={(e) => handleClaimJob(e, job.id)}
+                        disabled={claimingJobId === job.id}
+                      >
+                        {claimingJobId === job.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Play className="h-3 w-3 mr-1" />
+                            Start
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                ))
               )}
               {openJobs.length > 5 && (
                 <Button variant="ghost" className="w-full" onClick={() => navigate('/freelancer/jobs?status=OPEN')}>

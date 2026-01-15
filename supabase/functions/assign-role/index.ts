@@ -37,28 +37,51 @@ serve(async (req) => {
       );
     }
 
-    // Check if any admin exists
-    const { data: existingAdmins, error: checkError } = await supabase
+    // Check if user already has a role
+    const { data: existingRole, error: existingRoleError } = await supabase
       .from('user_roles')
-      .select('id')
-      .eq('role', 'admin');
+      .select('id, role')
+      .eq('user_id', userId)
+      .maybeSingle();
 
-    if (checkError) {
-      console.error('Error checking for existing admins:', checkError);
+    if (existingRoleError) {
+      console.error('Error checking existing role:', existingRoleError);
+    }
+
+    // If user already has the requested role, return success
+    if (existingRole && existingRole.role === role) {
       return new Response(
-        JSON.stringify({ error: 'Failed to check existing admins' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: true, data: existingRole, message: 'Role already assigned' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // If admins exist and trying to create admin, reject (security measure for bootstrap only)
-    if (existingAdmins && existingAdmins.length > 0 && role === 'admin') {
-      console.log('Admin already exists, rejecting bootstrap attempt');
-      return new Response(
-        JSON.stringify({ error: 'An admin already exists. Use the admin panel to assign roles.' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    // For admin role, check if any admin exists (security measure for bootstrap only)
+    if (role === 'admin') {
+      const { data: existingAdmins, error: checkError } = await supabase
+        .from('user_roles')
+        .select('id')
+        .eq('role', 'admin');
+
+      if (checkError) {
+        console.error('Error checking for existing admins:', checkError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to check existing admins' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (existingAdmins && existingAdmins.length > 0) {
+        console.log('Admin already exists, rejecting bootstrap attempt');
+        return new Response(
+          JSON.stringify({ error: 'An admin already exists. Use the admin panel to assign roles.' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
+
+    // Freelancers can self-register (no admin check needed)
+    // This allows the magic link flow to auto-assign freelancer role
 
     // Insert the role
     const { data, error: insertError } = await supabase
