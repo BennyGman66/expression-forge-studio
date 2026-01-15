@@ -73,6 +73,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
 
       // Build looks with images
       const looksWithImages: LookWithImages[] = filteredLooksData
+        .filter(look => look.digital_talent_id !== null)
         .map(look => ({
           id: look.id,
           name: look.name,
