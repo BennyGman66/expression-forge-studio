@@ -20,6 +20,7 @@ interface ViewSlotProps {
   onCropClick: () => void;
   onSkip?: () => void;
   isOver?: boolean;
+  isSkipped?: boolean;
 }
 
 export function ViewSlot({
@@ -29,6 +30,7 @@ export function ViewSlot({
   onCropClick,
   onSkip,
   isOver,
+  isSkipped = false,
 }: ViewSlotProps) {
   const hasCrop = !!sourceImage.head_cropped_url;
   const viewLabel = VIEW_LABELS[sourceImage.view] || sourceImage.view;
@@ -42,7 +44,49 @@ export function ViewSlot({
 
   const showDropIndicator = hasCrop && (isOver || isDragOver);
 
-  // If not cropped, show a prominent "needs crop" state
+  // If not cropped but skipped - show green "skipped" state
+  if (!hasCrop && isSkipped) {
+    return (
+      <div className="relative rounded-lg border-2 border-emerald-500/50 bg-emerald-50/50 p-3">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            {viewLabel}
+          </span>
+          <div className="flex items-center gap-1 text-emerald-600">
+            <SkipForward className="h-3 w-3" />
+            <span className="text-xs font-medium">Skipped</span>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex gap-3">
+          <div className="relative">
+            <img
+              src={sourceImage.source_url}
+              alt={viewLabel}
+              className="w-20 h-20 object-cover rounded-lg opacity-50"
+            />
+          </div>
+
+          {/* Arrow */}
+          <div className="flex items-center opacity-30">
+            <div className="w-6 h-px bg-muted-foreground/30" />
+            <div className="w-0 h-0 border-t-4 border-b-4 border-l-6 border-transparent border-l-muted-foreground/30" />
+          </div>
+
+          {/* Skipped indicator */}
+          <div className="w-20 h-20 rounded-lg border-2 border-emerald-500/50 bg-emerald-50 flex items-center justify-center">
+            <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+              <Check className="h-3 w-3 text-white" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If not cropped, show "needs crop" state with smaller buttons
   if (!hasCrop) {
     return (
       <div className="relative rounded-lg border-2 border-dashed border-rose-300 bg-rose-50/50 p-3">
@@ -51,15 +95,6 @@ export function ViewSlot({
           <span className="text-xs font-medium text-rose-600 uppercase tracking-wide">
             {viewLabel} — Needs Crop
           </span>
-          {onSkip && (
-            <button
-              onClick={onSkip}
-              className="text-xs text-primary hover:text-primary/80 font-medium flex items-center gap-1"
-            >
-              <SkipForward className="h-3 w-3" />
-              Skip
-            </button>
-          )}
         </div>
 
         {/* Content */}
@@ -90,16 +125,29 @@ export function ViewSlot({
           </div>
         </div>
 
-        {/* Crop action - prominent */}
-        <Button
-          variant="default"
-          size="sm"
-          className="w-full mt-3 h-8 text-xs bg-rose-600 hover:bg-rose-700"
-          onClick={onCropClick}
-        >
-          <Crop className="h-3 w-3 mr-1" />
-          Crop Now
-        </Button>
+        {/* Action buttons - smaller, side by side */}
+        <div className="flex gap-2 mt-3">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 h-7 text-xs"
+            onClick={onCropClick}
+          >
+            <Crop className="h-3 w-3 mr-1" />
+            Crop Now
+          </Button>
+          {onSkip && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 h-7 text-xs text-primary border-primary/50 hover:bg-primary/10"
+              onClick={onSkip}
+            >
+              <SkipForward className="h-3 w-3 mr-1" />
+              Skip Now
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
