@@ -139,14 +139,25 @@ export function LooksTable({
     
     if (searchTerms.length === 0) return looks;
     
-    return looks.filter((look) => {
-      const lookName = look.name.toLowerCase();
-      const lookCode = (look.look_code || "").toLowerCase();
-      
-      return searchTerms.some(
-        (term) => lookName.includes(term) || lookCode.includes(term)
-      );
-    });
+    // Filter and track which search term each look matched
+    const matchedLooks = looks
+      .map((look) => {
+        const lookName = look.name.toLowerCase();
+        const lookCode = (look.look_code || "").toLowerCase();
+        
+        // Find the first matching search term's index
+        const matchIndex = searchTerms.findIndex(
+          (term) => lookName.includes(term) || lookCode.includes(term)
+        );
+        
+        return { look, matchIndex };
+      })
+      .filter(({ matchIndex }) => matchIndex !== -1);
+    
+    // Sort by the order of search terms (maintains relative order for same term)
+    matchedLooks.sort((a, b) => a.matchIndex - b.matchIndex);
+    
+    return matchedLooks.map(({ look }) => look);
   }, [looks, searchQuery]);
 
   const hasSelection = selectedIds !== undefined && onToggleSelection !== undefined;
