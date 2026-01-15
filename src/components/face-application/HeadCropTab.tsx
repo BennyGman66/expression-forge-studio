@@ -795,7 +795,10 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
                         draggable={false}
                       />
                     ) : imageReady && getLivePreviewStyle() ? (
-                      <div className="absolute bottom-0 left-0 right-0 h-1/2 overflow-hidden">
+                      <div 
+                        className="absolute left-0 right-0 overflow-hidden"
+                        style={{ top: '80px', height: '80px' }}
+                      >
                         <img
                           src={currentImage.source_url}
                           alt="Live preview"
