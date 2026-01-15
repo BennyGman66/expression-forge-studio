@@ -240,8 +240,9 @@ export function LooksTable({
                       width: '100%',
                       height: `${virtualRow.size}px`,
                       transform: `translateY(${virtualRow.start}px)`,
+                      zIndex: 10,
                     }}
-                    className="bg-muted/20 border-b"
+                    className="bg-background border-b"
                   >
                     <LookRowExpanded
                       look={look}
@@ -266,9 +267,10 @@ export function LooksTable({
                     width: '100%',
                     height: `${virtualRow.size}px`,
                     transform: `translateY(${virtualRow.start}px)`,
+                    zIndex: isExpanded ? 11 : 1,
                   }}
                   className={cn(
-                    "flex items-center flex-nowrap overflow-hidden border-b cursor-pointer transition-colors hover:bg-muted/50",
+                    "flex items-center flex-nowrap overflow-hidden border-b cursor-pointer transition-colors hover:bg-muted/50 bg-background",
                     isExpanded && "bg-muted/30",
                     hasSelection && selectedIds.has(look.id) && "bg-primary/5"
                   )}
