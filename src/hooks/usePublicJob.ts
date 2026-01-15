@@ -56,11 +56,17 @@ export function usePublicFreelancerJobs(freelancerIdentityId: string | undefined
   return useQuery({
     queryKey: ['public-freelancer-jobs', freelancerIdentityId],
     queryFn: async () => {
-      // Fetch open jobs (claimable) and jobs assigned to this freelancer
+      // Fetch all active jobs: open, in progress, submitted, needs changes
+      // Include freelancer identity data for showing who's working on each job
       const { data, error } = await supabase
         .from('unified_jobs')
-        .select('*')
-        .or(`and(status.eq.OPEN,freelancer_identity_id.is.null),freelancer_identity_id.eq.${freelancerIdentityId}`)
+        .select(`
+          *,
+          freelancer:freelancer_identities!freelancer_identity_id(
+            id, first_name, last_name, display_name
+          )
+        `)
+        .or(`status.eq.OPEN,status.eq.IN_PROGRESS,status.eq.SUBMITTED,status.eq.NEEDS_CHANGES`)
         .order('created_at', { ascending: false });
 
       if (error) throw error;

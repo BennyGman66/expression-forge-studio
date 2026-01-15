@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Briefcase, Clock, CheckCircle, AlertCircle, AlertTriangle, User, ArrowRight, Eye } from 'lucide-react';
+import { Briefcase, Clock, CheckCircle, AlertCircle, AlertTriangle, User, ArrowRight, Eye, Users } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { format } from 'date-fns';
 import { FreelancerNamePrompt } from '@/components/freelancer/FreelancerNamePrompt';
 import { useQueryClient } from '@tanstack/react-query';
@@ -36,6 +37,29 @@ export default function PublicFreelancerBoard() {
   const needsChangesJobs = myJobs.filter(j => j.status === 'NEEDS_CHANGES');
   const submittedJobs = myJobs.filter(j => j.status === 'SUBMITTED');
   const completedJobs = myJobs.filter(j => j.status === 'APPROVED' || j.status === 'CLOSED');
+
+  // Jobs being worked on by OTHER freelancers
+  const othersJobs = jobs.filter(job => 
+    job.freelancer_identity_id && 
+    job.freelancer_identity_id !== identity?.id &&
+    ['IN_PROGRESS', 'SUBMITTED', 'NEEDS_CHANGES'].includes(job.status)
+  );
+
+  // Helper to get initials from freelancer name
+  const getInitials = (freelancer: UnifiedJob['freelancer']) => {
+    if (!freelancer) return '??';
+    const displayName = freelancer.display_name || `${freelancer.first_name} ${freelancer.last_name}`;
+    const parts = displayName.trim().split(' ');
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[parts.length-1][0]}`.toUpperCase();
+    }
+    return parts[0].substring(0, 2).toUpperCase();
+  };
+
+  const getFreelancerName = (freelancer: UnifiedJob['freelancer']) => {
+    if (!freelancer) return 'Unknown';
+    return freelancer.display_name || `${freelancer.first_name} ${freelancer.last_name}`;
+  };
 
   // Real-time subscription for job updates
   useEffect(() => {
@@ -348,6 +372,61 @@ export default function PublicFreelancerBoard() {
               {inProgressJobs.length > 5 && (
                 <p className="text-xs text-center text-muted-foreground">
                   +{inProgressJobs.length - 5} more in-progress jobs
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Being Worked On by Others */}
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Users className="h-5 w-5 text-muted-foreground" />
+                Being Worked On
+                <span className="text-xs font-normal text-muted-foreground ml-1">
+                  (by others)
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {jobsLoading ? (
+                <p className="text-muted-foreground">Loading...</p>
+              ) : othersJobs.length === 0 ? (
+                <p className="text-muted-foreground text-sm">No jobs being worked on by others</p>
+              ) : (
+                <TooltipProvider>
+                  {othersJobs.slice(0, 8).map(job => (
+                    <div
+                      key={job.id}
+                      className="p-3 rounded-lg bg-muted/30 h-[56px] flex items-center"
+                    >
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-muted-foreground flex items-center">
+                            <span className="truncate">{getJobTitle(job)}</span>
+                          </p>
+                          <Badge className={`${getStatusColor(job.status)} text-xs`}>
+                            {job.status.replace('_', ' ')}
+                          </Badge>
+                        </div>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium text-primary flex-shrink-0 cursor-default">
+                              {getInitials(job.freelancer)}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>{getFreelancerName(job.freelancer)}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </div>
+                  ))}
+                </TooltipProvider>
+              )}
+              {othersJobs.length > 8 && (
+                <p className="text-xs text-center text-muted-foreground">
+                  +{othersJobs.length - 8} more jobs by others
                 </p>
               )}
             </CardContent>

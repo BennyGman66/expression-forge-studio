@@ -59,6 +59,12 @@ export interface UnifiedJob {
     first_name: string;
     last_name: string;
   };
+  freelancer?: {
+    id: string;
+    display_name: string | null;
+    first_name: string;
+    last_name: string;
+  } | null;
   project?: {
     id: string;
     name: string;
