@@ -41,6 +41,8 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [forceDefaultCrop, setForceDefaultCrop] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [expanding, setExpanding] = useState(false);
+  const [expandingAll, setExpandingAll] = useState(false);
+  const [expandProgress, setExpandProgress] = useState({ current: 0, total: 0 });
   // Cached bounds to ensure consistent coordinate calculations
   const [cachedBounds, setCachedBounds] = useState<{
     offsetX: number;
@@ -510,6 +512,77 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
     }
   };
 
+  const handleExpandAllImages = async () => {
+    // Get all source images that haven't been cropped yet
+    const imagesToExpand = sourceImages.filter(img => !img.head_cropped_url);
+    
+    if (imagesToExpand.length === 0) {
+      toast({ title: "Nothing to expand", description: "All images already have crops." });
+      return;
+    }
+    
+    setExpandingAll(true);
+    setExpandProgress({ current: 0, total: imagesToExpand.length });
+    
+    let successCount = 0;
+    for (let i = 0; i < imagesToExpand.length; i++) {
+      const img = imagesToExpand[i];
+      setExpandProgress({ current: i + 1, total: imagesToExpand.length });
+      
+      try {
+        const response = await supabase.functions.invoke("expand-image-top", {
+          body: {
+            imageUrl: img.source_url,
+            imageId: img.id,
+            paddingPercent: 20,
+          },
+        });
+        
+        if (!response.error && response.data?.expandedUrl) {
+          successCount++;
+          const expandedUrl = response.data.expandedUrl;
+          
+          // Clear crop data in database for expanded image
+          await supabase
+            .from("look_source_images")
+            .update({
+              source_url: expandedUrl,
+              head_crop_x: null,
+              head_crop_y: null,
+              head_crop_width: null,
+              head_crop_height: null,
+              head_cropped_url: null,
+            })
+            .eq("id", img.id);
+          
+          // Update local state with new URL
+          setSourceImages(prev => prev.map(s => 
+            s.id === img.id 
+              ? { 
+                  ...s, 
+                  source_url: expandedUrl,
+                  head_crop_x: null,
+                  head_crop_y: null,
+                  head_crop_width: null,
+                  head_crop_height: null,
+                  head_cropped_url: null,
+                }
+              : s
+          ));
+        }
+      } catch (e) {
+        console.error(`Failed to expand image ${img.id}:`, e);
+      }
+    }
+    
+    setExpandingAll(false);
+    setForceDefaultCrop(true);
+    toast({
+      title: "Bulk expansion complete",
+      description: `Expanded ${successCount} of ${imagesToExpand.length} images.`
+    });
+  };
+
   const allCropped = sourceImages.every((img) => img.head_cropped_url);
 
   // Filter source images based on workflow filter mode
@@ -704,7 +777,20 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
         {/* Center: Crop Editor */}
         <Card className="col-span-2">
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Crop Head Region</CardTitle>
+            <div className="flex items-center gap-3">
+              <CardTitle>Crop Head Region</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExpandAllImages}
+                disabled={expandingAll || processing || expanding}
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                {expandingAll 
+                  ? `Expanding ${expandProgress.current}/${expandProgress.total}...` 
+                  : "Expand All Images"}
+              </Button>
+            </div>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
