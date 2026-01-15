@@ -190,6 +190,8 @@ export function ProjectGroupRow({
               const canReview = reviewableStatuses.includes(job.status);
               const needsReview = job.status === "SUBMITTED";
               const wasReviewed = job.status === "APPROVED" || job.status === "NEEDS_CHANGES";
+              const isInProgress = job.status === "IN_PROGRESS";
+              const hasOutputs = (job.outputs_count ?? 0) > 0;
               
               return (
                 <div
@@ -280,7 +282,7 @@ export function ProjectGroupRow({
                           onReviewClick(job.id);
                         }}
                       >
-                        {wasReviewed ? "View" : "Review"}
+                        {wasReviewed ? "View" : isInProgress ? `Preview${hasOutputs ? ` (${job.outputs_count})` : ''}` : "Review"}
                       </Button>
                     )}
                     <Button
@@ -384,6 +386,8 @@ export function UngroupedJobsRow({
               const canReview = reviewableStatuses.includes(job.status);
               const needsReview = job.status === "SUBMITTED";
               const wasReviewed = job.status === "APPROVED" || job.status === "NEEDS_CHANGES";
+              const isInProgress = job.status === "IN_PROGRESS";
+              const hasOutputs = (job.outputs_count ?? 0) > 0;
               
               return (
                 <div
@@ -456,7 +460,7 @@ export function UngroupedJobsRow({
                           onReviewClick(job.id);
                         }}
                       >
-                        {wasReviewed ? "View" : "Review"}
+                        {wasReviewed ? "View" : isInProgress ? `Preview${hasOutputs ? ` (${job.outputs_count})` : ''}` : "Review"}
                       </Button>
                     )}
                     <Button

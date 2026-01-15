@@ -72,7 +72,7 @@ const typeLabels: Record<JobType, string> = {
 };
 
 // Statuses that can have a review panel opened
-const reviewableStatuses: JobStatus[] = ["SUBMITTED", "NEEDS_CHANGES", "APPROVED", "CLOSED"];
+const reviewableStatuses: JobStatus[] = ["IN_PROGRESS", "SUBMITTED", "NEEDS_CHANGES", "APPROVED", "CLOSED"];
 
 export default function JobBoard() {
   const navigate = useNavigate();
@@ -359,6 +359,8 @@ export default function JobBoard() {
                     const canReview = reviewableStatuses.includes(job.status);
                     const needsReview = job.status === "SUBMITTED";
                     const wasReviewed = job.status === "APPROVED" || job.status === "NEEDS_CHANGES";
+                    const isInProgress = job.status === "IN_PROGRESS";
+                    const hasOutputs = (job.outputs_count ?? 0) > 0;
                     
                     return (
                       <TableRow
@@ -436,6 +438,11 @@ export default function JobBoard() {
                                   <>
                                     <CheckCircle className="h-3 w-3" />
                                     View
+                                  </>
+                                ) : isInProgress ? (
+                                  <>
+                                    <Eye className="h-3 w-3" />
+                                    Preview {hasOutputs && `(${job.outputs_count})`}
                                   </>
                                 ) : (
                                   <>
