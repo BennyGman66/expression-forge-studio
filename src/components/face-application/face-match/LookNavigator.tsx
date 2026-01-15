@@ -1,8 +1,8 @@
 import { useRef, useCallback, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Check, ChevronRight, Circle, CircleDot } from "lucide-react";
+import { Check, ChevronRight, Circle, CircleDot, Crop } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { LookWithImages, getLookPairingStatus } from "./types";
+import { LookWithImages, getLookPairingStatus, LookPairingStatus } from "./types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface LookNavigatorProps {
@@ -40,23 +40,27 @@ export function LookNavigator({
     overscan: 5,
   });
 
-  const getStatusIcon = (status: 'empty' | 'partial' | 'complete') => {
+  const getStatusIcon = (status: LookPairingStatus['status']) => {
     switch (status) {
       case 'complete':
         return <Check className="h-4 w-4 text-emerald-500" />;
       case 'partial':
         return <CircleDot className="h-4 w-4 text-amber-500" />;
+      case 'needs_crop':
+        return <Crop className="h-4 w-4 text-rose-500" />;
       default:
         return <Circle className="h-4 w-4 text-muted-foreground/40" />;
     }
   };
 
-  const getStatusColor = (status: 'empty' | 'partial' | 'complete') => {
+  const getStatusColor = (status: LookPairingStatus['status']) => {
     switch (status) {
       case 'complete':
         return 'bg-emerald-500';
       case 'partial':
         return 'bg-amber-500';
+      case 'needs_crop':
+        return 'bg-rose-500';
       default:
         return 'bg-muted-foreground/20';
     }
@@ -116,7 +120,9 @@ export function LookNavigator({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{look.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {status.paired}/{status.total} paired
+                      {status.status === 'needs_crop' 
+                        ? `${status.cropped}/${status.total} cropped` 
+                        : `${status.paired}/${status.total} paired`}
                     </p>
                   </div>
 

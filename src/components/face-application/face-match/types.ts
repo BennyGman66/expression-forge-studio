@@ -14,8 +14,9 @@ export interface PairingState {
 
 export interface LookPairingStatus {
   total: number;
+  cropped: number;
   paired: number;
-  status: 'empty' | 'partial' | 'complete';
+  status: 'needs_crop' | 'empty' | 'partial' | 'complete';
 }
 
 export function getLookPairingStatus(
@@ -23,16 +24,23 @@ export function getLookPairingStatus(
   pairings: Map<string, string>
 ): LookPairingStatus {
   const total = look.sourceImages.length;
-  const paired = look.sourceImages.filter(img => pairings.has(img.id)).length;
+  const cropped = look.sourceImages.filter(img => !!img.head_cropped_url).length;
+  const paired = look.sourceImages.filter(img => !!img.head_cropped_url && pairings.has(img.id)).length;
   
-  let status: 'empty' | 'partial' | 'complete' = 'empty';
-  if (paired === total && total > 0) {
+  let status: 'needs_crop' | 'empty' | 'partial' | 'complete' = 'empty';
+  
+  if (cropped < total) {
+    // Some images still need cropping
+    status = 'needs_crop';
+  } else if (paired === total && total > 0) {
+    // All cropped AND all paired
     status = 'complete';
   } else if (paired > 0) {
+    // Some paired
     status = 'partial';
   }
   
-  return { total, paired, status };
+  return { total, cropped, paired, status };
 }
 
 export interface FaceMatchContextValue {

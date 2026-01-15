@@ -64,11 +64,11 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
       const talentIds = [...new Set(filteredLooksData.map(l => l.digital_talent_id).filter(Boolean))] as string[];
 
       // Fetch source images for all looks
+      // Fetch ALL source images (cropped or not) so we can show uncropped ones with "Crop Now" option
       const { data: allImages } = await supabase
         .from("look_source_images")
         .select("*")
         .in("look_id", filteredLooksData.map(l => l.id))
-        .not("head_cropped_url", "is", null)
         .order("view");
 
       // Build looks with images
@@ -79,6 +79,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
           digital_talent_id: look.digital_talent_id,
           sourceImages: (allImages || []).filter(img => img.look_id === look.id) as any,
         }))
+        // Now include looks that have ANY source images (not just cropped ones)
         .filter(look => look.sourceImages.length > 0);
 
       setLooks(looksWithImages);
@@ -135,9 +136,10 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     fetchData();
   }, [projectId, selectedLookIds]);
 
-  // Calculate progress
-  const { totalViews, pairedViews, completedLooks, needsActionLooks } = useMemo(() => {
+  // Calculate progress - now accounting for cropped vs uncropped
+  const { totalViews, croppedViews, pairedViews, completedLooks, needsActionLooks } = useMemo(() => {
     let total = 0;
+    let cropped = 0;
     let paired = 0;
     let completed = 0;
     let needsAction = 0;
@@ -145,6 +147,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     looks.forEach(look => {
       const status = getLookPairingStatus(look, pairings);
       total += status.total;
+      cropped += status.cropped;
       paired += status.paired;
       if (status.status === 'complete') {
         completed++;
@@ -153,10 +156,10 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
       }
     });
 
-    return { totalViews: total, pairedViews: paired, completedLooks: completed, needsActionLooks: needsAction };
+    return { totalViews: total, croppedViews: cropped, pairedViews: paired, completedLooks: completed, needsActionLooks: needsAction };
   }, [looks, pairings]);
 
-  const progressPercent = totalViews > 0 ? Math.round((pairedViews / totalViews) * 100) : 0;
+  const progressPercent = croppedViews > 0 ? Math.round((pairedViews / croppedViews) * 100) : 0;
 
   // Selected look
   const selectedLook = useMemo(() => 
@@ -192,7 +195,8 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     setPairings(prev => {
       const next = new Map(prev);
       selectedLook.sourceImages.forEach(img => {
-        if (!next.has(img.id)) {
+        // Only auto-match images that have been cropped AND don't already have a pairing
+        if (img.head_cropped_url && !next.has(img.id)) {
           const matchingFace = talentFoundations.find(f => f.view === img.view);
           if (matchingFace) {
             next.set(img.id, matchingFace.stored_url);
@@ -219,12 +223,17 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     }
   }, [clickSelectedFace, handleSetPairing]);
 
-  const handleCropClick = useCallback((sourceImageId: string) => {
-    toast({
-      title: "Crop feature",
-      description: "Navigate to the Head Crop tab to crop this image.",
-    });
-  }, [toast]);
+  // Refresh function for after inline crop
+  const handleCropComplete = useCallback((updatedImage: any) => {
+    setLooks(prevLooks => 
+      prevLooks.map(look => ({
+        ...look,
+        sourceImages: look.sourceImages.map(img =>
+          img.id === updatedImage.id ? updatedImage : img
+        ),
+      }))
+    );
+  }, []);
 
   // Drag handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -396,8 +405,8 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
               pairings={pairings}
               onSetPairing={handleSetPairing}
               onClearPairing={handleClearPairing}
-              onCropClick={handleCropClick}
               onApplyAutoMatches={handleApplyAutoMatches}
+              onCropComplete={handleCropComplete}
               dragOverSlotId={dragOverSlotId}
             />
           </div>
