@@ -21,7 +21,7 @@ import Unauthorized from "./pages/Unauthorized";
 import NotFound from "./pages/NotFound";
 import JobBoard from "./pages/JobBoard";
 import UserManagement from "./pages/UserManagement";
-import FreelancerDashboard from "./pages/FreelancerDashboard";
+
 import FreelancerJobList from "./pages/FreelancerJobList";
 import FreelancerJobDetail from "./pages/FreelancerJobDetail";
 import BrandPoseLibrary from "./pages/BrandPoseLibrary";
@@ -181,31 +181,10 @@ const App = () => (
               } 
             />
             
-            {/* Freelancer routes */}
-            <Route 
-              path="/freelancer" 
-              element={
-                <ProtectedRoute requiredRoles={['admin', 'internal', 'freelancer']}>
-                  <FreelancerDashboard />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/freelancer/jobs" 
-              element={
-                <ProtectedRoute requiredRoles={['admin', 'internal', 'freelancer']}>
-                  <FreelancerJobList />
-                </ProtectedRoute>
-              } 
-            />
-            <Route 
-              path="/freelancer/jobs/:jobId" 
-              element={
-                <ProtectedRoute requiredRoles={['admin', 'internal', 'freelancer']}>
-                  <FreelancerJobDetail />
-                </ProtectedRoute>
-              } 
-            />
+            {/* Freelancer routes - redirect to unified public portal */}
+            <Route path="/freelancer" element={<Navigate to="/work" replace />} />
+            <Route path="/freelancer/jobs" element={<Navigate to="/work" replace />} />
+            <Route path="/freelancer/jobs/:jobId" element={<Navigate to="/work/:jobId" replace />} />
             
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
