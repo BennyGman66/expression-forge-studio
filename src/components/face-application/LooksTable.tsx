@@ -51,7 +51,7 @@ interface LooksTableProps {
 
 const VIEWS = ["front", "back", "side", "detail"] as const;
 const ROW_HEIGHT = 56; // pixels
-const EXPANDED_ROW_HEIGHT = 360; // approximate height for expanded row
+const EXPANDED_ROW_HEIGHT = 420; // approximate height for expanded row
 
 /**
  * TinyThumbnail - Lightweight thumbnail without IntersectionObserver overhead
