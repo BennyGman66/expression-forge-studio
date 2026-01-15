@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowRight, Play, User } from "lucide-react";
+import { ArrowRight, Play, User, CheckCircle, XCircle, Clock, RefreshCw, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LookSourceImage, FaceApplicationJob, FaceFoundation } from "@/types/face-application";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
@@ -22,6 +22,13 @@ interface GenerateTabProps {
   talentId: string | null;
   selectedLookIds?: Set<string>;
   onContinue: () => void;
+}
+
+interface OutputCounts {
+  completed: number;
+  failed: number;
+  pending: number;
+  generating: number;
 }
 
 const ATTEMPT_OPTIONS = [1, 2, 4, 6, 8, 12, 24];
@@ -44,6 +51,7 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
   const [generationStartTime, setGenerationStartTime] = useState<Date | null>(null);
   const [elapsedDisplay, setElapsedDisplay] = useState("");
   const [lastActivitySeconds, setLastActivitySeconds] = useState<number | null>(null);
+  const [outputCounts, setOutputCounts] = useState<OutputCounts>({ completed: 0, failed: 0, pending: 0, generating: 0 });
   const { toast } = useToast();
 
   // Fetch ALL looks for this PROJECT with their source images
@@ -225,6 +233,34 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
     return () => clearInterval(interval);
   }, [isGenerating, currentBatchJobIds, jobs]);
 
+  // Poll for output counts when we have batch jobs
+  useEffect(() => {
+    if (currentBatchJobIds.length === 0) {
+      setOutputCounts({ completed: 0, failed: 0, pending: 0, generating: 0 });
+      return;
+    }
+
+    const fetchOutputCounts = async () => {
+      const { data: outputs } = await supabase
+        .from("face_application_outputs")
+        .select("status")
+        .in("job_id", currentBatchJobIds);
+
+      if (outputs) {
+        setOutputCounts({
+          completed: outputs.filter(o => o.status === "completed").length,
+          failed: outputs.filter(o => o.status === "failed").length,
+          pending: outputs.filter(o => o.status === "pending").length,
+          generating: outputs.filter(o => o.status === "generating").length,
+        });
+      }
+    };
+
+    fetchOutputCounts();
+    const interval = setInterval(fetchOutputCounts, 2000);
+    return () => clearInterval(interval);
+  }, [currentBatchJobIds, jobs]);
+
   // Get current processing info
   const getCurrentProcessingInfo = () => {
     if (batchProgress === 0 || batchTotal === 0) return "Starting...";
@@ -241,6 +277,129 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
     if (lastActivitySeconds < 30) return "bg-green-500";
     if (lastActivitySeconds < 60) return "bg-yellow-500";
     return "bg-red-500";
+  };
+
+  // Retry only failed outputs
+  const handleRetryFailed = async () => {
+    if (currentBatchJobIds.length === 0) return;
+    
+    setIsGenerating(true);
+    setGenerationStartTime(new Date());
+
+    try {
+      // Delete failed outputs so resume regenerates them
+      await supabase
+        .from("face_application_outputs")
+        .delete()
+        .in("job_id", currentBatchJobIds)
+        .eq("status", "failed");
+
+      // Reset job status and resume each job
+      for (const jobId of currentBatchJobIds) {
+        await supabase
+          .from("face_application_jobs")
+          .update({ status: "pending" })
+          .eq("id", jobId);
+
+        await supabase.functions.invoke("generate-face-application", {
+          body: { jobId, resume: true },
+        });
+      }
+
+      toast({ title: "Retrying failed outputs", description: "Regenerating only the failed images." });
+
+      // Refresh jobs
+      const { data } = await supabase
+        .from("face_application_jobs")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false });
+      if (data) setJobs(data as unknown as FaceApplicationJob[]);
+
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      setIsGenerating(false);
+    }
+  };
+
+  // Generate more options (fresh batch, keeps existing outputs)
+  const handleRegenerateAll = async () => {
+    if (looks.length === 0 || talentIds.length === 0) return;
+    
+    setIsGenerating(true);
+    setGenerationStartTime(new Date());
+
+    try {
+      const newBatchJobIds: string[] = [];
+
+      for (const look of looks) {
+        const talentId = look.digital_talent_id || talentIds[0];
+        
+        // Auto-describe outfits
+        const outfitDescriptions: Record<string, string> = {};
+        
+        toast({ title: "Analyzing outfits...", description: `Processing ${look.name}` });
+        
+        const results = await Promise.all(
+          look.sourceImages.map(async (img) => {
+            const imageToDescribe = img.head_cropped_url || img.source_url;
+            const response = await supabase.functions.invoke("generate-outfit-description", {
+              body: { imageUrl: imageToDescribe },
+            });
+            return {
+              id: img.id,
+              description: response.data?.description || null,
+            };
+          })
+        );
+        
+        results.forEach(({ id, description }) => {
+          if (description) outfitDescriptions[id] = description;
+        });
+
+        // Create NEW job for fresh batch
+        const { data: newJob, error: jobError } = await supabase
+          .from("face_application_jobs")
+          .insert({
+            project_id: projectId,
+            look_id: look.id,
+            digital_talent_id: talentId,
+            attempts_per_view: attemptsPerView,
+            model: selectedModel,
+            total: look.sourceImages.length * attemptsPerView,
+            status: "pending",
+          })
+          .select()
+          .single();
+
+        if (jobError) throw jobError;
+        
+        newBatchJobIds.push(newJob.id);
+
+        await supabase.functions.invoke("generate-face-application", {
+          body: {
+            jobId: newJob.id,
+            outfitDescriptions,
+          },
+        });
+      }
+
+      setCurrentBatchJobIds(newBatchJobIds);
+
+      toast({ title: "Generating more options", description: "Creating a fresh batch of images." });
+
+      // Refresh jobs
+      const { data } = await supabase
+        .from("face_application_jobs")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: false });
+      if (data) setJobs(data as unknown as FaceApplicationJob[]);
+
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      setIsGenerating(false);
+    }
   };
 
   // Auto-describe and start generation for all looks
@@ -446,6 +605,28 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
                       </div>
                     </div>
                     
+                    {/* Live output counts */}
+                    <div className="flex items-center gap-4 text-xs pt-2 border-t border-border/50">
+                      {outputCounts.completed > 0 && (
+                        <span className="flex items-center gap-1 text-green-600">
+                          <CheckCircle className="w-3 h-3" />
+                          {outputCounts.completed} done
+                        </span>
+                      )}
+                      {outputCounts.failed > 0 && (
+                        <span className="flex items-center gap-1 text-red-500">
+                          <XCircle className="w-3 h-3" />
+                          {outputCounts.failed} failed
+                        </span>
+                      )}
+                      {(outputCounts.pending + outputCounts.generating) > 0 && (
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Clock className="w-3 h-3" />
+                          {outputCounts.pending + outputCounts.generating} remaining
+                        </span>
+                      )}
+                    </div>
+
                     {/* Activity indicators */}
                     <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
                       <span className="text-foreground/80">
@@ -462,6 +643,49 @@ export function GenerateTab({ projectId, lookId, talentId, selectedLookIds, onCo
                           </span>
                         )}
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Post-generation actions */}
+                {!isGenerating && currentBatchJobIds.length > 0 && (outputCounts.completed > 0 || outputCounts.failed > 0) && (
+                  <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
+                    {/* Status summary */}
+                    <div className="flex items-center gap-4 text-sm">
+                      {outputCounts.completed > 0 && (
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle className="w-4 h-4 text-green-500" />
+                          {outputCounts.completed} completed
+                        </span>
+                      )}
+                      {outputCounts.failed > 0 && (
+                        <span className="flex items-center gap-1.5">
+                          <XCircle className="w-4 h-4 text-red-500" />
+                          {outputCounts.failed} failed
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Action buttons */}
+                    <div className="flex gap-2">
+                      {outputCounts.failed > 0 && (
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={handleRetryFailed}
+                        >
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          Retry Failed ({outputCounts.failed})
+                        </Button>
+                      )}
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={handleRegenerateAll}
+                      >
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        Generate More Options
+                      </Button>
                     </div>
                   </div>
                 )}
