@@ -197,7 +197,7 @@ export function useGenerationTracking({
     if (!projectId) return;
 
     const channel = supabase
-      .channel('generation-tracking')
+      .channel(`generation-tracking-${projectId}`)
       .on(
         'postgres_changes',
         {
@@ -205,23 +205,45 @@ export function useGenerationTracking({
           schema: 'public',
           table: 'ai_apply_outputs',
         },
-        () => {
+        (payload) => {
+          console.log('[Generation Tracking] Realtime update:', payload.eventType);
           // Refresh data when outputs change
           setLastRefresh(Date.now());
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[Generation Tracking] Subscription status:', status);
+      });
 
     return () => {
       supabase.removeChannel(channel);
     };
   }, [projectId]);
 
+  // Polling fallback - refresh every 3 seconds when there are generating outputs
+  useEffect(() => {
+    if (!projectId) return;
+    
+    // Check if there's active generation
+    const hasActiveGeneration = looks.some(l => 
+      l.views.some(v => v.runningCount > 0 || v.pendingCount > 0)
+    );
+    
+    if (!hasActiveGeneration) return;
+    
+    console.log('[Generation Tracking] Active generation detected, starting polling');
+    const interval = setInterval(() => {
+      setLastRefresh(Date.now());
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [projectId, looks]);
+
   // Refresh when lastRefresh changes (debounced)
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchData();
-    }, 500);
+    }, 300);
     return () => clearTimeout(timer);
   }, [lastRefresh, fetchData]);
 
