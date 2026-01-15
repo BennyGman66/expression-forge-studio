@@ -393,70 +393,116 @@ export function LooksUploadTab({
 
   // Track looks created during progressive import (lookKey -> lookId mapping)
   const progressiveLooksRef = useRef<Map<string, string>>(new Map());
+  // Track in-flight look creation promises to prevent concurrent duplicate creation
+  const lookCreationPromisesRef = useRef<Map<string, Promise<string | null>>>(new Map());
+
+  // Helper to get or create a look, ensuring only one is created per lookKey
+  const getOrCreateLook = useCallback(async (lookKey: string): Promise<string | null> => {
+    const lookName = lookKey;
+    
+    // Check if we already have this look cached
+    const cachedId = progressiveLooksRef.current.get(lookName);
+    if (cachedId) return cachedId;
+    
+    // Check if there's already a creation in progress for this lookKey
+    const existingPromise = lookCreationPromisesRef.current.get(lookName);
+    if (existingPromise) {
+      return existingPromise;
+    }
+    
+    // Create a new promise for this lookKey creation
+    const creationPromise = (async (): Promise<string | null> => {
+      // Double-check cache after acquiring "lock"
+      const recheckedId = progressiveLooksRef.current.get(lookName);
+      if (recheckedId) return recheckedId;
+      
+      // Check if the look already exists in DB (by look_code or name)
+      const { data: existingLooks } = await supabase
+        .from("talent_looks")
+        .select("id")
+        .eq("project_id", projectId)
+        .or(`look_code.eq.${lookKey},name.eq.${lookName}`)
+        .limit(1);
+      
+      if (existingLooks && existingLooks.length > 0) {
+        const existingId = existingLooks[0].id;
+        progressiveLooksRef.current.set(lookName, existingId);
+        return existingId;
+      }
+      
+      // Create a new look with look_code
+      const talentId = await getDefaultTalentId();
+      if (!talentId) {
+        console.error("[TiffImport] No talent found for progressive save");
+        return null;
+      }
+      
+      const { data: lookData, error } = await supabase
+        .from("talent_looks")
+        .insert({ 
+          name: lookName, 
+          talent_id: talentId, 
+          project_id: projectId, 
+          digital_talent_id: null,
+          look_code: lookKey,
+        })
+        .select()
+        .single();
+      
+      if (error || !lookData) {
+        console.error("[TiffImport] Failed to create look:", error);
+        return null;
+      }
+      
+      progressiveLooksRef.current.set(lookName, lookData.id);
+      
+      // Add to local state immediately
+      const newLook: LookData = { ...lookData, sourceImages: [] };
+      setLooks((prev) => [newLook, ...prev]);
+      
+      return lookData.id;
+    })();
+    
+    // Store the promise so concurrent calls wait on it
+    lookCreationPromisesRef.current.set(lookName, creationPromise);
+    
+    try {
+      return await creationPromise;
+    } finally {
+      // Clean up the promise after it resolves
+      lookCreationPromisesRef.current.delete(lookName);
+    }
+  }, [projectId]);
 
   // Progressive image save - called after each successful conversion
   const handleImageReady = useCallback(async (imageData: ProgressiveImageData): Promise<void> => {
     const { url, view, originalFilename, lookKey } = imageData;
     
     // Use lookKey or fallback to a generated name
-    const lookName = lookKey || `Look ${Date.now()}`;
+    const lookName = lookKey || `Look_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const viewToUse = view === 'unassigned' ? 'front' : view;
     
-    // Check if we already have a look for this lookKey
-    let lookId = progressiveLooksRef.current.get(lookName);
-    
+    // Get or create the look (thread-safe)
+    const lookId = await getOrCreateLook(lookName);
     if (!lookId) {
-      // Check if the look already exists in the current looks state (by look_code or name)
-      const existingLook = looks.find(l => l.name === lookName || (lookKey && l.name.includes(lookKey)));
-      
-      if (existingLook) {
-        lookId = existingLook.id;
-        progressiveLooksRef.current.set(lookName, lookId);
-      } else {
-        // Create a new look with look_code
-        const talentId = await getDefaultTalentId();
-        if (!talentId) {
-          console.error("[TiffImport] No talent found for progressive save");
-          return;
-        }
-        
-        const { data: lookData, error } = await supabase
-          .from("talent_looks")
-          .insert({ 
-            name: lookName, 
-            talent_id: talentId, 
-            project_id: projectId, 
-            digital_talent_id: null,
-            look_code: lookKey, // Save the look_code for deduplication
-          })
-          .select()
-          .single();
-        
-        if (error || !lookData) {
-          console.error("[TiffImport] Failed to create look:", error);
-          return;
-        }
-        
-        lookId = lookData.id;
-        progressiveLooksRef.current.set(lookName, lookId);
-        
-        // Add to local state immediately
-        const newLook: LookData = { ...lookData, sourceImages: [] };
-        setLooks((prev) => [newLook, ...prev]);
-      }
-    }
-    
-    // Check for duplicate image URL to prevent re-inserting on retry
-    const existingImage = looks
-      .find(l => l.id === lookId)
-      ?.sourceImages.find(img => img.source_url === url);
-    
-    if (existingImage) {
-      console.log("[TiffImport] Image already exists, skipping:", originalFilename);
+      console.error("[TiffImport] Could not get or create look for:", lookName);
       return;
     }
     
     // Insert the image with original_filename for traceability
+    // Use upsert-like pattern: check DB directly to avoid stale state issues
+    const { data: existingImages } = await supabase
+      .from("look_source_images")
+      .select("id")
+      .eq("look_id", lookId)
+      .eq("source_url", url)
+      .limit(1);
+    
+    if (existingImages && existingImages.length > 0) {
+      console.log("[TiffImport] Image already exists, skipping:", originalFilename);
+      return;
+    }
+    
     const { data: imageResult, error: imageError } = await supabase
       .from("look_source_images")
       .insert({ 
@@ -464,7 +510,7 @@ export function LooksUploadTab({
         view: viewToUse, 
         source_url: url, 
         original_source_url: url,
-        original_filename: originalFilename, // Save original filename
+        original_filename: originalFilename,
       })
       .select()
       .single();
@@ -484,11 +530,12 @@ export function LooksUploadTab({
         )
       );
     }
-  }, [looks, projectId]);
+  }, [getOrCreateLook]);
 
   const handleTiffImportComplete = async (createdLooks: { lookName: string; images: { url: string; view: string; originalFilename: string }[] }[]) => {
-    // Clear the progressive looks cache when import completes
+    // Clear the progressive looks caches when import completes
     progressiveLooksRef.current.clear();
+    lookCreationPromisesRef.current.clear();
     
     // For any looks not already saved progressively, save them now
     const talentId = await getDefaultTalentId();
