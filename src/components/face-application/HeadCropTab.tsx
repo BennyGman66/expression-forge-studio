@@ -892,15 +892,6 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={handleIgnoreLook}
-                disabled={ignoringLook || !lookId}
-              >
-                <ArrowRight className="h-4 w-4 mr-1" />
-                {ignoringLook ? "Skipping..." : "Skip Look"}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
                 onClick={handleSkipImage}
                 disabled={skippingImage || !currentImage}
               >
