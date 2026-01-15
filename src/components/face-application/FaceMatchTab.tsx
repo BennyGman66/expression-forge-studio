@@ -24,6 +24,7 @@ interface TalentInfo {
 interface FaceMatchTabProps {
   projectId: string;
   talentId: string | null;
+  selectedLookIds?: Set<string>;
   onContinue: () => void;
 }
 
@@ -117,7 +118,7 @@ function LookMatchCard({ look, faceFoundations, matches, viewToAngle, onSelectFa
   );
 }
 
-export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabProps) {
+export function FaceMatchTab({ projectId, talentId, selectedLookIds, onContinue }: FaceMatchTabProps) {
   const [looks, setLooks] = useState<LookWithImages[]>([]);
   const [faceFoundations, setFaceFoundations] = useState<FaceFoundation[]>([]);
   const [matches, setMatches] = useState<Record<string, string>>({}); // sourceImageId -> faceUrl
@@ -144,13 +145,18 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
         return;
       }
 
+      // Filter by selectedLookIds if provided
+      const filteredLooksData = selectedLookIds && selectedLookIds.size > 0
+        ? looksData.filter(l => selectedLookIds.has(l.id))
+        : looksData;
+
       // Extract unique talent IDs from looks
-      const uniqueTalentIds = [...new Set(looksData.map(l => l.digital_talent_id).filter(Boolean))] as string[];
+      const uniqueTalentIds = [...new Set(filteredLooksData.map(l => l.digital_talent_id).filter(Boolean))] as string[];
       setTalentIds(uniqueTalentIds);
 
       // For each look, fetch its source images with crops
       const looksWithImages: LookWithImages[] = [];
-      for (const look of looksData) {
+      for (const look of filteredLooksData) {
         const { data: images } = await supabase
           .from("look_source_images")
           .select("*")
@@ -170,7 +176,7 @@ export function FaceMatchTab({ projectId, talentId, onContinue }: FaceMatchTabPr
       setLooks(looksWithImages);
     };
     fetchLooks();
-  }, [projectId]);
+  }, [projectId, selectedLookIds]);
 
   // Fetch talent info from first derived talentId
   useEffect(() => {

@@ -14,9 +14,10 @@ import { useWorkflowStateContext } from "@/contexts/WorkflowStateContext";
 
 interface AIApplyTabProps {
   projectId: string;
+  selectedLookIds?: Set<string>;
 }
 
-export function AIApplyTab({ projectId }: AIApplyTabProps) {
+export function AIApplyTab({ projectId, selectedLookIds }: AIApplyTabProps) {
   // Default prompt
   const DEFAULT_PROMPT = `Apply the provided head/face to the body while maintaining exact clothing, pose, and proportions. Preserve facial identity precisely. Output should be photorealistic and seamless.`;
 
