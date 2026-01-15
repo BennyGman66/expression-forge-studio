@@ -102,6 +102,36 @@ export default function PublicJobWorkspace() {
   const recommendedOutputs = job?.type === 'FOUNDATION_FACE_REPLACE' ? 3 : 1;
   const uploadProgress = outputs.length > 0 ? Math.min(100, Math.round((outputs.length / recommendedOutputs) * 100)) : 0;
 
+  // Handle claim job for preview mode
+  const claimJob = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase
+        .from('unified_jobs')
+        .update({ 
+          status: 'IN_PROGRESS',
+          freelancer_identity_id: identity?.id,
+          started_at: new Date().toISOString()
+        })
+        .eq('id', jobId)
+        .eq('status', 'OPEN')
+        .is('freelancer_identity_id', null)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      if (!data) throw new Error('Job is no longer available - it may have been claimed by someone else');
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
+      toast.success('Job claimed! You can now start working.');
+    },
+    onError: (error: any) => {
+      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
+      toast.error(error.message || 'Failed to claim job');
+    },
+  });
+
   // Mutations
   const updateJobStatus = useMutation({
     mutationFn: async ({ status }: { status: 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'SUBMITTED' | 'NEEDS_CHANGES' | 'APPROVED' | 'CLOSED' }) => {
@@ -459,37 +489,6 @@ export default function PublicJobWorkspace() {
   const displayInstructions = job.instructions || 
     JOB_TYPE_CONFIG[job.type as keyof typeof JOB_TYPE_CONFIG]?.defaultInstructions || 
     'No instructions provided';
-
-  // Handle claim job for preview mode
-  const claimJob = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase
-        .from('unified_jobs')
-        .update({ 
-          status: 'IN_PROGRESS',
-          freelancer_identity_id: identity?.id,
-          started_at: new Date().toISOString()
-        })
-        .eq('id', jobId)
-        .eq('status', 'OPEN')
-        .is('freelancer_identity_id', null)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      if (!data) throw new Error('Job is no longer available - it may have been claimed by someone else');
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
-      toast.success('Job claimed! You can now start working.');
-    },
-    onError: (error: any) => {
-      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
-      toast.error(error.message || 'Failed to claim job');
-    },
-  });
-
   return (
     <div className="min-h-screen bg-background">
       {/* Preview Mode Banner */}
