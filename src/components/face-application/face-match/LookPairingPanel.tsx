@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Wand2, AlertCircle } from "lucide-react";
+import { Check, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LookWithImages, getLookPairingStatus } from "./types";
 import { FaceFoundation, LookSourceImage } from "@/types/face-application";
@@ -28,6 +28,7 @@ export function LookPairingPanel({
   dragOverSlotId,
 }: LookPairingPanelProps) {
   const [cropDialogImage, setCropDialogImage] = useState<LookSourceImage | null>(null);
+  const [skippedImageIds, setSkippedImageIds] = useState<Set<string>>(new Set());
 
   if (!look) {
     return (
@@ -45,13 +46,20 @@ export function LookPairingPanel({
     );
   }
 
-  const status = getLookPairingStatus(look, pairings);
+  // Filter out skipped images
+  const visibleImages = look.sourceImages.filter(img => !skippedImageIds.has(img.id));
+  
+  const status = getLookPairingStatus(
+    { ...look, sourceImages: visibleImages },
+    pairings
+  );
+  
   const talentFoundations = faceFoundations.filter(
     f => f.digital_talent_id === look.digital_talent_id
   );
 
   // Count cropped images only for auto-match check
-  const croppedImages = look.sourceImages.filter(img => !!img.head_cropped_url);
+  const croppedImages = visibleImages.filter(img => !!img.head_cropped_url);
   
   // Check if auto-matching would add any new pairings
   const canAutoMatch = croppedImages.some(img => {
@@ -68,6 +76,12 @@ export function LookPairingPanel({
     setCropDialogImage(null);
   };
 
+  const handleSkipImage = (imageId: string) => {
+    setSkippedImageIds(prev => new Set([...prev, imageId]));
+  };
+
+  const needsCropCount = visibleImages.filter(img => !img.head_cropped_url).length;
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -75,17 +89,17 @@ export function LookPairingPanel({
         <div>
           <h3 className="text-lg font-semibold">{look.name}</h3>
           <p className="text-sm text-muted-foreground">
-            {status.cropped < status.total ? (
+            {needsCropCount > 0 && (
               <>
-                <span className="text-rose-600 font-medium">
-                  {status.total - status.cropped} need cropping
+                <span className="text-muted-foreground">
+                  {needsCropCount} need cropping
                 </span>
                 {" · "}
               </>
-            ) : null}
+            )}
             {status.paired}/{status.cropped} views paired
             {status.status === 'complete' && (
-              <span className="ml-2 text-emerald-600 font-medium">✓ Complete</span>
+              <span className="ml-2 text-primary font-medium">✓ Complete</span>
             )}
           </p>
         </div>
@@ -103,33 +117,23 @@ export function LookPairingPanel({
         )}
       </div>
 
-      {/* Needs crop banner */}
-      {status.cropped < status.total && (
-        <div className="px-4 py-2 bg-rose-50 border-b border-rose-100 flex items-center gap-2 text-rose-700 text-sm">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>
-            {status.total - status.cropped} image(s) need cropping before they can be matched. 
-            Click "Crop Now" on each to crop inline.
-          </span>
-        </div>
-      )}
-
       {/* View slots grid */}
       <div className="flex-1 overflow-auto p-4">
         <div className="grid grid-cols-2 gap-4">
-          {look.sourceImages.map((img) => (
+          {visibleImages.map((img) => (
             <ViewSlot
               key={img.id}
               sourceImage={img}
               pairedFaceUrl={pairings.get(img.id) || null}
               onClearPairing={() => onClearPairing(img.id)}
               onCropClick={() => handleCropClick(img)}
+              onSkip={() => handleSkipImage(img.id)}
               isOver={dragOverSlotId === img.id}
             />
           ))}
         </div>
 
-        {look.sourceImages.length === 0 && (
+        {visibleImages.length === 0 && (
           <div className="text-center py-8 text-muted-foreground">
             <p>No source images found for this look.</p>
             <p className="text-sm">Upload images in the Looks tab first.</p>
