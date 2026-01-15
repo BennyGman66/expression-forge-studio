@@ -118,6 +118,7 @@ export function LooksTable({
 }: LooksTableProps) {
   const [expandedLookId, setExpandedLookId] = useState<string | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
+  const prevExpandedRef = useRef<string | null>(null);
 
   const toggleExpand = (lookId: string) => {
     setExpandedLookId((prev) => (prev === lookId ? null : lookId));
@@ -157,14 +158,17 @@ export function LooksTable({
     overscan: 5,
   });
 
-  // Force virtualizer to recalculate row positions when expansion state changes
+  // Force virtualizer to recalculate only when expansion actually changes
   useEffect(() => {
-    // Use setTimeout to break out of React's render cycle
-    const timeoutId = setTimeout(() => {
-      rowVirtualizer.measure();
-    }, 0);
-    return () => clearTimeout(timeoutId);
-  }, [expandedLookId]);
+    if (prevExpandedRef.current !== expandedLookId) {
+      prevExpandedRef.current = expandedLookId;
+      // Defer measure to next tick to avoid render-cycle issues
+      const timeoutId = setTimeout(() => {
+        rowVirtualizer.measure();
+      }, 0);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [expandedLookId, rowVirtualizer]);
 
   return (
     <div className="space-y-2">
