@@ -553,18 +553,21 @@ const [cropBox, setCropBox] = useState({ x: 0, y: 0, width: 0, height: 0 });
   // The live preview shows: top half = white, bottom half = the selection
   // This matches the actual output from the edge function
   const getLivePreviewStyle = () => {
-    if (!imageDimensions.width || !cropBox.width) return null;
+    if (!imageDimensions.width || !cropBox.width || !cropBox.height) return null;
     
     // Preview container is 160x160 (w-40 h-40)
-    // Bottom half shows the selection scaled to 160x80
-    const previewWidth = 160;
+    // Bottom half is 80px tall - we show the square selection scaled to fit
     const previewBottomHalfHeight = 80;
     
-    // Scale the source image so the selection width fits the preview width
-    const scale = previewWidth / cropBox.width;
+    // Since cropBox is always square (1:1), scale to fit the 80px height
+    // The selection will render as 80x80 in the bottom half
+    const scale = previewBottomHalfHeight / cropBox.height;
     
-    // Position offset to show only the selection in the bottom half
-    const left = -cropBox.x * scale;
+    // Position offset to center the selection horizontally in the 160px wide container
+    const scaledWidth = cropBox.width * scale; // Will be 80 for square
+    const horizontalOffset = (160 - scaledWidth) / 2;
+    
+    const left = -cropBox.x * scale + horizontalOffset;
     const top = -cropBox.y * scale;
     
     return {
