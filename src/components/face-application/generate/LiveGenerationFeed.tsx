@@ -5,8 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { getImageUrl } from "@/lib/imageUtils";
 import { VIEW_LABELS } from "@/types/face-application";
-import { Check, X, Loader2, AlertTriangle, Clock } from "lucide-react";
+import { Check, X, Loader2, AlertTriangle, Clock, Trash2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 interface LiveOutput {
   id: string;
@@ -15,6 +16,7 @@ interface LiveOutput {
   attempt_index: number | null;
   status: string | null;
   look_id: string | null;
+  job_id?: string | null;
   created_at: string | null;
   updated_at?: string | null;
   lookName?: string;
@@ -38,6 +40,9 @@ export function LiveGenerationFeed({
   const [stalledCount, setStalledCount] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const [showAll, setShowAll] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const { toast } = useToast();
 
   // Fetch recent outputs for this project
   useEffect(() => {
@@ -68,6 +73,7 @@ export function LiveGenerationFeed({
           attempt_index,
           status,
           look_id,
+          job_id,
           created_at
         `)
         .in("job_id", jobIds)
@@ -146,23 +152,79 @@ export function LiveGenerationFeed({
 
   // Clean up stalled outputs
   const handleCleanupStalled = async () => {
-    const now = Date.now();
     const stalledIds = outputs
-      .filter(o => 
-        o.status === "generating" && 
-        o.created_at && 
-        now - new Date(o.created_at).getTime() > STALL_THRESHOLD_MS
-      )
+      .filter(o => {
+        const age = Date.now() - new Date(o.created_at).getTime();
+        return o.status === 'generating' && age > 120000;
+      })
       .map(o => o.id);
 
     if (stalledIds.length === 0) return;
 
     await supabase
-      .from("ai_apply_outputs")
-      .update({ status: "failed", error_message: "Stalled - marked as failed by user" })
-      .in("id", stalledIds);
+      .from('ai_apply_outputs')
+      .update({ status: 'failed', error_message: 'Timed out' })
+      .in('id', stalledIds);
 
     onCleanupStalled?.(stalledIds);
+  };
+
+  const handleCancelAll = async () => {
+    setIsCanceling(true);
+    try {
+      // Cancel all pending/running jobs for this project
+      const { error } = await supabase
+        .from('ai_apply_jobs')
+        .update({ status: 'canceled', updated_at: new Date().toISOString() })
+        .eq('project_id', projectId)
+        .in('status', ['pending', 'running']);
+
+      if (error) throw error;
+
+      // Mark any generating outputs as failed
+      await supabase
+        .from('ai_apply_outputs')
+        .update({ status: 'failed', error_message: 'Canceled by user' })
+        .in('job_id', outputs.filter(o => o.status === 'generating').map(o => o.job_id));
+
+      toast({ title: 'Canceled all pending jobs' });
+    } catch (err) {
+      console.error('Failed to cancel:', err);
+      toast({ title: 'Failed to cancel', variant: 'destructive' });
+    } finally {
+      setIsCanceling(false);
+    }
+  };
+
+  const handleClearFeed = async () => {
+    setIsClearing(true);
+    try {
+      // Get all job IDs for this project
+      const { data: jobs } = await supabase
+        .from('ai_apply_jobs')
+        .select('id')
+        .eq('project_id', projectId);
+
+      if (jobs && jobs.length > 0) {
+        const jobIds = jobs.map(j => j.id);
+        
+        // Delete all outputs for these jobs
+        const { error } = await supabase
+          .from('ai_apply_outputs')
+          .delete()
+          .in('job_id', jobIds);
+
+        if (error) throw error;
+      }
+
+      setOutputs([]);
+      toast({ title: 'Cleared feed' });
+    } catch (err) {
+      console.error('Failed to clear:', err);
+      toast({ title: 'Failed to clear feed', variant: 'destructive' });
+    } finally {
+      setIsClearing(false);
+    }
   };
 
   const completedCount = outputs.filter(o => o.status === "completed").length;
@@ -174,6 +236,9 @@ export function LiveGenerationFeed({
   if (outputs.length === 0 && !isGenerating) {
     return null;
   }
+
+  const hasPendingOrRunning = generatingCount > 0;
+  const hasAnyOutputs = outputs.length > 0;
 
   return (
     <Card className="border-dashed">
@@ -189,6 +254,38 @@ export function LiveGenerationFeed({
             )}
           </CardTitle>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {/* Cancel button */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs gap-1 px-2"
+              onClick={handleCancelAll}
+              disabled={isCanceling || !hasPendingOrRunning}
+            >
+              {isCanceling ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Square className="h-3 w-3" />
+              )}
+              Cancel
+            </Button>
+            
+            {/* Clear button */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs gap-1 px-2"
+              onClick={handleClearFeed}
+              disabled={isClearing || !hasAnyOutputs}
+            >
+              {isClearing ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Trash2 className="h-3 w-3" />
+              )}
+              Clear
+            </Button>
+
             <Badge variant="outline" className="gap-1">
               <Check className="w-3 h-3 text-green-500" />
               {completedCount}
