@@ -106,13 +106,35 @@ export function useGenerationTracking({
 
       if (srcError) throw srcError;
 
-      // Fetch all outputs for these looks
-      const { data: outputs, error: outError } = await supabase
-        .from("ai_apply_outputs")
-        .select("id, look_id, view, status, created_at")
-        .in("look_id", filteredLooks.map(l => l.id));
-
-      if (outError) throw outError;
+      // Fetch all outputs for these looks with pagination to avoid 1000-row limit
+      const lookIds = filteredLooks.map(l => l.id);
+      const outputs: Array<{ id: string; look_id: string; view: string; status: string; created_at: string }> = [];
+      const CHUNK_SIZE = 30; // Chunk lookIds for URL length
+      const PAGE_SIZE = 1000;
+      
+      for (let i = 0; i < lookIds.length; i += CHUNK_SIZE) {
+        const chunkLookIds = lookIds.slice(i, i + CHUNK_SIZE);
+        let offset = 0;
+        let hasMore = true;
+        
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from("ai_apply_outputs")
+            .select("id, look_id, view, status, created_at")
+            .in("look_id", chunkLookIds)
+            .range(offset, offset + PAGE_SIZE - 1);
+          
+          if (error) throw error;
+          
+          if (data && data.length > 0) {
+            outputs.push(...data);
+            offset += PAGE_SIZE;
+            hasMore = data.length === PAGE_SIZE;
+          } else {
+            hasMore = false;
+          }
+        }
+      }
 
       // Build stats for each look
       const lookStats: LookGenerationStats[] = filteredLooks.map(look => {
