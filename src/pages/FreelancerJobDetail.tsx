@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useJob, useJobInputs, useJobOutputs, useJobNotes, useUpdateJobStatus, useAddJobNote, useClaimJob, useAbandonJob } from '@/hooks/useJobs';
 import { useCreateSubmission, useLatestSubmission, useCreateResubmission } from '@/hooks/useReviewSystem';
 import { supabase } from '@/integrations/supabase/client';
+import { sanitizeFileName } from '@/lib/fileUtils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -264,7 +265,8 @@ export default function FreelancerJobDetail() {
     setUploading(true);
     try {
       for (const pending of filesToUpload) {
-        const fileName = `${jobId}/${Date.now()}-${pending.view}-${pending.file.name}`;
+        const safeName = sanitizeFileName(pending.file.name);
+        const fileName = `${jobId}/${Date.now()}-${pending.view}-${safeName}`;
         const { error: uploadError } = await supabase.storage
           .from('images')
           .upload(fileName, pending.file);
@@ -425,7 +427,8 @@ export default function FreelancerJobDetail() {
       const replacementUrls = new Map<string, string>();
       
       for (const [assetId, { file }] of pendingReplacements) {
-        const fileName = `${jobId}/${Date.now()}-replacement-${file.name}`;
+        const safeName = sanitizeFileName(file.name);
+        const fileName = `${jobId}/${Date.now()}-replacement-${safeName}`;
         const { error: uploadError } = await supabase.storage
           .from('images')
           .upload(fileName, file);

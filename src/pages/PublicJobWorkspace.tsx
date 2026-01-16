@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useFreelancerIdentity } from '@/hooks/useFreelancerIdentity';
 import { usePublicJobById, usePublicJobInputs, usePublicJobOutputs, usePublicJobNotes, usePublicLatestSubmission } from '@/hooks/usePublicJob';
 import { supabase } from '@/integrations/supabase/client';
+import { sanitizeFileName } from '@/lib/fileUtils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -273,7 +274,8 @@ export default function PublicJobWorkspace() {
       
       // Upload replacement files
       for (const [assetId, { file }] of replacements.entries()) {
-        const fileName = `public/${job?.id}/${Date.now()}-resubmit-${file.name}`;
+        const safeName = sanitizeFileName(file.name);
+        const fileName = `public/${job?.id}/${Date.now()}-resubmit-${safeName}`;
         const { error: uploadError } = await supabase.storage
           .from('images')
           .upload(fileName, file);
@@ -461,7 +463,8 @@ export default function PublicJobWorkspace() {
         const viewLabel = pending.view 
           ? `${pending.view.charAt(0).toUpperCase()}${pending.view.slice(1)} View - `
           : '';
-        const fileName = `public/${job?.id}/${Date.now()}-${pending.view || 'output'}-${pending.file.name}`;
+        const safeName = sanitizeFileName(pending.file.name);
+        const fileName = `public/${job?.id}/${Date.now()}-${pending.view || 'output'}-${safeName}`;
         const { error: uploadError } = await supabase.storage
           .from('images')
           .upload(fileName, pending.file);
