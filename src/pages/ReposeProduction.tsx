@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProjectSelectPanel } from "@/components/repose-production/ProjectSelectPanel";
 import { BatchSetupPanel } from "@/components/repose-production/BatchSetupPanel";
 import { GeneratePanel } from "@/components/repose-production/GeneratePanel";
-import { ReviewPanel } from "@/components/repose-production/ReviewPanel";
+import { ReviewCurationPanel } from "@/components/repose-production/ReviewCurationPanel";
 import { ExportPanel } from "@/components/repose-production/ExportPanel";
 import { useReposeBatch, useReposeOutputs } from "@/hooks/useReposeBatches";
 import { FolderOpen, Settings, Sparkles, ClipboardList, Download } from "lucide-react";
@@ -87,7 +87,7 @@ export default function ReposeProduction() {
             </TabsContent>
 
             <TabsContent value="review">
-              <ReviewPanel batchId={batchId} />
+              <ReviewCurationPanel batchId={batchId} />
             </TabsContent>
 
             <TabsContent value="export">

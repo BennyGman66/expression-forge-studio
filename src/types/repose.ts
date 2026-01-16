@@ -58,6 +58,10 @@ export interface ReposeOutput {
   result_url: string | null;
   status: 'queued' | 'running' | 'complete' | 'failed';
   created_at: string;
+  // Selection fields for curation
+  is_favorite: boolean;
+  favorite_rank: 1 | 2 | 3 | null;
+  selected_at: string | null;
 }
 
 // DEPRECATED: Legacy pairing rules - kept for backward compatibility
@@ -73,4 +77,15 @@ export const DEFAULT_REPOSE_CONFIG: ReposeConfig = {
   posesPerShotType: 2,
   attemptsPerPose: 1,
   cropTarget: 'top',
+};
+
+// Selection constants
+export const MAX_FAVORITES_PER_VIEW = 3;
+
+// Export folder naming
+export const SHOT_TYPE_FOLDER_NAMES: Record<OutputShotType, string> = {
+  FRONT_FULL: 'FULL_FRONT',
+  FRONT_CROPPED: 'FRONT_CROPPED',
+  DETAIL: 'DETAIL',
+  BACK_FULL: 'BACK',
 };
