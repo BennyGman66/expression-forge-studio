@@ -452,6 +452,61 @@ export function GenerateTabEnhanced({
     }
   };
 
+  // Resume pending generation - invoke edge function for existing pending outputs
+  const handleResumePending = async () => {
+    // Get all jobs with pending outputs
+    const { data: jobsWithPending } = await supabase
+      .from("ai_apply_jobs")
+      .select("id, look_id")
+      .eq("project_id", projectId)
+      .in("status", ["pending", "running", "completed"]);
+
+    if (!jobsWithPending || jobsWithPending.length === 0) {
+      toast({ title: "No pending outputs to resume" });
+      return;
+    }
+
+    // Check which jobs actually have pending outputs
+    const { data: pendingOutputs } = await supabase
+      .from("ai_apply_outputs")
+      .select("job_id, view, look_id")
+      .in("job_id", jobsWithPending.map(j => j.id))
+      .eq("status", "pending");
+
+    if (!pendingOutputs || pendingOutputs.length === 0) {
+      toast({ title: "No pending outputs to resume" });
+      return;
+    }
+
+    setIsGenerating(true);
+    setGenerationStartTime(new Date());
+    
+    // Group by look_id and invoke edge function for each
+    const lookIdsWithPending = [...new Set(pendingOutputs.map(o => o.look_id))];
+    const jobIds = [...new Set(pendingOutputs.map(o => o.job_id))];
+    setCurrentBatchJobIds(jobIds as string[]);
+
+    for (const lookId of lookIdsWithPending) {
+      if (!lookId) continue;
+      
+      // Fire and forget
+      supabase.functions.invoke("generate-ai-apply", {
+        body: {
+          projectId,
+          lookId,
+          type: 'run',
+          model: selectedModel,
+          attemptsPerView: 0, // Don't create new outputs, just process pending
+        },
+      });
+    }
+
+    toast({ 
+      title: "Resuming generation", 
+      description: `Processing ${pendingOutputs.length} pending outputs for ${lookIdsWithPending.length} looks` 
+    });
+  };
+
   // Retry failed
   const handleRetryFailed = async () => {
     if (currentBatchJobIds.length === 0) return;
@@ -685,27 +740,40 @@ export function GenerateTabEnhanced({
         />
 
         {/* Generate button */}
-        <Button
-          size="lg"
-          className="w-full"
-          onClick={handleStartGeneration}
-          disabled={!canGenerate}
-        >
-          {isGenerating ? (
-            <div className="flex items-center gap-2">
-              <LeapfrogLoader message="" size="sm" />
-              <span>Generating...</span>
-            </div>
-          ) : (
-            <>
-              <Play className="h-4 w-4 mr-2" />
-              {generationPlan.outputsToGenerate > 0 
-                ? `Generate ${generationPlan.outputsToGenerate} Outputs`
-                : "Start Generation"
-              }
-            </>
-          )}
-        </Button>
+        <div className="flex gap-3">
+          <Button
+            size="lg"
+            className="flex-1"
+            onClick={handleStartGeneration}
+            disabled={!canGenerate}
+          >
+            {isGenerating ? (
+              <div className="flex items-center gap-2">
+                <LeapfrogLoader message="" size="sm" />
+                <span>Generating...</span>
+              </div>
+            ) : (
+              <>
+                <Play className="h-4 w-4 mr-2" />
+                {generationPlan.outputsToGenerate > 0 
+                  ? `Generate ${generationPlan.outputsToGenerate} Outputs`
+                  : "Start Generation"
+                }
+              </>
+            )}
+          </Button>
+          
+          {/* Resume pending button */}
+          <Button
+            size="lg"
+            variant="outline"
+            onClick={handleResumePending}
+            disabled={isGenerating}
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Resume Pending
+          </Button>
+        </div>
 
         {faceFoundations.length === 0 && (
           <p className="text-sm text-yellow-600 text-center">
