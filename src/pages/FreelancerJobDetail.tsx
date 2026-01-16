@@ -190,26 +190,60 @@ export default function FreelancerJobDetail() {
   };
 
   // Drag and drop handlers
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }, []);
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragOver(true);
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragOver(false);
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragOver(false);
     
-    const files = Array.from(e.dataTransfer.files);
+    // Enhanced logging for debugging
+    console.log('[Upload] Drop event triggered');
+    console.log('[Upload] dataTransfer types:', Array.from(e.dataTransfer.types));
+    console.log('[Upload] dataTransfer items count:', e.dataTransfer.items?.length);
+    
+    let files = Array.from(e.dataTransfer.files);
     console.log('[Upload] Dropped files:', files.length, files.map(f => ({ name: f.name, type: f.type, size: f.size })));
+    
     if (files.length === 0) {
-      toast.error('No files detected. Try using the Upload button instead.');
+      // Try using items API as fallback (works in some browsers like Safari)
+      if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+        console.log('[Upload] Trying items API fallback...');
+        const itemFiles: File[] = [];
+        for (let i = 0; i < e.dataTransfer.items.length; i++) {
+          const item = e.dataTransfer.items[i];
+          if (item.kind === 'file') {
+            const file = item.getAsFile();
+            if (file) itemFiles.push(file);
+          }
+        }
+        if (itemFiles.length > 0) {
+          console.log('[Upload] Items API recovered files:', itemFiles.length);
+          addFilesToPending(itemFiles);
+          return;
+        }
+      }
+      
+      toast.error('Drag-and-drop failed. Please use the "Browse Files" button instead.', { duration: 5000 });
       return;
     }
+    
     addFilesToPending(files);
   }, []);
 
@@ -927,6 +961,7 @@ export default function FreelancerJobDetail() {
                 {/* Drag and Drop Zone */}
                 {canUpload && (
                   <div
+                    onDragEnter={handleDragEnter}
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
