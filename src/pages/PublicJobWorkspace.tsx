@@ -801,6 +801,17 @@ export default function PublicJobWorkspace() {
         </div>
       )}
 
+      {/* Stable file input - rendered once outside all conditionals */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="*/*"
+        onChange={handleFileInputChange}
+        className="hidden"
+        aria-hidden="true"
+      />
+
       {/* Header */}
       <header className="border-b border-border bg-card">
         <div className="container mx-auto px-6 py-4">
@@ -1023,19 +1034,14 @@ export default function PublicJobWorkspace() {
                       <Upload className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
                       <p className="text-sm font-medium mb-1">Drag & drop files here</p>
                       <p className="text-xs text-muted-foreground mb-3">or click to browse</p>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        accept="*/*"
-                        onChange={handleFileInputChange}
-                        className="hidden"
-                      />
                       <Button 
                         variant="outline" 
                         size="sm" 
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => {
+                          console.log('[Upload] Browse button clicked, ref:', fileInputRef.current);
+                          fileInputRef.current?.click();
+                        }}
                       >
                         <Upload className="h-4 w-4 mr-2" />
                         Browse Files
@@ -1318,19 +1324,14 @@ export default function PublicJobWorkspace() {
                       <p className="text-sm text-muted-foreground mb-2">
                         Drag & drop files here, or click to browse
                       </p>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        accept="*/*"
-                        onChange={handleFileInputChange}
-                        className="hidden"
-                      />
                       <Button 
                         variant="outline" 
                         size="sm" 
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => {
+                          console.log('[Upload] Browse button clicked, ref:', fileInputRef.current);
+                          fileInputRef.current?.click();
+                        }}
                       >
                         <Upload className="h-4 w-4 mr-2" />
                         Browse Files
