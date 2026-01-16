@@ -48,8 +48,17 @@ interface SourceImageInfo {
 interface QuickFillTarget {
   lookId: string;
   lookName: string;
-  view: string;
-  sourceImage: LookSourceImage;
+  missingViews: Array<{
+    view: string;
+    sourceImage: {
+      id: string;
+      look_id: string;
+      digital_talent_id: string | null;
+      view: string;
+      source_url: string;
+      head_cropped_url: string | null;
+    };
+  }>;
   digitalTalentId: string | null;
 }
 
@@ -585,28 +594,25 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                             className="gap-1.5 h-7 text-xs"
                             onClick={(e) => {
                               e.stopPropagation();
-                              const firstMissing = missingViewsByLook[group.lookId][0];
+                              const allMissing = missingViewsByLook[group.lookId];
                               // Find digital talent ID from source image or look
-                              const talentId = firstMissing.sourceImage.digital_talent_id || 
+                              const talentId = allMissing[0]?.sourceImage.digital_talent_id || 
                                 sourceImages.find(s => s.look_id === group.lookId && s.digital_talent_id)?.digital_talent_id;
                               
                               setQuickFillTarget({
                                 lookId: group.lookId,
                                 lookName: group.lookName,
-                                view: firstMissing.view,
-                                sourceImage: {
-                                  id: firstMissing.sourceImage.id,
-                                  look_id: firstMissing.sourceImage.look_id,
-                                  digital_talent_id: firstMissing.sourceImage.digital_talent_id,
-                                  view: firstMissing.sourceImage.view as any,
-                                  source_url: firstMissing.sourceImage.source_url,
-                                  head_crop_x: null,
-                                  head_crop_y: null,
-                                  head_crop_width: null,
-                                  head_crop_height: null,
-                                  head_cropped_url: firstMissing.sourceImage.head_cropped_url,
-                                  created_at: '',
-                                },
+                                missingViews: allMissing.map(m => ({
+                                  view: m.view,
+                                  sourceImage: {
+                                    id: m.sourceImage.id,
+                                    look_id: m.sourceImage.look_id,
+                                    digital_talent_id: m.sourceImage.digital_talent_id,
+                                    view: m.sourceImage.view,
+                                    source_url: m.sourceImage.source_url,
+                                    head_cropped_url: m.sourceImage.head_cropped_url,
+                                  },
+                                })),
                                 digitalTalentId: talentId || null,
                               });
                             }}
@@ -744,8 +750,7 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
           onClose={() => setQuickFillTarget(null)}
           lookId={quickFillTarget.lookId}
           lookName={quickFillTarget.lookName}
-          view={quickFillTarget.view}
-          sourceImage={quickFillTarget.sourceImage}
+          missingViews={quickFillTarget.missingViews}
           digitalTalentId={quickFillTarget.digitalTalentId}
           projectId={projectId}
           onComplete={handleQuickFillComplete}
