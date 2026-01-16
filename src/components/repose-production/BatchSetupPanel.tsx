@@ -674,14 +674,14 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
 
         for (const pose of selectedPoses) {
           const clayImage = pose.clay_images as { id: string; stored_url: string } | null;
-          if (!clayImage?.stored_url) continue;
+          if (!clayImage?.id || !clayImage?.stored_url) continue;
 
           outputsToCreate.push({
             batch_id: batchId!,
             batch_item_id: item.id,
             run_id: runId,
-            pose_id: pose.id,
-            pose_url: clayImage.stored_url, // Critical: store the pose URL!
+            pose_id: clayImage.id, // Use clay_images.id - FK references clay_images table
+            pose_url: clayImage.stored_url,
             shot_type: shotType,
             attempt_index: 0,
             status: 'queued',
