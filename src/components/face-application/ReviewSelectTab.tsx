@@ -440,6 +440,55 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
       if (sentLookIds.has(output.look_id)) {
         setDirtyLookIds(prev => new Set([...prev, output.look_id]));
       }
+      
+      // Sync new selection to Job Board if the look already has an active job
+      if (newSelected && output.stored_url) {
+        const { data: existingJob } = await supabase
+          .from('unified_jobs')
+          .select('id')
+          .eq('look_id', output.look_id)
+          .in('status', ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'NEEDS_CHANGES'])
+          .maybeSingle();
+
+        if (existingJob) {
+          const normalizedView = output.view.toLowerCase();
+          const viewUpper = normalizedView.replace('full_', '').replace('cropped_', '').toUpperCase();
+          const artifactType = viewUpper === 'FRONT' ? 'HEAD_RENDER_FRONT' 
+            : viewUpper === 'SIDE' || viewUpper === 'DETAIL' ? 'HEAD_RENDER_SIDE'
+            : viewUpper === 'BACK' ? 'HEAD_RENDER_BACK'
+            : 'HEAD_RENDER_FRONT';
+
+          // Create artifact for the new head render
+          const { data: artifact } = await supabase
+            .from('unified_artifacts')
+            .insert({
+              project_id: projectId,
+              look_id: output.look_id,
+              type: artifactType,
+              file_url: output.stored_url,
+              source_table: 'ai_apply_outputs',
+              source_id: output.id,
+              metadata: { view: normalizedView, added_after_handoff: true },
+            })
+            .select()
+            .single();
+
+          if (artifact) {
+            await supabase
+              .from('job_inputs')
+              .insert({
+                job_id: existingJob.id,
+                artifact_id: artifact.id,
+                label: `Head render ${normalizedView} (updated)`,
+              });
+            console.log('[ReviewSelectTab] Synced selection to Job Board:', { 
+              lookId: output.look_id, 
+              view: normalizedView, 
+              artifactId: artifact.id 
+            });
+          }
+        }
+      }
     } finally {
       setSelectingId(null);
     }
