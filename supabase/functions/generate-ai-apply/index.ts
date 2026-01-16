@@ -6,34 +6,22 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// View-specific pose and framing instructions (from working generate-face-application)
+// View-specific pose and framing instructions
 const VIEW_PROMPTS: Record<string, string> = {
-  full_front: `Full-length front-facing portrait showing the complete outfit from head to toe. Model standing upright with head held straight and aligned with the torso. Eyes looking directly at the camera with a calm, steady gaze. Brows in a soft, neutral resting position. Mouth closed with an extremely subtle smile.
+  full_front: `Front-facing portrait with the head held upright and aligned with the torso, showing no noticeable tilt left or right. Chin is neutral and level, giving a centred, composed posture. Eyes looking directly at the camera with a calm, steady gaze. Eyelids moderately open — relaxed and natural, not widened, creating a serene, attentive expression. Brows in a soft, neutral resting position. Mouth closed with an extremely subtle, low-intensity smile: the lips rest naturally with only a faint softening, no upward corner lift.`,
 
-Keep face and lighting consistent from image 2, make sure to keep freckles intact.`,
+  cropped_front: `Front-facing portrait with the head held upright and aligned with the torso, showing no noticeable tilt left or right. Chin is neutral and level, giving a centred, composed posture. Eyes looking directly at the camera with a calm, steady gaze. Eyelids moderately open — relaxed and natural, not widened, creating a serene, attentive expression. Brows in a soft, neutral resting position. Mouth closed with an extremely subtle, low-intensity smile: the lips rest naturally with only a faint softening, no upward corner lift.`,
 
-  cropped_front: `Close-up front-facing portrait cropped at chest level, focusing on the face and upper body. Head held upright and aligned with the torso, showing no noticeable tilt left or right. Chin is neutral and level. Eyes looking directly at the camera with a calm, steady gaze.
+  front: `Front-facing portrait with the head held upright and aligned with the torso, showing no noticeable tilt left or right. Chin is neutral and level, giving a centred, composed posture. Eyes looking directly at the camera with a calm, steady gaze. Eyelids moderately open — relaxed and natural, not widened, creating a serene, attentive expression. Brows in a soft, neutral resting position. Mouth closed with an extremely subtle, low-intensity smile: the lips rest naturally with only a faint softening, no upward corner lift.`,
 
-Keep face and lighting consistent from image 2, make sure to keep freckles intact.`,
+  back: `Back-facing pose with shoulders squared to the camera. Head is rotated slightly to her left (camera right), creating a soft partial profile. Chin is neutral and level. The face is visible only in side view, with the cheek, jawline, and nose seen in gentle profile while the eyes are turned away from the camera. Overall posture is upright, calm, and centered.`,
 
-  front: `Front-facing portrait with full visibility of the face and outfit. Head held upright and aligned with the torso. Eyes looking directly at the camera with a calm, steady gaze.
+  side: `Side profile view with the model's face in clean profile. Head held upright, chin neutral and level. The full outline of the face is visible - forehead, nose, lips, and chin in silhouette against the background.`,
 
-Keep face and lighting consistent from image 2, make sure to keep freckles intact.`,
-
-  back: `Back-facing pose with shoulders squared to the camera. Head is rotated slightly to her left (camera right), creating a soft partial profile. Chin is neutral and level. The face is visible only in side view, with the cheek, jawline, and nose seen in gentle profile while the eyes are turned away from the camera. Overall posture is upright, calm, and centered.
-
-Keep face and lighting consistent from image 2.`,
-
-  side: `Side profile view with the model's face in clean profile. Head held upright, chin neutral and level. The full outline of the face is visible - forehead, nose, lips, and chin in silhouette against the background.
-
-Keep face and lighting consistent from image 2.`,
-
-  detail: `Close-up detail shot focusing on a specific feature of the outfit (collar, cuff, pocket, or texture). Frame tightly on the detail while keeping the model's face partially visible at the edge of frame for context.
-
-Keep face and lighting consistent from image 2.`,
+  detail: `Close-up detail shot focusing on a specific feature of the outfit (collar, cuff, pocket, or texture). Frame tightly on the detail while keeping the model's face partially visible at the edge of frame for context.`,
 };
 
-const STUDIO_LIGHTING_PROMPT = `Model photographed in soft, high-key studio lighting against a clean white background with no visible texture. Light is diffused and even, creating minimal shadows. Key light is centred and slightly above eye level, producing gentle falloff on the cheeks and a natural, matte skin appearance. No harsh rim light. Overall look is crisp, neutral, and modern, similar to premium fashion e-commerce photography. Colours are true-to-life with subtle contrast.`;
+const STUDIO_LIGHTING_PROMPT = `Model shot in soft, high-key studio lighting. Background is clean white with no visible texture. Light is diffused and even, creating minimal shadows. Key light is centred and slightly above eye level, producing gentle falloff on the cheeks and a natural, matte skin appearance. No harsh rim light. Overall look is crisp, neutral, and modern, similar to premium fashion e-commerce photography. Colours are true-to-life with subtle contrast.`;
 
 interface RequestBody {
   projectId: string;
@@ -89,6 +77,42 @@ async function uploadToStorage(
   } catch (err) {
     console.error("[AI Apply] Upload exception:", err);
     return null;
+  }
+}
+
+// Helper to generate outfit description from an image
+async function generateOutfitDescription(
+  imageUrl: string,
+  supabaseUrl: string,
+  supabaseKey: string
+): Promise<string> {
+  try {
+    console.log(`[AI Apply] Generating outfit description for image...`);
+    
+    const descResponse = await fetch(
+      `${supabaseUrl}/functions/v1/generate-outfit-description`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({ imageUrl }),
+      }
+    );
+    
+    if (descResponse.ok) {
+      const descResult = await descResponse.json();
+      const description = descResult.description || "the outfit shown";
+      console.log(`[AI Apply] Outfit description: "${description}"`);
+      return description;
+    } else {
+      console.error(`[AI Apply] Outfit description API error: ${descResponse.status}`);
+      return "the outfit shown";
+    }
+  } catch (err) {
+    console.error(`[AI Apply] Failed to generate outfit description:`, err);
+    return "the outfit shown";
   }
 }
 
@@ -172,17 +196,23 @@ serve(async (req) => {
     // Determine which views to process
     const viewsToProcess = view ? [view] : ['full_front', 'cropped_front', 'back', 'detail'];
 
-    // Get source images with matched_face_url (from Face Match stage)
+    // Get source images with Digital Talent portrait (join digital_talents table)
     const { data: sourceImages } = await supabase
       .from('look_source_images')
-      .select('id, look_id, view, source_url, head_cropped_url, matched_face_url')
+      .select(`
+        id, look_id, view, source_url, head_cropped_url, matched_face_url, digital_talent_id,
+        digital_talent:digital_talents!digital_talent_id (
+          id, name, front_face_url
+        )
+      `)
       .eq('look_id', lookId);
 
     console.log(`[AI Apply] Found ${sourceImages?.length || 0} source images for look`);
     
     // Log what we have for debugging
     for (const img of sourceImages || []) {
-      console.log(`[AI Apply] Source image ${img.view}: body=${img.source_url ? 'YES' : 'NO'}, matched_face=${img.matched_face_url ? 'YES' : 'NO'}`);
+      const talentPortrait = (img.digital_talent as any)?.front_face_url;
+      console.log(`[AI Apply] Source image ${img.view}: crop=${img.head_cropped_url ? 'YES' : 'NO'}, paired_face=${img.matched_face_url ? 'YES' : 'NO'}, talent_portrait=${talentPortrait ? 'YES' : 'NO'}`);
     }
 
     // View name mapping: generation views -> database views
@@ -215,24 +245,33 @@ serve(async (req) => {
         continue;
       }
 
-      // CORRECT INPUTS:
-      // - bodyImageUrl: Full body outfit from source_url
-      // - modelPortraitUrl: Model face from matched_face_url (set in Face Match stage)
-      const bodyImageUrl = bodyImage.source_url;
-      const modelPortraitUrl = bodyImage.matched_face_url;
+      // CORRECT 3 INPUTS:
+      // - Image 1: head_cropped_url (the crop we describe in the prompt)
+      // - Image 2: matched_face_url (paired face from Face Match stage)
+      // - Image 3: digital_talents.front_face_url (talent's primary portrait)
+      const cropImageUrl = bodyImage.head_cropped_url;                              // Image 1
+      const pairedFaceUrl = bodyImage.matched_face_url;                             // Image 2
+      const talentPortraitUrl = (bodyImage.digital_talent as any)?.front_face_url;  // Image 3
 
-      if (!bodyImageUrl) {
-        console.log(`[AI Apply] SKIP: No body source_url for ${currentView}`);
+      if (!cropImageUrl) {
+        console.log(`[AI Apply] SKIP: No head_cropped_url for ${currentView} - Head Crop stage not completed`);
         continue;
       }
 
-      if (!modelPortraitUrl) {
+      if (!pairedFaceUrl) {
         console.log(`[AI Apply] SKIP: No matched_face_url for ${currentView} - Face Match stage not completed`);
         continue;
       }
 
-      console.log(`[AI Apply] Body image (source_url) for ${currentView}: ${bodyImageUrl.substring(0, 80)}...`);
-      console.log(`[AI Apply] Model portrait (matched_face_url) for ${currentView}: ${modelPortraitUrl.substring(0, 80)}...`);
+      if (!talentPortraitUrl) {
+        console.log(`[AI Apply] SKIP: No digital talent portrait for ${currentView} - Digital Talent not linked`);
+        continue;
+      }
+
+      console.log(`[AI Apply] Image 1 (crop): ${cropImageUrl.substring(0, 60)}...`);
+      console.log(`[AI Apply] Image 2 (paired face): ${pairedFaceUrl.substring(0, 60)}...`);
+      console.log(`[AI Apply] Image 3 (talent portrait): ${talentPortraitUrl.substring(0, 60)}...`);
+
       // Determine how many attempts to create
       let attemptsToCreate = attemptsPerView;
 
@@ -275,11 +314,11 @@ serve(async (req) => {
           view: currentView,
           attempt_index: attemptIndex,
           head_image_id: null,
-          head_image_url: modelPortraitUrl,  // Model portrait from Face Match
+          head_image_url: talentPortraitUrl,  // Store talent portrait as reference
           body_image_id: bodyImage.id,
-          body_image_url: bodyImageUrl,      // Full body from source_url
+          body_image_url: cropImageUrl,        // Store the crop as the body reference
           status: 'generating',
-          prompt_version: 'v3-matched-face',
+          prompt_version: 'v4-3-image-dynamic',
         });
       }
 
@@ -297,6 +336,10 @@ serve(async (req) => {
         })
         .eq('id', jobId);
 
+      // Generate outfit description from Image 1 (the crop)
+      // This only needs to be done once per view, not per attempt
+      const outfitDescription = await generateOutfitDescription(cropImageUrl, supabaseUrl, supabaseKey);
+
       // Process each pending output for this view
       const { data: pendingOutputs } = await supabase
         .from('ai_apply_outputs')
@@ -307,7 +350,7 @@ serve(async (req) => {
 
       for (const output of pendingOutputs || []) {
         try {
-          // Build the prompt using the CORRECT format from generate-face-application
+          // Build the prompt with dynamic outfit description
           const viewPrompt = VIEW_PROMPTS[currentView] || VIEW_PROMPTS.front || '';
           
           let finalPrompt: string;
@@ -317,18 +360,27 @@ serve(async (req) => {
 
 ${viewPrompt}
 
+Keep face and lighting consistent from image 3.
+
 ${STUDIO_LIGHTING_PROMPT}`;
           } else {
-            // Default prompt: explicit face swap instruction
-            finalPrompt = `Recreate image 1, keep the crop, pose and clothing exactly the same but put the head of image 2 on it. ${viewPrompt}
+            // Default prompt with dynamic outfit description
+            finalPrompt = `Recreate image 1 with "${outfitDescription}", keep the crop, pose and clothing exactly the same but put the head of image 2 on it.
+
+${viewPrompt}
+
+Keep face and lighting consistent from image 3.
 
 ${STUDIO_LIGHTING_PROMPT}`;
           }
 
           console.log(`[AI Apply] Generating output ${output.id} for ${currentView} attempt ${output.attempt_index}`);
 
-          // Call Lovable AI Gateway
-          // CRITICAL: Image order matters! Image 1 = body, Image 2 = head
+          // Call Lovable AI Gateway with 3 images
+          // CRITICAL: Image order matters!
+          // Image 1 = crop (outfit/pose)
+          // Image 2 = paired face (from Face Match)
+          // Image 3 = talent portrait (identity reference)
           const aiResponse = await fetch(
             "https://ai.gateway.lovable.dev/v1/chat/completions",
             {
@@ -344,8 +396,9 @@ ${STUDIO_LIGHTING_PROMPT}`;
                     role: 'user',
                     content: [
                       { type: 'text', text: finalPrompt },
-                      { type: 'image_url', image_url: { url: output.body_image_url } },  // Image 1 = Body
-                      { type: 'image_url', image_url: { url: output.head_image_url } },  // Image 2 = Head
+                      { type: 'image_url', image_url: { url: cropImageUrl } },         // Image 1 = Crop (outfit)
+                      { type: 'image_url', image_url: { url: pairedFaceUrl } },        // Image 2 = Paired face
+                      { type: 'image_url', image_url: { url: talentPortraitUrl } },    // Image 3 = Talent portrait
                     ],
                   },
                 ],
