@@ -359,7 +359,7 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                                 <OptimizedImage
                                   src={output.stored_url}
                                   alt={`${view} attempt ${idx + 1}`}
-                                  tier="thumb"
+                                  tier="preview"
                                   className="object-cover"
                                   containerClassName="w-full h-full"
                                 />
