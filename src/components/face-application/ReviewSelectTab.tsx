@@ -945,69 +945,41 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                         </CardTitle>
                       </div>
                       <div className="flex items-center gap-2">
-                        {/* Re-render missing views button */}
+                        {/* Add missing views button - always opens wizard */}
                         {missingViewsByLook[group.lookId]?.length > 0 && (() => {
                           const allMissing = missingViewsByLook[group.lookId];
                           const talentId = allMissing[0]?.sourceImage.digital_talent_id || 
                             sourceImages.find(s => s.look_id === group.lookId && s.digital_talent_id)?.digital_talent_id ||
                             lookTalentMap[group.lookId];
                           
-                          // Check which views have prerequisites (head crop + talent)
-                          const readyViews = allMissing.filter(m => 
-                            m.sourceImage.head_cropped_url && talentId
-                          );
-                          const canRerender = readyViews.length > 0;
-                          const isRegenerating = allMissing.some(m => 
-                            regeneratingView === `${group.lookId}:${m.view}`
-                          );
-                          
                           return (
                             <Button
                               variant="outline"
                               size="sm"
                               className="gap-1.5 h-7 text-xs"
-                              disabled={isRegenerating}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                
-                                if (canRerender) {
-                                  // Trigger regeneration directly for ready views
-                                  for (const missing of readyViews) {
-                                    handleRegenerateView(group.lookId, missing.view);
-                                  }
-                                  toast({
-                                    title: "Generating",
-                                    description: `Starting ${readyViews.length} view(s)...`,
-                                  });
-                                } else {
-                                  // Fallback to QuickFillDialog for views missing prerequisites
-                                  setQuickFillTarget({
-                                    lookId: group.lookId,
-                                    lookName: group.lookName,
-                                    missingViews: allMissing.map(m => ({
-                                      view: m.view,
-                                      sourceImage: {
-                                        id: m.sourceImage.id,
-                                        look_id: m.sourceImage.look_id,
-                                        digital_talent_id: m.sourceImage.digital_talent_id,
-                                        view: m.sourceImage.view,
-                                        source_url: m.sourceImage.source_url,
-                                        head_cropped_url: m.sourceImage.head_cropped_url,
-                                      },
-                                    })),
-                                    digitalTalentId: talentId || null,
-                                  });
-                                }
+                                // Always open QuickFillDialog for full workflow control
+                                setQuickFillTarget({
+                                  lookId: group.lookId,
+                                  lookName: group.lookName,
+                                  missingViews: allMissing.map(m => ({
+                                    view: m.view,
+                                    sourceImage: {
+                                      id: m.sourceImage.id,
+                                      look_id: m.sourceImage.look_id,
+                                      digital_talent_id: m.sourceImage.digital_talent_id,
+                                      view: m.sourceImage.view,
+                                      source_url: m.sourceImage.source_url,
+                                      head_cropped_url: m.sourceImage.head_cropped_url,
+                                    },
+                                  })),
+                                  digitalTalentId: talentId || null,
+                                });
                               }}
                             >
-                              {isRegenerating ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : canRerender ? (
-                                <RotateCcw className="h-3 w-3" />
-                              ) : (
-                                <Plus className="h-3 w-3" />
-                              )}
-                              {canRerender ? 'Re-render' : 'Add'} {allMissing.length} missing
+                              <Plus className="h-3 w-3" />
+                              Add {allMissing.length} missing
                             </Button>
                           );
                         })()}
@@ -1212,69 +1184,41 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                             </CardTitle>
                           </div>
                           <div className="flex items-center gap-2">
-                            {/* Re-render missing views button */}
+                            {/* Add missing views button - always opens wizard */}
                             {missingViewsByLook[group.lookId]?.length > 0 && (() => {
                               const allMissing = missingViewsByLook[group.lookId];
                               const talentId = allMissing[0]?.sourceImage.digital_talent_id || 
                                 sourceImages.find(s => s.look_id === group.lookId && s.digital_talent_id)?.digital_talent_id ||
                                 lookTalentMap[group.lookId];
                               
-                              // Check which views have prerequisites (head crop + talent)
-                              const readyViews = allMissing.filter(m => 
-                                m.sourceImage.head_cropped_url && talentId
-                              );
-                              const canRerender = readyViews.length > 0;
-                              const isRegenerating = allMissing.some(m => 
-                                regeneratingView === `${group.lookId}:${m.view}`
-                              );
-                              
                               return (
                                 <Button
                                   variant="outline"
                                   size="sm"
                                   className="gap-1.5 h-7 text-xs"
-                                  disabled={isRegenerating}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    
-                                    if (canRerender) {
-                                      // Trigger regeneration directly for ready views
-                                      for (const missing of readyViews) {
-                                        handleRegenerateView(group.lookId, missing.view);
-                                      }
-                                      toast({
-                                        title: "Generating",
-                                        description: `Starting ${readyViews.length} view(s)...`,
-                                      });
-                                    } else {
-                                      // Fallback to QuickFillDialog for views missing prerequisites
-                                      setQuickFillTarget({
-                                        lookId: group.lookId,
-                                        lookName: group.lookName,
-                                        missingViews: allMissing.map(m => ({
-                                          view: m.view,
-                                          sourceImage: {
-                                            id: m.sourceImage.id,
-                                            look_id: m.sourceImage.look_id,
-                                            digital_talent_id: m.sourceImage.digital_talent_id,
-                                            view: m.sourceImage.view,
-                                            source_url: m.sourceImage.source_url,
-                                            head_cropped_url: m.sourceImage.head_cropped_url,
-                                          },
-                                        })),
-                                        digitalTalentId: talentId || null,
-                                      });
-                                    }
+                                    // Always open QuickFillDialog for full workflow control
+                                    setQuickFillTarget({
+                                      lookId: group.lookId,
+                                      lookName: group.lookName,
+                                      missingViews: allMissing.map(m => ({
+                                        view: m.view,
+                                        sourceImage: {
+                                          id: m.sourceImage.id,
+                                          look_id: m.sourceImage.look_id,
+                                          digital_talent_id: m.sourceImage.digital_talent_id,
+                                          view: m.sourceImage.view,
+                                          source_url: m.sourceImage.source_url,
+                                          head_cropped_url: m.sourceImage.head_cropped_url,
+                                        },
+                                      })),
+                                      digitalTalentId: talentId || null,
+                                    });
                                   }}
                                 >
-                                  {isRegenerating ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : canRerender ? (
-                                    <RotateCcw className="h-3 w-3" />
-                                  ) : (
-                                    <Plus className="h-3 w-3" />
-                                  )}
-                                  {canRerender ? 'Re-render' : 'Add'} {allMissing.length} missing
+                                  <Plus className="h-3 w-3" />
+                                  Add {allMissing.length} missing
                                 </Button>
                               );
                             })()}
