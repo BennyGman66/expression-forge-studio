@@ -281,7 +281,7 @@ export default function PublicFreelancerBoard() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="max-h-[400px]">
+                  <ScrollArea className="h-[200px]">
                   <div className="space-y-3 pr-4">
                     {needsChangesJobs.map(job => renderJobRow(job, 'orange'))}
                   </div>
@@ -310,7 +310,7 @@ export default function PublicFreelancerBoard() {
                   <p className="text-muted-foreground text-sm">No open jobs available</p>
                 </div>
               ) : (
-                <ScrollArea className="max-h-[400px]">
+                  <ScrollArea className="h-[400px]">
                   <div className="space-y-3 pr-4">
                     {openJobs.map(job => (
                       <div
@@ -365,7 +365,7 @@ export default function PublicFreelancerBoard() {
               ) : inProgressJobs.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No jobs in progress</p>
               ) : (
-                <ScrollArea className="max-h-[400px]">
+                  <ScrollArea className="h-[400px]">
                   <div className="space-y-3 pr-4">
                     {inProgressJobs.map(job => renderJobRow(job))}
                   </div>
@@ -391,7 +391,7 @@ export default function PublicFreelancerBoard() {
               ) : othersJobs.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No jobs being worked on by others</p>
               ) : (
-                <ScrollArea className="max-h-[400px]">
+                <ScrollArea className="h-[400px]">
                   <div className="space-y-3 pr-4">
                     <TooltipProvider>
                       {othersJobs.map(job => (
