@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye, RotateCcw } from 'lucide-react';
+import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye, RotateCcw, Trash2, MessageSquare } from 'lucide-react';
 import { format } from 'date-fns';
 import { FreelancerNamePrompt } from '@/components/freelancer/FreelancerNamePrompt';
 import { FreelancerNeedsChangesView } from '@/components/freelancer/FreelancerNeedsChangesView';
@@ -337,6 +337,23 @@ export default function PublicJobWorkspace() {
     },
   });
 
+  // Delete output mutation
+  const deleteOutput = useMutation({
+    mutationFn: async (outputId: string) => {
+      const { error } = await supabase
+        .from('job_outputs')
+        .delete()
+        .eq('id', outputId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['public-job-outputs', jobId] });
+    },
+    onError: (error: any) => {
+      toast.error('Failed to delete output');
+      console.error(error);
+    },
+  });
   const handleIdentitySubmit = async (firstName: string, lastName: string) => {
     setIdentitySaving(true);
     try {
@@ -648,35 +665,17 @@ export default function PublicJobWorkspace() {
 
       {/* Status Banners */}
       {job.status === 'NEEDS_CHANGES' && !isPreviewMode && (
-        <>
-          <div className="bg-orange-500/20 border-b border-orange-500/30 px-6 py-3">
-            <div className="container mx-auto flex items-center gap-3">
-              <AlertTriangle className="h-5 w-5 text-orange-400" />
-              <div>
-                <p className="font-medium text-orange-200">Changes Requested</p>
-                <p className="text-sm text-orange-300/80">
-                  Review the feedback below and update your submission.
-                </p>
-              </div>
+        <div className="bg-orange-500/20 border-b border-orange-500/30 px-6 py-3">
+          <div className="container mx-auto flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-orange-400" />
+            <div>
+              <p className="font-medium text-orange-200">Changes Requested</p>
+              <p className="text-sm text-orange-300/80">
+                Review the feedback below and update your submission.
+              </p>
             </div>
           </div>
-          
-          {/* Feedback Viewer for NEEDS_CHANGES */}
-          {latestSubmission && (
-            <div className="container mx-auto px-6 py-6">
-              <FreelancerNeedsChangesView
-                submissionId={latestSubmission.id}
-                jobId={jobId!}
-                versionNumber={latestSubmission.version_number || 1}
-                instructions={job.instructions}
-                inputs={inputs as any}
-                onReplacementsChange={setReplacements}
-                onResubmit={() => resubmitJob.mutate()}
-                isResubmitting={resubmitJob.isPending}
-              />
-            </div>
-          )}
-        </>
+        </div>
       )}
 
       {job.status === 'SUBMITTED' && !isPreviewMode && (
@@ -743,356 +742,332 @@ export default function PublicJobWorkspace() {
         </div>
       </header>
 
-      <main className="container mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Content */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Brief / Instructions */}
-            <Accordion type="single" collapsible defaultValue="instructions">
-              <AccordionItem value="instructions" className="border rounded-lg px-4">
-                <AccordionTrigger className="hover:no-underline">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    <span className="font-medium">Brief / Instructions</span>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="pt-2 pb-4 space-y-4">
-                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                      {displayInstructions}
-                    </p>
-                    
-                    {/* Input Images Grid */}
-                    {inputs.length > 0 && (
-                      <div className="space-y-2">
-                        <Label className="text-xs text-muted-foreground">Reference Images</Label>
-                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                          {inputs.map((input: any) => (
-                            <div key={input.id} className="relative group">
-                              <img
-                                src={(input.artifact?.preview_url || input.artifact?.file_url)}
-                                alt={input.label || 'Input'}
-                                className="w-full aspect-square object-cover rounded border border-border"
-                              />
-                              {input.label && (
-                                <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-white px-1 py-0.5 truncate">
-                                  {input.label}
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-
-            {/* Inputs Section */}
-            {groupedInputs && groupedInputs.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <FileImage className="h-5 w-5" />
-                      Input Files
-                    </CardTitle>
-                    <Button variant="outline" size="sm" onClick={handleDownloadAll}>
-                      <Download className="h-4 w-4 mr-2" />
-                      Download All
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {groupedInputs.map((group) => (
-                      <div key={group.view} className="space-y-3">
-                        <h4 className="font-medium text-sm">{group.view} View</h4>
-                        <div className="space-y-2">
-                          {group.headRender && (
-                            <div className="space-y-1">
-                              <span className="text-xs text-muted-foreground">Head Render</span>
-                              <div className="relative group">
-                                <img
-                                  src={group.headRender.artifact?.preview_url || group.headRender.artifact?.file_url}
-                                  alt={`${group.view} head render`}
-                                  className="w-full aspect-[3/4] object-cover rounded border border-border"
-                                />
-                                <a
-                                  href={group.headRender.artifact?.file_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
-                                >
-                                  <Download className="h-6 w-6 text-white" />
-                                </a>
-                              </div>
-                            </div>
-                          )}
-                          {group.originalSource && (
-                            <div className="space-y-1">
-                              <span className="text-xs text-muted-foreground">Original Source</span>
-                              <div className="relative group">
-                                <img
-                                  src={group.originalSource.artifact?.preview_url || group.originalSource.artifact?.file_url}
-                                  alt={`${group.view} source`}
-                                  className="w-full aspect-[3/4] object-cover rounded border border-border"
-                                />
-                                <a
-                                  href={group.originalSource.artifact?.file_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
-                                >
-                                  <Download className="h-6 w-6 text-white" />
-                                </a>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Upload Section */}
-            {canUpload && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Upload className="h-5 w-5" />
-                    Upload Outputs
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Progress */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Upload Progress</span>
-                      <span>{outputs.length} output{outputs.length !== 1 ? 's' : ''}</span>
+      {/* Main Content - Show Feedback View when NEEDS_CHANGES, otherwise show regular content */}
+      {job.status === 'NEEDS_CHANGES' && latestSubmission && !isPreviewMode ? (
+        <main className="container mx-auto px-6 py-6 flex-1">
+          <div className="h-[calc(100vh-220px)] min-h-[600px]">
+            <FreelancerNeedsChangesView
+              submissionId={latestSubmission.id}
+              jobId={jobId!}
+              versionNumber={latestSubmission.version_number || 1}
+              instructions={job.instructions}
+              inputs={inputs as any}
+              onReplacementsChange={setReplacements}
+              onResubmit={() => resubmitJob.mutate()}
+              isResubmitting={resubmitJob.isPending}
+            />
+          </div>
+        </main>
+      ) : (
+        <main className="container mx-auto px-6 py-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Main Content */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Brief / Instructions */}
+              <Accordion type="single" collapsible defaultValue="instructions">
+                <AccordionItem value="instructions" className="border rounded-lg px-4">
+                  <AccordionTrigger className="hover:no-underline">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      <span className="font-medium">Brief / Instructions</span>
                     </div>
-                    <Progress value={uploadProgress} className="h-2" />
-                  </div>
-
-                  {/* Drop Zone */}
-                  <div
-                    className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                      isDragOver ? 'border-primary bg-primary/5' : 'border-border'
-                    }`}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                  >
-                    <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground mb-2">
-                      Drag & drop files here, or click to browse
-                    </p>
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*,.psd,.tiff,.ai,.pdf"
-                      onChange={handleFileInputChange}
-                      className="hidden"
-                      id="file-upload"
-                    />
-                    <label htmlFor="file-upload">
-                      <Button variant="outline" size="sm" asChild>
-                        <span>Browse Files</span>
-                      </Button>
-                    </label>
-                  </div>
-
-                  {/* Pending Uploads */}
-                  {pendingUploads.length > 0 && (
-                    <div className="space-y-3">
-                      <Label>Files to Upload <span className="text-muted-foreground font-normal">(view optional)</span></Label>
-                      {pendingUploads.map((pending) => (
-                        <div key={pending.id} className="flex items-center gap-3 p-2 border rounded">
-                          {pending.preview ? (
-                            <img src={pending.preview} alt="" className="h-12 w-12 object-cover rounded" />
-                          ) : (
-                            <div className="h-12 w-12 bg-muted rounded flex items-center justify-center">
-                              <FileImage className="h-6 w-6 text-muted-foreground" />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm truncate">{pending.file.name}</p>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <div className="pt-2 pb-4 space-y-4">
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                        {displayInstructions}
+                      </p>
+                      
+                      {/* Input Images Grid */}
+                      {inputs.length > 0 && (
+                        <div className="space-y-2">
+                          <Label className="text-xs text-muted-foreground">Reference Images</Label>
+                          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                            {inputs.map((input: any) => (
+                              <div key={input.id} className="relative group">
+                                <img
+                                  src={(input.artifact?.preview_url || input.artifact?.file_url)}
+                                  alt={input.label || 'Input'}
+                                  className="w-full aspect-square object-cover rounded border border-border"
+                                />
+                                {input.label && (
+                                  <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-white px-1 py-0.5 truncate">
+                                    {input.label}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
                           </div>
-                          <Select
-                            value={pending.view || ''}
-                            onValueChange={(v) => updatePendingView(pending.id, v === '' ? null : v as 'front' | 'side' | 'back' | 'other')}
-                          >
-                            <SelectTrigger className="w-28">
-                              <SelectValue placeholder="View" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="front">
-                                Front {uploadedViews.has('front') && <span className="text-muted-foreground">(exists)</span>}
-                              </SelectItem>
-                              <SelectItem value="side">
-                                Side {uploadedViews.has('side') && <span className="text-muted-foreground">(exists)</span>}
-                              </SelectItem>
-                              <SelectItem value="back">
-                                Back {uploadedViews.has('back') && <span className="text-muted-foreground">(exists)</span>}
-                              </SelectItem>
-                              <SelectItem value="other">Other</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Button variant="ghost" size="icon" onClick={() => removePendingFile(pending.id)}>
-                            <X className="h-4 w-4" />
-                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+
+              {/* Inputs Section */}
+              {groupedInputs && groupedInputs.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <FileImage className="h-5 w-5" />
+                        Input Files
+                      </CardTitle>
+                      <Button variant="outline" size="sm" onClick={handleDownloadAll}>
+                        <Download className="h-4 w-4 mr-2" />
+                        Download All
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {groupedInputs.map((group) => (
+                        <div key={group.view} className="space-y-3">
+                          <h4 className="font-medium text-sm">{group.view} View</h4>
+                          <div className="space-y-2">
+                            {group.headRender && (
+                              <div className="space-y-1">
+                                <span className="text-xs text-muted-foreground">Head Render</span>
+                                <div className="relative group">
+                                  <img
+                                    src={group.headRender.artifact?.preview_url || group.headRender.artifact?.file_url}
+                                    alt={`${group.view} head render`}
+                                    className="w-full aspect-[3/4] object-cover rounded border border-border"
+                                  />
+                                  <a
+                                    href={group.headRender.artifact?.file_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  >
+                                    <Download className="h-6 w-6 text-white" />
+                                  </a>
+                                </div>
+                              </div>
+                            )}
+                            {group.originalSource && (
+                              <div className="space-y-1">
+                                <span className="text-xs text-muted-foreground">Original Source</span>
+                                <div className="relative group">
+                                  <img
+                                    src={group.originalSource.artifact?.preview_url || group.originalSource.artifact?.file_url}
+                                    alt={`${group.view} source`}
+                                    className="w-full aspect-[3/4] object-cover rounded border border-border"
+                                  />
+                                  <a
+                                    href={group.originalSource.artifact?.file_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  >
+                                    <Download className="h-6 w-6 text-white" />
+                                  </a>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))}
-                      <Button 
-                        onClick={handleUploadPending} 
-                        disabled={pendingUploads.length === 0 || uploading}
-                        className="w-full"
-                      >
-                        {uploading ? 'Uploading...' : `Upload ${pendingUploads.length} File(s)`}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Upload Section */}
+              {canUpload && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Upload className="h-5 w-5" />
+                      Upload Outputs
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Progress */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Upload Progress</span>
+                        <span>{outputs.length} output{outputs.length !== 1 ? 's' : ''}</span>
+                      </div>
+                      <Progress value={uploadProgress} className="h-2" />
+                    </div>
+
+                    {/* Drop Zone */}
+                    <div
+                      className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                        isDragOver ? 'border-primary bg-primary/5' : 'border-border'
+                      }`}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                    >
+                      <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Drag & drop files here, or click to browse
+                      </p>
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,.psd,.tiff,.ai,.pdf"
+                        onChange={handleFileInputChange}
+                        className="hidden"
+                        id="file-upload"
+                      />
+                      <Button variant="outline" size="sm" asChild>
+                        <label htmlFor="file-upload" className="cursor-pointer">
+                          Browse Files
+                        </label>
                       </Button>
                     </div>
-                  )}
 
-                  {/* Uploaded Outputs */}
-                  {outputs.length > 0 && (
-                    <div className="space-y-2">
-                      <Label>Uploaded Outputs</Label>
+                    {/* Uploaded Files Grid */}
+                    {outputs.length > 0 && (
                       <div className="grid grid-cols-3 gap-2">
                         {outputs.map((output: any) => (
                           <div key={output.id} className="relative group">
                             <img
-                              src={output.file_url || output.artifact?.file_url}
+                              src={output.artifact?.preview_url || output.artifact?.file_url || output.file_url}
                               alt={output.label || 'Output'}
-                              className="w-full aspect-[3/4] object-cover rounded border border-border"
+                              className="w-full aspect-square object-cover rounded border border-border"
                             />
-                            <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-white px-1 py-0.5 truncate">
-                              {output.label}
-                            </span>
+                            <button
+                              onClick={() => deleteOutput.mutate(output.id)}
+                              className="absolute top-1 right-1 p-1 bg-red-500/80 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <Trash2 className="h-3 w-3 text-white" />
+                            </button>
+                            {output.label && (
+                              <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-white px-1 py-0.5 truncate">
+                                {output.label}
+                              </span>
+                            )}
                           </div>
                         ))}
                       </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Submitted Outputs - Read Only View */}
+              {!canUpload && outputs.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <FileImage className="h-5 w-5" />
+                      Submitted Outputs
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-3 gap-2">
+                      {outputs.map((output: any) => (
+                        <div key={output.id} className="relative group">
+                          <img
+                            src={output.artifact?.preview_url || output.artifact?.file_url || output.file_url}
+                            alt={output.label || 'Output'}
+                            className="w-full aspect-square object-cover rounded border border-border"
+                          />
+                          {output.label && (
+                            <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-white px-1 py-0.5 truncate">
+                              {output.label}
+                            </span>
+                          )}
+                        </div>
+                      ))}
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Sidebar */}
+            <div className="space-y-6">
+              {/* Actions Card */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg">Actions</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {canUpload && (
+                    <>
+                      <Button 
+                        className="w-full" 
+                        onClick={() => createSubmission.mutate()}
+                        disabled={outputs.length === 0 || createSubmission.isPending}
+                      >
+                        <Send className="h-4 w-4 mr-2" />
+                        {createSubmission.isPending ? 'Submitting...' : 'Submit for Review'}
+                      </Button>
+                      {outputs.length === 0 && (
+                        <p className="text-xs text-muted-foreground text-center">
+                          Upload at least 1 output to submit
+                        </p>
+                      )}
+                    </>
+                  )}
+                  
+                  {(job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES') && !isPreviewMode && (
+                    <Button 
+                      variant="outline" 
+                      className="w-full text-orange-500 border-orange-500/30 hover:bg-orange-500/10"
+                      onClick={() => setShowAbandonConfirm(true)}
+                    >
+                      Return Job
+                    </Button>
                   )}
                 </CardContent>
               </Card>
-            )}
-          </div>
 
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* Actions Card */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {canStart && (
-                  <Button className="w-full" onClick={handleStartJob}>
-                    <Play className="h-4 w-4 mr-2" />
-                    Start Job
-                  </Button>
-                )}
-                
-                {canUpload && (
-                  <Button 
-                    className="w-full" 
-                    onClick={handleSubmitJob}
-                    disabled={outputs.length < 1 || createSubmission.isPending}
-                  >
-                    <Send className="h-4 w-4 mr-2" />
-                    {createSubmission.isPending ? 'Submitting...' : 'Submit for Review'}
-                  </Button>
-                )}
+              {/* Notes Card */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5" />
+                    Notes
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {notes.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {notes.map((note: any) => (
+                        <div key={note.id} className="text-sm bg-muted/50 rounded p-2">
+                          <p className="text-foreground">{note.body}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {format(new Date(note.created_at), 'MMM d, h:mm a')}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No notes yet.</p>
+                  )}
                   
-                {/* Return Job button for claimed jobs */}
-                {(job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES') && 
-                 job.freelancer_identity_id === identity?.id && (
-                  <Button 
-                    variant="outline"
-                    className="w-full text-muted-foreground hover:text-orange-400 hover:border-orange-400/50"
-                    onClick={() => setShowAbandonConfirm(true)}
-                    disabled={abandonJob.isPending}
-                  >
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    {abandonJob.isPending ? 'Returning...' : 'Return Job to Pool'}
-                  </Button>
-                )}
-
-                {isReadOnly && (
-                  <p className="text-sm text-muted-foreground text-center">
-                    This job is {job.status === 'SUBMITTED' ? 'awaiting review' : job.status.toLowerCase()}.
-                  </p>
-                )}
-
-                {/* Pre-submission checklist */}
-                {canUpload && job.type === 'FOUNDATION_FACE_REPLACE' && (
-                  <div className="pt-2 border-t space-y-2">
-                    <p className="text-xs text-muted-foreground">Pre-submission checklist:</p>
-                    {['front', 'side', 'back'].map(view => (
-                      <div key={view} className="flex items-center gap-2 text-sm">
-                        {uploadedViews.has(view) ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <div className="h-4 w-4 rounded-full border-2 border-muted" />
-                        )}
-                        <span className={uploadedViews.has(view) ? 'text-foreground' : 'text-muted-foreground'}>
-                          {view.charAt(0).toUpperCase() + view.slice(1)} view uploaded
-                        </span>
-                      </div>
-                    ))}
+                  <Separator />
+                  
+                  <div className="space-y-2">
+                    <Textarea
+                      placeholder="Add a note..."
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      rows={2}
+                    />
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={handleAddNote}
+                      disabled={!noteText.trim() || addNote.isPending}
+                      className="w-full"
+                    >
+                      Add Note
+                    </Button>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Notes Card */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Notes</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {notes.length > 0 ? (
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {notes.map((note: any) => (
-                      <div key={note.id} className="p-2 bg-muted rounded text-sm">
-                        <p>{note.body}</p>
-                        <span className="text-xs text-muted-foreground">
-                          {format(new Date(note.created_at), 'MMM d, h:mm a')}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No notes yet.</p>
-                )}
-                
-                <Separator />
-                
-                <div className="space-y-2">
-                  <Textarea
-                    placeholder="Add a note..."
-                    value={noteText}
-                    onChange={(e) => setNoteText(e.target.value)}
-                    rows={2}
-                  />
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={handleAddNote}
-                    disabled={!noteText.trim() || addNote.isPending}
-                    className="w-full"
-                  >
-                    Add Note
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+      )}
 
       {/* Abandon Job Confirmation Dialog */}
       <AlertDialog open={showAbandonConfirm} onOpenChange={setShowAbandonConfirm}>
