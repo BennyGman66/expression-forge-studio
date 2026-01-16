@@ -289,6 +289,85 @@ export function GenerateTabEnhanced({
     return () => clearInterval(interval);
   }, [isGenerating, currentBatchJobIds, outputCounts.completed, refreshTracking, toast]);
 
+  // Continuous processing loop - re-invoke edge function for pending outputs
+  // This is needed because the edge function processes only ONE output per invocation
+  useEffect(() => {
+    if (!isGenerating || currentBatchJobIds.length === 0 || setupPhase) return;
+
+    let isProcessing = false;
+    const maxConcurrent = 3;
+    const activeRequests = new Set<string>();
+
+    const processPendingOutputs = async () => {
+      if (isProcessing) return;
+      isProcessing = true;
+
+      try {
+        // Check for pending outputs across all jobs
+        const { data: pendingOutputs } = await supabase
+          .from("ai_apply_outputs")
+          .select("id, job_id, look_id, view")
+          .in("job_id", currentBatchJobIds)
+          .eq("status", "pending")
+          .limit(maxConcurrent * 2); // Fetch a few extra for the queue
+
+        if (!pendingOutputs || pendingOutputs.length === 0) {
+          isProcessing = false;
+          return;
+        }
+
+        // Group by look_id + view to avoid duplicate requests
+        const lookViewPairs = new Map<string, { lookId: string; view: string; jobId: string }>();
+        for (const output of pendingOutputs) {
+          const key = `${output.look_id}-${output.view}`;
+          if (!lookViewPairs.has(key) && !activeRequests.has(key)) {
+            lookViewPairs.set(key, {
+              lookId: output.look_id!,
+              view: output.view,
+              jobId: output.job_id!,
+            });
+          }
+        }
+
+        // Limit concurrent requests
+        const pairsToProcess = Array.from(lookViewPairs.values()).slice(0, maxConcurrent - activeRequests.size);
+
+        // Invoke edge function for each pending look/view pair
+        for (const pair of pairsToProcess) {
+          const requestKey = `${pair.lookId}-${pair.view}`;
+          activeRequests.add(requestKey);
+
+          supabase.functions.invoke("generate-ai-apply", {
+            body: {
+              projectId,
+              lookId: pair.lookId,
+              type: 'run',
+              jobId: pair.jobId,
+              views: [pair.view],
+              model: selectedModel,
+            },
+          }).finally(() => {
+            activeRequests.delete(requestKey);
+          });
+        }
+
+        // Track last activity
+        setLastActivitySeconds(0);
+      } catch (error) {
+        console.error("Error processing pending outputs:", error);
+      } finally {
+        isProcessing = false;
+      }
+    };
+
+    // Run every 3 seconds to pick up new pending outputs
+    const interval = setInterval(processPendingOutputs, 3000);
+    // Also run immediately
+    processPendingOutputs();
+
+    return () => clearInterval(interval);
+  }, [isGenerating, currentBatchJobIds, setupPhase, projectId, selectedModel]);
+
   // Selection handlers
   const toggleLookSelection = useCallback((lookId: string) => {
     setSelectedLookIds(prev => {
