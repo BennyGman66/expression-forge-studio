@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff, RefreshCw, AlertCircle, Plus, Send } from 'lucide-react';
+import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff, RefreshCw, AlertCircle, Plus, Send, RotateCcw, Upload } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { OptimizedImage } from '@/components/shared/OptimizedImage';
@@ -122,6 +122,15 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
   const [sentLookIds, setSentLookIds] = useState<Set<string>>(new Set());
   const [projectName, setProjectName] = useState<string>('');
   const [lookTalentMap, setLookTalentMap] = useState<Record<string, string | null>>({});
+  
+  // Track which looks have unsaved changes since being sent
+  const [dirtyLookIds, setDirtyLookIds] = useState<Set<string>>(new Set());
+  
+  // Track regenerating views
+  const [regeneratingView, setRegeneratingView] = useState<string | null>(null);
+  
+  // Track updating jobs
+  const [updatingJobLookId, setUpdatingJobLookId] = useState<string | null>(null);
 
   // Fetch outputs, look names, and source images with chunked queries
   useEffect(() => {
@@ -441,9 +450,213 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
         }
         return o;
       }));
+      
+      // Mark as dirty if this look was already sent
+      if (sentLookIds.has(output.look_id)) {
+        setDirtyLookIds(prev => new Set([...prev, output.look_id]));
+      }
     } finally {
       setSelectingId(null);
     }
+  };
+  
+  // Regenerate a specific view for a look
+  const handleRegenerateView = async (lookId: string, view: string) => {
+    const viewKey = `${lookId}:${view}`;
+    setRegeneratingView(viewKey);
+    
+    try {
+      // Find source image for this look+view
+      const sourceImage = sourceImages.find(
+        s => s.look_id === lookId && normalizeView(s.view) === normalizeView(view)
+      );
+      
+      if (!sourceImage?.head_cropped_url) {
+        toast({ 
+          title: "Cannot Regenerate", 
+          description: "Head crop is required for this view. Go to Head Crop tab first.", 
+          variant: "destructive" 
+        });
+        return;
+      }
+      
+      // Get the digital talent ID
+      const talentId = sourceImage.digital_talent_id || lookTalentMap[lookId];
+      
+      if (!talentId) {
+        toast({ 
+          title: "Cannot Regenerate", 
+          description: "No digital talent assigned to this look.", 
+          variant: "destructive" 
+        });
+        return;
+      }
+      
+      // Call the generate-ai-apply edge function for just this view
+      const { error } = await supabase.functions.invoke('generate-ai-apply', {
+        body: { 
+          projectId, 
+          lookId, 
+          view, // Single view
+          type: 'add_more',
+          attemptsPerView: 3,
+        }
+      });
+      
+      if (error) {
+        toast({ 
+          title: "Error", 
+          description: error.message || "Failed to start generation", 
+          variant: "destructive" 
+        });
+      } else {
+        toast({ 
+          title: "Generating", 
+          description: `Regenerating ${VIEW_LABELS[view] || view} view with 3 new attempts...` 
+        });
+        // Refresh to show new pending outputs after a short delay
+        setTimeout(() => refetch(), 2000);
+      }
+    } catch (err) {
+      console.error('Regenerate error:', err);
+      toast({ 
+        title: "Error", 
+        description: "Failed to regenerate view", 
+        variant: "destructive" 
+      });
+    } finally {
+      setRegeneratingView(null);
+    }
+  };
+  
+  // Update an existing job with new selections
+  const handleUpdateSentJob = async (lookId: string) => {
+    setUpdatingJobLookId(lookId);
+    
+    try {
+      // Find the existing job for this look
+      const { data: existingJob, error: jobError } = await supabase
+        .from('unified_jobs')
+        .select('id, job_group_id')
+        .eq('look_id', lookId)
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (jobError || !existingJob) {
+        toast({ 
+          title: "Error", 
+          description: "Could not find existing job for this look", 
+          variant: "destructive" 
+        });
+        return;
+      }
+      
+      // Get current selected outputs for this look
+      const group = groupedByLook.find(g => g.lookId === lookId);
+      if (!group) return;
+      
+      // Update artifacts with new selections
+      for (const viewKey of Object.keys(group.views)) {
+        const selectedOutput = group.views[viewKey].find(o => o.is_selected);
+        if (!selectedOutput?.stored_url) continue;
+        
+        const renderType = getHeadRenderType(viewKey);
+        
+        // Find existing artifact for this view
+        const { data: existingArtifact } = await supabase
+          .from('unified_artifacts')
+          .select('id')
+          .eq('look_id', lookId)
+          .eq('type', renderType)
+          .maybeSingle();
+        
+        if (existingArtifact) {
+          // Update the artifact with new URL
+          await supabase
+            .from('unified_artifacts')
+            .update({ 
+              file_url: selectedOutput.stored_url,
+              source_id: selectedOutput.id,
+            })
+            .eq('id', existingArtifact.id);
+        } else {
+          // Create new artifact if it doesn't exist
+          const { data: newArtifact } = await supabase
+            .from('unified_artifacts')
+            .insert({
+              project_id: projectId,
+              look_id: lookId,
+              type: renderType as any,
+              file_url: selectedOutput.stored_url,
+              source_table: 'ai_apply_outputs',
+              source_id: selectedOutput.id,
+              metadata: { view: viewKey },
+            })
+            .select()
+            .single();
+          
+          // Link to job
+          if (newArtifact) {
+            await supabase
+              .from('job_inputs')
+              .insert({
+                job_id: existingJob.id,
+                artifact_id: newArtifact.id,
+                label: `Head render ${viewKey.replace('_', ' ')}`,
+              });
+          }
+        }
+      }
+      
+      // Create audit event
+      await supabase
+        .from('audit_events')
+        .insert({
+          project_id: projectId,
+          action: 'JOB_ARTIFACTS_UPDATED',
+          metadata: {
+            job_id: existingJob.id,
+            look_id: lookId,
+            updated_views: Object.keys(group.views).filter(v => 
+              group.views[v].some(o => o.is_selected)
+            ),
+          },
+        });
+      
+      // Remove from dirty set
+      setDirtyLookIds(prev => {
+        const next = new Set(prev);
+        next.delete(lookId);
+        return next;
+      });
+      
+      toast({ 
+        title: "Updated", 
+        description: "Job artifacts updated with new selections" 
+      });
+    } catch (err) {
+      console.error('Update job error:', err);
+      toast({ 
+        title: "Error", 
+        description: "Failed to update job", 
+        variant: "destructive" 
+      });
+    } finally {
+      setUpdatingJobLookId(null);
+    }
+  };
+  
+  // Helper to get artifact type for a view
+  const getHeadRenderType = (view: string): 'HEAD_RENDER_FRONT' | 'HEAD_RENDER_BACK' | 'HEAD_RENDER_SIDE' => {
+    const normalizedView = view.toLowerCase();
+    if (normalizedView === 'full_front' || normalizedView === 'cropped_front' || normalizedView === 'front') {
+      return 'HEAD_RENDER_FRONT';
+    }
+    if (normalizedView === 'back') return 'HEAD_RENDER_BACK';
+    if (normalizedView === 'side' || normalizedView === 'detail') return 'HEAD_RENDER_SIDE';
+    return 'HEAD_RENDER_FRONT';
   };
 
   const toggleLookExpanded = (lookId: string) => {
@@ -833,20 +1046,41 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                                 )}
                               </div>
                               
-                              {/* Show "view all" option in selected-only mode */}
-                              {showSelectedOnly && selectedOutput && viewOutputs.length > 1 && (
+                              <div className="flex items-center gap-2">
+                                {/* Regenerate button */}
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="text-xs h-6 px-2"
+                                  className="text-xs h-6 px-2 gap-1"
+                                  disabled={regeneratingView === viewKey}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    toggleViewExpanded(group.lookId, view);
+                                    handleRegenerateView(group.lookId, view);
                                   }}
                                 >
-                                  {isViewExpanded ? 'Show selected only' : `View all ${viewOutputs.length} attempts`}
+                                  {regeneratingView === viewKey ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <RotateCcw className="h-3 w-3" />
+                                  )}
+                                  Regenerate
                                 </Button>
-                              )}
+                                
+                                {/* Show "view all" option in selected-only mode */}
+                                {showSelectedOnly && selectedOutput && viewOutputs.length > 1 && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-xs h-6 px-2"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleViewExpanded(group.lookId, view);
+                                    }}
+                                  >
+                                    {isViewExpanded ? 'Show selected only' : `View all ${viewOutputs.length} attempts`}
+                                  </Button>
+                                )}
+                              </div>
                             </div>
 
                             <div className={cn(
@@ -996,11 +1230,31 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                               )}
                             </Badge>
                             
-                            {/* Sent badge instead of Send button */}
-                            <Badge variant="secondary" className="gap-1.5 text-xs">
-                              <Send className="h-3 w-3" />
-                              Sent
-                            </Badge>
+                            {/* Update Job button if dirty, otherwise Sent badge */}
+                            {dirtyLookIds.has(group.lookId) ? (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                className="gap-1.5 h-7 text-xs bg-amber-600 hover:bg-amber-700"
+                                disabled={updatingJobLookId === group.lookId}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUpdateSentJob(group.lookId);
+                                }}
+                              >
+                                {updatingJobLookId === group.lookId ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Upload className="h-3 w-3" />
+                                )}
+                                Update Job
+                              </Button>
+                            ) : (
+                              <Badge variant="secondary" className="gap-1.5 text-xs">
+                                <Send className="h-3 w-3" />
+                                Sent
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       </CardHeader>
@@ -1033,20 +1287,41 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                                     )}
                                   </div>
                                   
-                                  {/* Show "view all" option in selected-only mode */}
-                                  {showSelectedOnly && selectedOutput && viewOutputs.length > 1 && (
+                                  <div className="flex items-center gap-2">
+                                    {/* Regenerate button */}
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className="text-xs h-6 px-2"
+                                      className="text-xs h-6 px-2 gap-1"
+                                      disabled={regeneratingView === viewKey}
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        toggleViewExpanded(group.lookId, view);
+                                        handleRegenerateView(group.lookId, view);
                                       }}
                                     >
-                                      {isViewExpanded ? 'Show selected only' : `View all ${viewOutputs.length} attempts`}
+                                      {regeneratingView === viewKey ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <RotateCcw className="h-3 w-3" />
+                                      )}
+                                      Regenerate
                                     </Button>
-                                  )}
+                                    
+                                    {/* Show "view all" option in selected-only mode */}
+                                    {showSelectedOnly && selectedOutput && viewOutputs.length > 1 && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="text-xs h-6 px-2"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleViewExpanded(group.lookId, view);
+                                        }}
+                                      >
+                                        {isViewExpanded ? 'Show selected only' : `View all ${viewOutputs.length} attempts`}
+                                      </Button>
+                                    )}
+                                  </div>
                                 </div>
 
                                 <div className={cn(
