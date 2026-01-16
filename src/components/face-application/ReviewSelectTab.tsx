@@ -8,7 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff, RefreshCw, AlertCircle, Plus, Send } from 'lucide-react';
-import { SentLooksDropdown } from './review/SentLooksDropdown';
+import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { OptimizedImage } from '@/components/shared/OptimizedImage';
 import { QuickFillDialog } from './review/QuickFillDialog';
@@ -560,7 +560,7 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     }
   }, [groupedByLook, buildLookHandoffStatus, sendToJobBoard, projectId, projectName, toast]);
 
-  // Filter groups for "selected only" mode and exclude sent looks
+  // Filter groups for "selected only" mode and split into sent/unsent
   // NOTE: This must be before early returns to maintain hook order
   const displayGroups = useMemo(() => {
     let groups = groupedByLook;
@@ -570,10 +570,11 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
       groups = groups.filter(g => g.selectedCount > 0);
     }
     
-    // Filter out looks that have already been sent to the Job Board
-    groups = groups.filter(g => !sentLookIds.has(g.lookId));
+    // Split into sent and unsent
+    const unsent = groups.filter(g => !sentLookIds.has(g.lookId));
+    const sent = groups.filter(g => sentLookIds.has(g.lookId));
     
-    return groups;
+    return { unsent, sent };
   }, [groupedByLook, showSelectedOnly, sentLookIds]);
 
   const hasNoSelectionsInSelectedMode = showSelectedOnly && stats.selectedViews === 0;
@@ -628,7 +629,10 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
             {stats.looksCount} looks
           </Badge>
           {sentLookIds.size > 0 && (
-            <SentLooksDropdown projectId={projectId} sentCount={sentLookIds.size} />
+            <Badge variant="secondary" className="text-sm gap-1.5">
+              <Send className="h-3 w-3" />
+              {sentLookIds.size} sent
+            </Badge>
           )}
         </div>
         
@@ -699,7 +703,8 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
       {!hasNoSelectionsInSelectedMode && (
         <ScrollArea className="h-[calc(100vh-320px)]">
           <div className="space-y-4 pr-4">
-            {displayGroups.map((group) => {
+            {/* Unsent looks */}
+            {displayGroups.unsent.map((group) => {
               const isExpanded = expandedLooks.has(group.lookId);
               const viewCount = Object.keys(group.views).length;
               const selectedCount = group.selectedCount;
@@ -901,6 +906,208 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                 </Card>
               );
             })}
+
+            {/* Sent looks section */}
+            {displayGroups.sent.length > 0 && (
+              <>
+                <div className="flex items-center gap-3 pt-4 pb-2">
+                  <Separator className="flex-1" />
+                  <span className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Send className="h-4 w-4" />
+                    Sent to Job Board ({displayGroups.sent.length})
+                  </span>
+                  <Separator className="flex-1" />
+                </div>
+
+                {displayGroups.sent.map((group) => {
+                  const isExpanded = expandedLooks.has(group.lookId);
+                  const viewCount = Object.keys(group.views).length;
+                  const selectedCount = group.selectedCount;
+
+                  // In selected-only mode, filter to only show views with selections
+                  const viewsToShow = showSelectedOnly
+                    ? VIEW_ORDER.filter(v => group.views[v]?.some(o => o.is_selected))
+                    : VIEW_ORDER.filter(v => group.views[v]);
+
+                  return (
+                    <Card key={group.lookId} className="bg-muted/30">
+                      <CardHeader 
+                        className="py-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => toggleLookExpanded(group.lookId)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            <CardTitle className="text-base font-medium">
+                              {group.lookName}
+                            </CardTitle>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {/* Add missing views button */}
+                            {missingViewsByLook[group.lookId]?.length > 0 && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5 h-7 text-xs"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const allMissing = missingViewsByLook[group.lookId];
+                                  // Find digital talent ID from source image or look
+                                  const talentId = allMissing[0]?.sourceImage.digital_talent_id || 
+                                    sourceImages.find(s => s.look_id === group.lookId && s.digital_talent_id)?.digital_talent_id;
+                                  
+                                  setQuickFillTarget({
+                                    lookId: group.lookId,
+                                    lookName: group.lookName,
+                                    missingViews: allMissing.map(m => ({
+                                      view: m.view,
+                                      sourceImage: {
+                                        id: m.sourceImage.id,
+                                        look_id: m.sourceImage.look_id,
+                                        digital_talent_id: m.sourceImage.digital_talent_id,
+                                        view: m.sourceImage.view,
+                                        source_url: m.sourceImage.source_url,
+                                        head_cropped_url: m.sourceImage.head_cropped_url,
+                                      },
+                                    })),
+                                    digitalTalentId: talentId || null,
+                                  });
+                                }}
+                              >
+                                <Plus className="h-3 w-3" />
+                                Add {missingViewsByLook[group.lookId].length} missing
+                              </Button>
+                            )}
+                            <Badge 
+                              variant={selectedCount === viewCount ? "default" : "outline"}
+                              className={cn(
+                                "text-xs",
+                                selectedCount === viewCount && "bg-primary"
+                              )}
+                            >
+                              {selectedCount === viewCount ? (
+                                <><Check className="h-3 w-3 mr-1" /> Complete</>
+                              ) : (
+                                `${selectedCount}/${viewCount} selected`
+                              )}
+                            </Badge>
+                            
+                            {/* Sent badge instead of Send button */}
+                            <Badge variant="secondary" className="gap-1.5 text-xs">
+                              <Send className="h-3 w-3" />
+                              Sent
+                            </Badge>
+                          </div>
+                        </div>
+                      </CardHeader>
+
+                      {isExpanded && (
+                        <CardContent className="pt-0 space-y-6">
+                          {viewsToShow.map((view) => {
+                            const viewOutputs = group.views[view];
+                            const selectedOutput = viewOutputs.find(o => o.is_selected);
+                            const viewKey = `${group.lookId}:${view}`;
+                            const isViewExpanded = expandedUnselectedViews.has(viewKey);
+
+                            // In selected-only mode, show only the selected output (or option to expand)
+                            const outputsToShow = showSelectedOnly && selectedOutput && !isViewExpanded
+                              ? [selectedOutput]
+                              : viewOutputs;
+
+                            return (
+                              <div key={view} className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium">
+                                      {VIEW_LABELS[view] || view}
+                                    </span>
+                                    {selectedOutput && (
+                                      <Badge variant="secondary" className="text-xs gap-1">
+                                        <Star className="h-3 w-3 fill-primary text-primary" />
+                                        Selected
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  
+                                  {/* Show "view all" option in selected-only mode */}
+                                  {showSelectedOnly && selectedOutput && viewOutputs.length > 1 && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="text-xs h-6 px-2"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleViewExpanded(group.lookId, view);
+                                      }}
+                                    >
+                                      {isViewExpanded ? 'Show selected only' : `View all ${viewOutputs.length} attempts`}
+                                    </Button>
+                                  )}
+                                </div>
+
+                                <div className={cn(
+                                  "grid gap-3",
+                                  showSelectedOnly && selectedOutput && !isViewExpanded
+                                    ? "grid-cols-1 max-w-xs"
+                                    : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+                                )}>
+                                  {outputsToShow.map((output, idx) => (
+                                    <button
+                                      key={output.id}
+                                      onClick={() => handleSelect(output)}
+                                      disabled={selectingId === output.id}
+                                      className={cn(
+                                        "relative aspect-[3/4] rounded-lg overflow-hidden border-2 transition-all hover:scale-[1.02]",
+                                        output.is_selected
+                                          ? "border-primary ring-2 ring-primary ring-offset-2"
+                                          : "border-border hover:border-primary/50"
+                                      )}
+                                    >
+                                      <OptimizedImage
+                                        src={output.stored_url}
+                                        alt={`${view} attempt ${idx + 1}`}
+                                        tier="preview"
+                                        className="object-cover"
+                                        containerClassName="w-full h-full"
+                                      />
+                                      
+                                      {/* Attempt number */}
+                                      <div className="absolute top-1 left-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
+                                        #{output.attempt_index + 1}
+                                      </div>
+
+                                      {/* Selection indicator */}
+                                      {output.is_selected && (
+                                        <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                                          <div className="bg-primary text-primary-foreground rounded-full p-2">
+                                            <Check className="h-5 w-5" />
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* Loading state */}
+                                      {selectingId === output.id && (
+                                        <div className="absolute inset-0 bg-background/50 flex items-center justify-center">
+                                          <Loader2 className="h-5 w-5 animate-spin" />
+                                        </div>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </CardContent>
+                      )}
+                    </Card>
+                  );
+                })}
+              </>
+            )}
           </div>
         </ScrollArea>
       )}
