@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useFreelancerIdentity } from '@/hooks/useFreelancerIdentity';
 import { usePublicJobById, usePublicJobInputs, usePublicJobOutputs, usePublicJobNotes, usePublicLatestSubmission } from '@/hooks/usePublicJob';
@@ -69,6 +69,7 @@ export default function PublicJobWorkspace() {
   const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
   const [replacements, setReplacements] = useState<Map<string, { file: File; preview: string }>>(new Map());
   const [needsChangesMode, setNeedsChangesMode] = useState<'review' | 'upload'>('review');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Group inputs by view for Foundation Face Replace jobs
   const groupedInputs = useMemo(() => {
@@ -1023,17 +1024,21 @@ export default function PublicJobWorkspace() {
                       <p className="text-sm font-medium mb-1">Drag & drop files here</p>
                       <p className="text-xs text-muted-foreground mb-3">or click to browse</p>
                       <input
+                        ref={fileInputRef}
                         type="file"
                         multiple
                         accept="*/*"
                         onChange={handleFileInputChange}
                         className="hidden"
-                        id="needs-changes-upload-input"
                       />
-                      <Button variant="outline" size="sm" asChild>
-                        <label htmlFor="needs-changes-upload-input" className="cursor-pointer">
-                          Browse Files
-                        </label>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <Upload className="h-4 w-4 mr-2" />
+                        Browse Files
                       </Button>
                     </div>
 
@@ -1314,17 +1319,21 @@ export default function PublicJobWorkspace() {
                         Drag & drop files here, or click to browse
                       </p>
                       <input
+                        ref={fileInputRef}
                         type="file"
                         multiple
                         accept="*/*"
                         onChange={handleFileInputChange}
                         className="hidden"
-                        id="file-upload"
                       />
-                      <Button variant="outline" size="sm" asChild>
-                        <label htmlFor="file-upload" className="cursor-pointer">
-                          Browse Files
-                        </label>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <Upload className="h-4 w-4 mr-2" />
+                        Browse Files
                       </Button>
                     </div>
 
