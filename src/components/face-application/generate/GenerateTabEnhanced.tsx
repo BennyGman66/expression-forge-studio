@@ -1101,6 +1101,7 @@ export function GenerateTabEnhanced({
         <LiveGenerationFeed
           projectId={projectId}
           isGenerating={isGenerating}
+          batchCounts={outputCounts}
           onCleanupStalled={(stalledIds) => {
             refreshTracking();
           }}

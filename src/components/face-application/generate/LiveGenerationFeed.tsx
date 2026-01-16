@@ -29,6 +29,13 @@ interface LiveGenerationFeedProps {
   isGenerating: boolean;
   onCleanupStalled?: (stalledIds: string[]) => void;
   onSelectionChange?: (selectedIds: Set<string>) => void;
+  // Batch-level counts from parent for stable badges (monotonic)
+  batchCounts?: {
+    completed: number;
+    failed: number;
+    pending: number;
+    generating: number;
+  };
 }
 
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
@@ -37,7 +44,8 @@ export function LiveGenerationFeed({
   projectId, 
   isGenerating,
   onCleanupStalled,
-  onSelectionChange
+  onSelectionChange,
+  batchCounts
 }: LiveGenerationFeedProps) {
   const [outputs, setOutputs] = useState<LiveOutput[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -296,9 +304,10 @@ export function LiveGenerationFeed({
     }
   };
 
-  const completedCount = outputs.filter(o => o.status === "completed").length;
-  const generatingCount = outputs.filter(o => o.status === "generating").length;
-  const failedCount = outputs.filter(o => o.status === "failed").length;
+  // Use batch-level counts if provided (stable/monotonic), otherwise fall back to feed counts
+  const completedCount = batchCounts?.completed ?? outputs.filter(o => o.status === "completed").length;
+  const generatingCount = batchCounts?.generating ?? outputs.filter(o => o.status === "generating").length;
+  const failedCount = batchCounts?.failed ?? outputs.filter(o => o.status === "failed").length;
 
   const displayOutputs = showAll ? outputs : outputs.slice(0, 24);
 
