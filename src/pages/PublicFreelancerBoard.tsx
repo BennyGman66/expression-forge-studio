@@ -6,7 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { toast } from 'sonner';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Briefcase, Clock, CheckCircle, AlertCircle, AlertTriangle, User, ArrowRight, Eye, Users } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { format } from 'date-fns';
@@ -280,13 +280,12 @@ export default function PublicFreelancerBoard() {
                   Needs Changes
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                {needsChangesJobs.slice(0, 5).map(job => renderJobRow(job, 'orange'))}
-                {needsChangesJobs.length > 5 && (
-                  <p className="text-xs text-center text-muted-foreground">
-                    +{needsChangesJobs.length - 5} more jobs needing changes
-                  </p>
-                )}
+              <CardContent>
+                <ScrollArea className="max-h-[400px]">
+                  <div className="space-y-3 pr-4">
+                    {needsChangesJobs.map(job => renderJobRow(job, 'orange'))}
+                  </div>
+                </ScrollArea>
               </CardContent>
             </Card>
           )}
@@ -302,7 +301,7 @@ export default function PublicFreelancerBoard() {
                 </span>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent>
               {jobsLoading ? (
                 <p className="text-muted-foreground">Loading...</p>
               ) : openJobs.length === 0 ? (
@@ -311,44 +310,43 @@ export default function PublicFreelancerBoard() {
                   <p className="text-muted-foreground text-sm">No open jobs available</p>
                 </div>
               ) : (
-                openJobs.slice(0, 5).map(job => (
-                  <div
-                    key={job.id}
-                    className="p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors h-[56px] flex items-center cursor-pointer"
-                    onClick={() => navigate(`/work/${job.id}`)}
-                  >
-                    <div className="flex items-center justify-between w-full gap-2">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-foreground flex items-center">
-                          <span className="truncate">{getJobTitle(job)}</span>
-                          {getPriorityBadge(job.priority)}
-                        </p>
-                        {job.due_date && (
-                          <p className="text-xs text-muted-foreground">
-                            Due: {format(new Date(job.due_date), 'MMM d')}
-                          </p>
-                        )}
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/work/${job.id}`);
-                        }}
+                <ScrollArea className="max-h-[400px]">
+                  <div className="space-y-3 pr-4">
+                    {openJobs.map(job => (
+                      <div
+                        key={job.id}
+                        className="p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors h-[56px] flex items-center cursor-pointer"
+                        onClick={() => navigate(`/work/${job.id}`)}
                       >
-                        <Eye className="h-3 w-3 mr-1" />
-                        View
-                      </Button>
-                    </div>
+                        <div className="flex items-center justify-between w-full gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-foreground flex items-center">
+                              <span className="truncate">{getJobTitle(job)}</span>
+                              {getPriorityBadge(job.priority)}
+                            </p>
+                            {job.due_date && (
+                              <p className="text-xs text-muted-foreground">
+                                Due: {format(new Date(job.due_date), 'MMM d')}
+                              </p>
+                            )}
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/work/${job.id}`);
+                            }}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
+                            View
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))
-              )}
-              {openJobs.length > 5 && (
-                <p className="text-xs text-center text-muted-foreground">
-                  +{openJobs.length - 5} more open jobs
-                </p>
+                </ScrollArea>
               )}
             </CardContent>
           </Card>
@@ -361,18 +359,17 @@ export default function PublicFreelancerBoard() {
                 In Progress
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent>
               {jobsLoading ? (
                 <p className="text-muted-foreground">Loading...</p>
               ) : inProgressJobs.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No jobs in progress</p>
               ) : (
-                inProgressJobs.slice(0, 5).map(job => renderJobRow(job))
-              )}
-              {inProgressJobs.length > 5 && (
-                <p className="text-xs text-center text-muted-foreground">
-                  +{inProgressJobs.length - 5} more in-progress jobs
-                </p>
+                <ScrollArea className="max-h-[400px]">
+                  <div className="space-y-3 pr-4">
+                    {inProgressJobs.map(job => renderJobRow(job))}
+                  </div>
+                </ScrollArea>
               )}
             </CardContent>
           </Card>
@@ -388,46 +385,45 @@ export default function PublicFreelancerBoard() {
                 </span>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent>
               {jobsLoading ? (
                 <p className="text-muted-foreground">Loading...</p>
               ) : othersJobs.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No jobs being worked on by others</p>
               ) : (
-                <TooltipProvider>
-                  {othersJobs.slice(0, 8).map(job => (
-                    <div
-                      key={job.id}
-                      className="p-3 rounded-lg bg-muted/30 h-[56px] flex items-center"
-                    >
-                      <div className="flex items-center justify-between w-full gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-muted-foreground flex items-center">
-                            <span className="truncate">{getJobTitle(job)}</span>
-                          </p>
-                          <Badge className={`${getStatusColor(job.status)} text-xs`}>
-                            {job.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium text-primary flex-shrink-0 cursor-default">
-                              {getInitials(job.freelancer)}
+                <ScrollArea className="max-h-[400px]">
+                  <div className="space-y-3 pr-4">
+                    <TooltipProvider>
+                      {othersJobs.map(job => (
+                        <div
+                          key={job.id}
+                          className="p-3 rounded-lg bg-muted/30 h-[56px] flex items-center"
+                        >
+                          <div className="flex items-center justify-between w-full gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-muted-foreground flex items-center">
+                                <span className="truncate">{getJobTitle(job)}</span>
+                              </p>
+                              <Badge className={`${getStatusColor(job.status)} text-xs`}>
+                                {job.status.replace('_', ' ')}
+                              </Badge>
                             </div>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>{getFreelancerName(job.freelancer)}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-                  ))}
-                </TooltipProvider>
-              )}
-              {othersJobs.length > 8 && (
-                <p className="text-xs text-center text-muted-foreground">
-                  +{othersJobs.length - 8} more jobs by others
-                </p>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-medium text-primary flex-shrink-0 cursor-default">
+                                  {getInitials(job.freelancer)}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{getFreelancerName(job.freelancer)}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      ))}
+                    </TooltipProvider>
+                  </div>
+                </ScrollArea>
               )}
             </CardContent>
           </Card>
