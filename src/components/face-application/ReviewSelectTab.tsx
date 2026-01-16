@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
+import { OptimizedImage } from '@/components/shared/OptimizedImage';
 interface ReviewSelectTabProps {
   projectId: string;
   onContinue?: () => void;
@@ -356,11 +356,12 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                                     : "border-border hover:border-primary/50"
                                 )}
                               >
-                                <img
-                                  src={output.stored_url!}
+                                <OptimizedImage
+                                  src={output.stored_url}
                                   alt={`${view} attempt ${idx + 1}`}
-                                  className="w-full h-full object-cover"
-                                  loading="lazy"
+                                  tier="thumb"
+                                  className="object-cover"
+                                  containerClassName="w-full h-full"
                                 />
                                 
                                 {/* Attempt number */}
