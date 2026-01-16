@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff, RefreshCw, AlertCircle, Plus, Send } from 'lucide-react';
+import { SentLooksDropdown } from './review/SentLooksDropdown';
 import { cn } from '@/lib/utils';
 import { OptimizedImage } from '@/components/shared/OptimizedImage';
 import { QuickFillDialog } from './review/QuickFillDialog';
@@ -627,10 +628,7 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
             {stats.looksCount} looks
           </Badge>
           {sentLookIds.size > 0 && (
-            <Badge variant="default" className="text-sm bg-blue-600">
-              <Send className="h-3 w-3 mr-1" />
-              {sentLookIds.size} sent
-            </Badge>
+            <SentLooksDropdown projectId={projectId} sentCount={sentLookIds.size} />
           )}
         </div>
         
