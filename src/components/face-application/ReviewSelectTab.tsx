@@ -371,34 +371,19 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     return groups;
   }, [outputs, looks]);
 
-  // Calculate missing views - source images that exist but have no outputs
-  const missingViewsByLook = useMemo(() => {
-    const missing: Record<string, { view: string; sourceImage: SourceImageInfo }[]> = {};
+  // Get ALL source images by look for "Add new" functionality (regenerate any view)
+  const allViewsByLook = useMemo(() => {
+    const all: Record<string, { view: string; sourceImage: SourceImageInfo }[]> = {};
     
     for (const srcImg of sourceImages) {
       if (!srcImg.look_id) continue;
       
-      // Normalize the view name
-      const normalizedSrcView = normalizeView(srcImg.view);
-      
-      // Check if we have any outputs for this look+view
-      const hasOutputs = outputs.some(
-        o => o.look_id === srcImg.look_id && normalizeView(o.view) === normalizedSrcView
-      );
-      
-      if (!hasOutputs) {
-        if (!missing[srcImg.look_id]) missing[srcImg.look_id] = [];
-        missing[srcImg.look_id].push({ view: srcImg.view, sourceImage: srcImg });
-      }
+      if (!all[srcImg.look_id]) all[srcImg.look_id] = [];
+      all[srcImg.look_id].push({ view: srcImg.view, sourceImage: srcImg });
     }
     
-    return missing;
-  }, [sourceImages, outputs]);
-
-  // Total count of missing views
-  const totalMissingViews = useMemo(() => {
-    return Object.values(missingViewsByLook).reduce((acc, arr) => acc + arr.length, 0);
-  }, [missingViewsByLook]);
+    return all;
+  }, [sourceImages]);
 
   // Calculate selection stats
   const stats = useMemo(() => {
@@ -945,10 +930,10 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                         </CardTitle>
                       </div>
                       <div className="flex items-center gap-2">
-                        {/* Add missing views button - always opens wizard */}
-                        {missingViewsByLook[group.lookId]?.length > 0 && (() => {
-                          const allMissing = missingViewsByLook[group.lookId];
-                          const talentId = allMissing[0]?.sourceImage.digital_talent_id || 
+                        {/* Add new button - opens wizard for any view */}
+                        {allViewsByLook[group.lookId]?.length > 0 && (() => {
+                          const allViews = allViewsByLook[group.lookId];
+                          const talentId = allViews[0]?.sourceImage.digital_talent_id || 
                             sourceImages.find(s => s.look_id === group.lookId && s.digital_talent_id)?.digital_talent_id ||
                             lookTalentMap[group.lookId];
                           
@@ -959,19 +944,19 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                               className="gap-1.5 h-7 text-xs"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                // Always open QuickFillDialog for full workflow control
+                                // Open QuickFillDialog for full workflow control
                                 setQuickFillTarget({
                                   lookId: group.lookId,
                                   lookName: group.lookName,
-                                  missingViews: allMissing.map(m => ({
-                                    view: m.view,
+                                  missingViews: allViews.map(v => ({
+                                    view: v.view,
                                     sourceImage: {
-                                      id: m.sourceImage.id,
-                                      look_id: m.sourceImage.look_id,
-                                      digital_talent_id: m.sourceImage.digital_talent_id,
-                                      view: m.sourceImage.view,
-                                      source_url: m.sourceImage.source_url,
-                                      head_cropped_url: m.sourceImage.head_cropped_url,
+                                      id: v.sourceImage.id,
+                                      look_id: v.sourceImage.look_id,
+                                      digital_talent_id: v.sourceImage.digital_talent_id,
+                                      view: v.sourceImage.view,
+                                      source_url: v.sourceImage.source_url,
+                                      head_cropped_url: v.sourceImage.head_cropped_url,
                                     },
                                   })),
                                   digitalTalentId: talentId || null,
@@ -979,7 +964,7 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                               }}
                             >
                               <Plus className="h-3 w-3" />
-                              Add {allMissing.length} missing
+                              Add new
                             </Button>
                           );
                         })()}
@@ -1050,24 +1035,6 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                               </div>
                               
                               <div className="flex items-center gap-2">
-                                {/* Regenerate button */}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-xs h-6 px-2 gap-1"
-                                  disabled={regeneratingView === viewKey}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRegenerateView(group.lookId, view);
-                                  }}
-                                >
-                                  {regeneratingView === viewKey ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : (
-                                    <RotateCcw className="h-3 w-3" />
-                                  )}
-                                  Regenerate
-                                </Button>
                                 
                                 {/* Show "view all" option in selected-only mode */}
                                 {showSelectedOnly && selectedOutput && viewOutputs.length > 1 && (
@@ -1184,10 +1151,10 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                             </CardTitle>
                           </div>
                           <div className="flex items-center gap-2">
-                            {/* Add missing views button - always opens wizard */}
-                            {missingViewsByLook[group.lookId]?.length > 0 && (() => {
-                              const allMissing = missingViewsByLook[group.lookId];
-                              const talentId = allMissing[0]?.sourceImage.digital_talent_id || 
+                            {/* Add new button - opens wizard for any view */}
+                            {allViewsByLook[group.lookId]?.length > 0 && (() => {
+                              const allViews = allViewsByLook[group.lookId];
+                              const talentId = allViews[0]?.sourceImage.digital_talent_id || 
                                 sourceImages.find(s => s.look_id === group.lookId && s.digital_talent_id)?.digital_talent_id ||
                                 lookTalentMap[group.lookId];
                               
@@ -1198,19 +1165,19 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                                   className="gap-1.5 h-7 text-xs"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    // Always open QuickFillDialog for full workflow control
+                                    // Open QuickFillDialog for full workflow control
                                     setQuickFillTarget({
                                       lookId: group.lookId,
                                       lookName: group.lookName,
-                                      missingViews: allMissing.map(m => ({
-                                        view: m.view,
+                                      missingViews: allViews.map(v => ({
+                                        view: v.view,
                                         sourceImage: {
-                                          id: m.sourceImage.id,
-                                          look_id: m.sourceImage.look_id,
-                                          digital_talent_id: m.sourceImage.digital_talent_id,
-                                          view: m.sourceImage.view,
-                                          source_url: m.sourceImage.source_url,
-                                          head_cropped_url: m.sourceImage.head_cropped_url,
+                                          id: v.sourceImage.id,
+                                          look_id: v.sourceImage.look_id,
+                                          digital_talent_id: v.sourceImage.digital_talent_id,
+                                          view: v.sourceImage.view,
+                                          source_url: v.sourceImage.source_url,
+                                          head_cropped_url: v.sourceImage.head_cropped_url,
                                         },
                                       })),
                                       digitalTalentId: talentId || null,
@@ -1218,7 +1185,7 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                                   }}
                                 >
                                   <Plus className="h-3 w-3" />
-                                  Add {allMissing.length} missing
+                                  Add new
                                 </Button>
                               );
                             })()}
@@ -1294,24 +1261,6 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                                   </div>
                                   
                                   <div className="flex items-center gap-2">
-                                    {/* Regenerate button */}
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="text-xs h-6 px-2 gap-1"
-                                      disabled={regeneratingView === viewKey}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRegenerateView(group.lookId, view);
-                                      }}
-                                    >
-                                      {regeneratingView === viewKey ? (
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                      ) : (
-                                        <RotateCcw className="h-3 w-3" />
-                                      )}
-                                      Regenerate
-                                    </Button>
                                     
                                     {/* Show "view all" option in selected-only mode */}
                                     {showSelectedOnly && selectedOutput && viewOutputs.length > 1 && (
