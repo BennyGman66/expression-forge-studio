@@ -452,59 +452,84 @@ export function GenerateTabEnhanced({
     }
   };
 
-  // Resume pending generation - invoke edge function for existing pending outputs
+  // Resume generation - creates missing outputs AND processes pending ones
   const handleResumePending = async () => {
-    // Get all jobs with pending outputs
-    const { data: jobsWithPending } = await supabase
-      .from("ai_apply_jobs")
-      .select("id, look_id")
-      .eq("project_id", projectId)
-      .in("status", ["pending", "running", "completed"]);
+    // Find looks with incomplete views (views that have source images but 0 outputs)
+    const looksNeedingWork = looks.filter(l => 
+      l.digitalTalentId && l.views.some(v => v.completedCount < attemptsPerView)
+    );
 
-    if (!jobsWithPending || jobsWithPending.length === 0) {
-      toast({ title: "No pending outputs to resume" });
-      return;
-    }
-
-    // Check which jobs actually have pending outputs
-    const { data: pendingOutputs } = await supabase
-      .from("ai_apply_outputs")
-      .select("job_id, view, look_id")
-      .in("job_id", jobsWithPending.map(j => j.id))
-      .eq("status", "pending");
-
-    if (!pendingOutputs || pendingOutputs.length === 0) {
-      toast({ title: "No pending outputs to resume" });
+    if (looksNeedingWork.length === 0) {
+      toast({ title: "All views are complete!" });
       return;
     }
 
     setIsGenerating(true);
     setGenerationStartTime(new Date());
-    
-    // Group by look_id and invoke edge function for each
-    const lookIdsWithPending = [...new Set(pendingOutputs.map(o => o.look_id))];
-    const jobIds = [...new Set(pendingOutputs.map(o => o.job_id))];
-    setCurrentBatchJobIds(jobIds as string[]);
+    setCurrentBatchJobIds([]);
 
-    for (const lookId of lookIdsWithPending) {
-      if (!lookId) continue;
-      
-      // Fire and forget
-      supabase.functions.invoke("generate-ai-apply", {
-        body: {
-          projectId,
-          lookId,
-          type: 'run',
-          model: selectedModel,
-          attemptsPerView: 0, // Don't create new outputs, just process pending
-        },
+    let totalCreated = 0;
+    const newJobIds: string[] = [];
+
+    try {
+      for (const look of looksNeedingWork) {
+        // Get or create a job for this look
+        let { data: existingJob } = await supabase
+          .from("ai_apply_jobs")
+          .select("id")
+          .eq("project_id", projectId)
+          .eq("look_id", look.lookId)
+          .maybeSingle();
+
+        let jobId: string;
+        if (!existingJob) {
+          const { data: newJob, error } = await supabase
+            .from("ai_apply_jobs")
+            .insert({
+              project_id: projectId,
+              look_id: look.lookId,
+              digital_talent_id: look.digitalTalentId,
+              attempts_per_view: attemptsPerView,
+              model: selectedModel,
+              status: "running",
+            })
+            .select()
+            .single();
+          
+          if (error) throw error;
+          jobId = newJob.id;
+        } else {
+          jobId = existingJob.id;
+          await supabase
+            .from("ai_apply_jobs")
+            .update({ status: "running" })
+            .eq("id", jobId);
+        }
+
+        newJobIds.push(jobId);
+
+        // Invoke edge function - it will create missing outputs and process them
+        supabase.functions.invoke("generate-ai-apply", {
+          body: {
+            projectId,
+            lookId: look.lookId,
+            type: 'run',
+            model: selectedModel,
+            attemptsPerView,
+          },
+        });
+        totalCreated++;
+      }
+
+      setCurrentBatchJobIds(newJobIds);
+      toast({ 
+        title: "Resuming generation", 
+        description: `Processing ${looksNeedingWork.length} looks with missing views` 
       });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      setIsGenerating(false);
     }
-
-    toast({ 
-      title: "Resuming generation", 
-      description: `Processing ${pendingOutputs.length} pending outputs for ${lookIdsWithPending.length} looks` 
-    });
   };
 
   // Retry failed
@@ -763,15 +788,16 @@ export function GenerateTabEnhanced({
             )}
           </Button>
           
-          {/* Resume pending button */}
+          {/* Resume/Fill Missing button */}
           <Button
             size="lg"
             variant="outline"
             onClick={handleResumePending}
             disabled={isGenerating}
+            title="Create and process outputs for any views showing 0/0"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
-            Resume Pending
+            Fill Missing
           </Button>
         </div>
 
