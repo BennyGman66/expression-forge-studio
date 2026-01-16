@@ -1075,20 +1075,20 @@ export function GenerateTabEnhanced({
           </Alert>
         )}
 
-        {/* Progress panel - uses job-level progress when batch is active, falls back to output-level */}
+        {/* Progress panel - uses OUTPUT-level progress (individual renders) */}
         <GenerationProgressPanel
           isGenerating={isGenerating}
-          progress={jobStatusCounts.total > 0 ? jobStatusCounts.done + jobStatusCounts.partial : outputCounts.completed}
-          total={jobStatusCounts.total > 0 ? jobStatusCounts.total : outputCounts.completed + outputCounts.failed + outputCounts.pending + outputCounts.generating}
-          completedCount={jobStatusCounts.total > 0 ? jobStatusCounts.done : outputCounts.completed}
-          failedCount={jobStatusCounts.total > 0 ? jobStatusCounts.failed : outputCounts.failed}
-          pendingCount={jobStatusCounts.total > 0 ? jobStatusCounts.queued : outputCounts.pending}
-          runningCount={jobStatusCounts.total > 0 ? jobStatusCounts.running : outputCounts.generating}
+          progress={outputCounts.completed}
+          total={outputCounts.completed + outputCounts.failed + outputCounts.pending + outputCounts.generating}
+          completedCount={outputCounts.completed}
+          failedCount={outputCounts.failed}
+          pendingCount={outputCounts.pending}
+          runningCount={outputCounts.generating}
           elapsedTime={elapsedDisplay}
           lastActivitySeconds={lastActivitySeconds}
           currentProcessingInfo={
             jobStatusCounts.total > 0 
-              ? `${jobStatusCounts.running} jobs generating, ${jobStatusCounts.queued} queued`
+              ? `${jobStatusCounts.running} jobs active, ${jobStatusCounts.queued} queued (${outputCounts.generating} renders in progress)`
               : `${outputCounts.generating} generating, ${outputCounts.pending} queued`
           }
           onCancel={handleCancelGeneration}
