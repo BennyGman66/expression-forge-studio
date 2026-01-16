@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye, RotateCcw, Trash2, MessageSquare } from 'lucide-react';
+import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye, RotateCcw, Trash2, MessageSquare, Plus } from 'lucide-react';
 import { format } from 'date-fns';
 import { FreelancerNamePrompt } from '@/components/freelancer/FreelancerNamePrompt';
 import { FreelancerNeedsChangesView } from '@/components/freelancer/FreelancerNeedsChangesView';
@@ -68,6 +68,7 @@ export default function PublicJobWorkspace() {
   const [identitySaving, setIdentitySaving] = useState(false);
   const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
   const [replacements, setReplacements] = useState<Map<string, { file: File; preview: string }>>(new Map());
+  const [needsChangesMode, setNeedsChangesMode] = useState<'review' | 'upload'>('review');
 
   // Group inputs by view for Foundation Face Replace jobs
   const groupedInputs = useMemo(() => {
@@ -791,18 +792,325 @@ export default function PublicJobWorkspace() {
       {/* Main Content - Show Feedback View when NEEDS_CHANGES, otherwise show regular content */}
       {job.status === 'NEEDS_CHANGES' && latestSubmission && !isPreviewMode ? (
         <main className="container mx-auto px-6 py-6 flex-1">
-          <div className="h-[calc(100vh-220px)] min-h-[600px]">
-            <FreelancerNeedsChangesView
-              submissionId={latestSubmission.id}
-              jobId={jobId!}
-              versionNumber={latestSubmission.version_number || 1}
-              instructions={job.instructions}
-              inputs={inputs as any}
-              onReplacementsChange={setReplacements}
-              onResubmit={() => resubmitJob.mutate()}
-              isResubmitting={resubmitJob.isPending}
-            />
+          {/* View Toggle Tabs */}
+          <div className="flex gap-2 mb-4 border-b border-border pb-3">
+            <Button
+              variant={needsChangesMode === 'review' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setNeedsChangesMode('review')}
+              className="gap-2"
+            >
+              <MessageSquare className="h-4 w-4" />
+              Review Feedback
+            </Button>
+            <Button
+              variant={needsChangesMode === 'upload' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setNeedsChangesMode('upload')}
+              className="gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              Add New Outputs
+            </Button>
           </div>
+
+          {/* Conditional content based on mode */}
+          {needsChangesMode === 'review' ? (
+            <div className="h-[calc(100vh-280px)] min-h-[600px]">
+              <FreelancerNeedsChangesView
+                submissionId={latestSubmission.id}
+                jobId={jobId!}
+                versionNumber={latestSubmission.version_number || 1}
+                instructions={job.instructions}
+                inputs={inputs as any}
+                onReplacementsChange={setReplacements}
+                onResubmit={() => resubmitJob.mutate()}
+                isResubmitting={resubmitJob.isPending}
+              />
+            </div>
+          ) : (
+            /* Upload mode - shows full upload interface */
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Main Content */}
+              <div className="lg:col-span-2 space-y-6">
+                {/* Brief / Instructions */}
+                <Accordion type="single" collapsible defaultValue="instructions">
+                  <AccordionItem value="instructions" className="border rounded-lg px-4">
+                    <AccordionTrigger className="hover:no-underline">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4" />
+                        <span className="font-medium">Brief / Instructions</span>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent>
+                      <div className="pt-2 pb-4 space-y-4">
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                          {displayInstructions}
+                        </p>
+                        
+                        {/* Input Images Grid */}
+                        {inputs.length > 0 && (
+                          <div className="space-y-2">
+                            <Label className="text-xs text-muted-foreground">Reference Images</Label>
+                            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                              {inputs.map((input: any) => (
+                                <div key={input.id} className="relative group">
+                                  <img
+                                    src={(input.artifact?.preview_url || input.artifact?.file_url)}
+                                    alt={input.label || 'Input'}
+                                    className="w-full aspect-square object-cover rounded border border-border"
+                                  />
+                                  {input.label && (
+                                    <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-white px-1 py-0.5 truncate">
+                                      {input.label}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+
+                {/* Inputs Section */}
+                {groupedInputs && groupedInputs.length > 0 && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <FileImage className="h-5 w-5" />
+                          Input Files
+                        </CardTitle>
+                        <Button variant="outline" size="sm" onClick={handleDownloadAll}>
+                          <Download className="h-4 w-4 mr-2" />
+                          Download All
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {groupedInputs.map((group) => (
+                          <div key={group.view} className="space-y-3">
+                            <h4 className="font-medium text-sm">{group.view} View</h4>
+                            <div className="space-y-2">
+                              {group.headRender && (
+                                <div className="space-y-1">
+                                  <span className="text-xs text-muted-foreground">Head Render</span>
+                                  <div className="relative group">
+                                    <img
+                                      src={group.headRender.artifact?.preview_url || group.headRender.artifact?.file_url}
+                                      alt={`${group.view} head render`}
+                                      className="w-full aspect-[3/4] object-cover rounded border border-border"
+                                    />
+                                    <a
+                                      href={group.headRender.artifact?.file_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                      <Download className="h-6 w-6 text-white" />
+                                    </a>
+                                  </div>
+                                </div>
+                              )}
+                              {group.originalSource && (
+                                <div className="space-y-1">
+                                  <span className="text-xs text-muted-foreground">Original Source</span>
+                                  <div className="relative group">
+                                    <img
+                                      src={group.originalSource.artifact?.preview_url || group.originalSource.artifact?.file_url}
+                                      alt={`${group.view} source`}
+                                      className="w-full aspect-[3/4] object-cover rounded border border-border"
+                                    />
+                                    <a
+                                      href={group.originalSource.artifact?.file_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                      <Download className="h-6 w-6 text-white" />
+                                    </a>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Upload Section */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Upload className="h-5 w-5" />
+                      Upload New Outputs
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Progress */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Outputs Uploaded</span>
+                        <span>{outputs.length} output{outputs.length !== 1 ? 's' : ''}</span>
+                      </div>
+                      <Progress value={uploadProgress} className="h-2" />
+                    </div>
+
+                    {/* Drop Zone */}
+                    <div
+                      className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+                        isDragOver ? 'border-primary bg-primary/5' : 'border-border'
+                      }`}
+                      onDragEnter={handleDragEnter}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                    >
+                      <Upload className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
+                      <p className="text-sm font-medium mb-1">Drag & drop files here</p>
+                      <p className="text-xs text-muted-foreground mb-3">or click to browse</p>
+                      <input
+                        type="file"
+                        multiple
+                        accept="*/*"
+                        onChange={handleFileInputChange}
+                        className="hidden"
+                        id="needs-changes-upload-input"
+                      />
+                      <Button variant="outline" size="sm" asChild>
+                        <label htmlFor="needs-changes-upload-input" className="cursor-pointer">
+                          Browse Files
+                        </label>
+                      </Button>
+                    </div>
+
+                    {/* Pending Uploads */}
+                    {pendingUploads.length > 0 && (
+                      <div className="space-y-3">
+                        <Label className="text-sm font-medium">Pending Uploads ({pendingUploads.length})</Label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          {pendingUploads.map((pending) => (
+                            <div key={pending.id} className="relative border rounded-lg p-2 space-y-2">
+                              {pending.preview ? (
+                                <img
+                                  src={pending.preview}
+                                  alt={pending.file.name}
+                                  className="w-full aspect-square object-cover rounded"
+                                />
+                              ) : (
+                                <div className="w-full aspect-square bg-muted rounded flex items-center justify-center">
+                                  <FileImage className="h-8 w-8 text-muted-foreground" />
+                                </div>
+                              )}
+                              <p className="text-xs truncate">{pending.file.name}</p>
+                              <Select
+                                value={pending.view || ''}
+                                onValueChange={(v) => updatePendingView(pending.id, v as any)}
+                              >
+                                <SelectTrigger className="h-7 text-xs">
+                                  <SelectValue placeholder="Select view" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="front">Front</SelectItem>
+                                  <SelectItem value="side">Side</SelectItem>
+                                  <SelectItem value="back">Back</SelectItem>
+                                  <SelectItem value="other">Other</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute top-1 right-1 h-6 w-6"
+                                onClick={() => removePendingFile(pending.id)}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                        <Button
+                          onClick={handleUploadPending}
+                          disabled={uploading || pendingUploads.length === 0}
+                          className="w-full"
+                        >
+                          {uploading ? 'Uploading...' : `Upload ${pendingUploads.length} File${pendingUploads.length !== 1 ? 's' : ''}`}
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Existing Outputs */}
+                    {outputs.length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Uploaded Outputs ({outputs.length})</Label>
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                          {outputs.map((output: any) => {
+                            const url = output.file_url || output.artifact?.file_url;
+                            const previewUrl = output.artifact?.preview_url || url;
+                            return (
+                              <div key={output.id} className="relative group">
+                                <img
+                                  src={previewUrl}
+                                  alt={output.label || 'Output'}
+                                  className="w-full aspect-square object-cover rounded border border-border"
+                                />
+                                <Button
+                                  variant="destructive"
+                                  size="icon"
+                                  className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => deleteOutput.mutate(output.id)}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Switch back to review */}
+                <div className="text-center">
+                  <Button variant="outline" onClick={() => setNeedsChangesMode('review')}>
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                    Back to Review Feedback
+                  </Button>
+                </div>
+              </div>
+
+              {/* Sidebar */}
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">Job Info</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Status</span>
+                      <Badge className={getStatusColor(job.status)}>{getStatusLabel(job.status)}</Badge>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Outputs</span>
+                      <span>{outputs.length}</span>
+                    </div>
+                    {job.due_date && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Due</span>
+                        <span>{format(new Date(job.due_date), 'MMM d, yyyy')}</span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
         </main>
       ) : (
         <main className="container mx-auto px-6 py-8">
