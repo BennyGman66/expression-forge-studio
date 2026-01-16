@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { fixBrokenStorageUrl } from '@/lib/fileUtils';
 import { SubmissionAsset, AssetReviewStatus } from '@/types/review';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -83,7 +84,7 @@ export function AssetThumbnails({
                 )}>
                   {asset.file_url ? (
                     <img
-                      src={asset.file_url}
+                      src={fixBrokenStorageUrl(asset.file_url)}
                       alt={asset.label || `Asset ${idx + 1}`}
                       className="w-full h-full object-cover"
                     />
