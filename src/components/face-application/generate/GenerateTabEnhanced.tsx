@@ -480,12 +480,74 @@ export function GenerateTabEnhanced({
     setSelectedLookIds(new Set(failedLooks.map(l => l.lookId)));
   }, [looks]);
 
+  // Preflight check: verify prerequisites for selected looks
+  const checkPrerequisites = useCallback(async (selectedLooks: LookGenerationStats[]) => {
+    const issues: { lookName: string; view: string; issue: string }[] = [];
+    let readyViews = 0;
+    let totalViews = 0;
+
+    for (const look of selectedLooks) {
+      for (const sourceImage of look.sourceImages) {
+        totalViews++;
+        const hasHeadCrop = !!sourceImage.head_cropped_url;
+        const hasMatchedFace = !!sourceImage.matched_face_url;
+
+        if (!hasHeadCrop) {
+          issues.push({
+            lookName: look.lookName,
+            view: sourceImage.view,
+            issue: 'Missing Head Crop',
+          });
+        } else if (!hasMatchedFace) {
+          issues.push({
+            lookName: look.lookName,
+            view: sourceImage.view,
+            issue: 'Missing Face Match',
+          });
+        } else {
+          readyViews++;
+        }
+      }
+    }
+
+    return { issues, readyViews, totalViews };
+  }, []);
+
   // Start generation - only generates missing outputs
   const handleStartGeneration = async () => {
     const selectedLooks = looks.filter(l => selectedLookIds.has(l.lookId));
     if (selectedLooks.length === 0) {
       toast({ title: "No looks selected", variant: "destructive" });
       return;
+    }
+
+    // Preflight check: verify all prerequisites are met
+    const { issues, readyViews, totalViews } = await checkPrerequisites(selectedLooks);
+    
+    if (issues.length > 0) {
+      // Group issues by type
+      const headCropMissing = issues.filter(i => i.issue === 'Missing Head Crop');
+      const faceMatchMissing = issues.filter(i => i.issue === 'Missing Face Match');
+      
+      let description = '';
+      if (headCropMissing.length > 0) {
+        description += `${headCropMissing.length} views missing Head Crops. `;
+      }
+      if (faceMatchMissing.length > 0) {
+        description += `${faceMatchMissing.length} views missing Face Match. `;
+      }
+      description += `Only ${readyViews}/${totalViews} views are ready.`;
+
+      toast({ 
+        title: "Prerequisites incomplete", 
+        description,
+        variant: "destructive" 
+      });
+
+      // If nothing is ready, don't start at all
+      if (readyViews === 0) {
+        return;
+      }
     }
 
     setIsGenerating(true);
@@ -497,17 +559,38 @@ export function GenerateTabEnhanced({
 
     try {
       let lookIndex = 0;
+      let jobsCreated = 0;
+      
       for (const look of selectedLooks) {
         lookIndex++;
         // Skip if no talent assigned
-        if (!look.digitalTalentId) continue;
+        if (!look.digitalTalentId) {
+          console.log(`[Generate] Skipping look ${look.lookName}: No talent assigned`);
+          continue;
+        }
 
-        // Determine which views need generation
-        const viewsToGenerate = look.views.filter(v => 
-          allowRegenerate || v.completedCount < attemptsPerView
+        // Check if this look has any views with prerequisites met
+        const readySourceImages = look.sourceImages.filter(
+          img => img.head_cropped_url && img.matched_face_url
         );
+        
+        if (readySourceImages.length === 0) {
+          console.log(`[Generate] Skipping look ${look.lookName}: No views with prerequisites`);
+          continue;
+        }
 
-        if (viewsToGenerate.length === 0) continue;
+        // Determine which views need generation AND have prerequisites
+        const viewsToGenerate = look.views.filter(v => {
+          const sourceImage = look.sourceImages.find(img => img.view === v.view);
+          const hasPrereqs = sourceImage?.head_cropped_url && sourceImage?.matched_face_url;
+          const needsGen = allowRegenerate || v.completedCount < attemptsPerView;
+          return hasPrereqs && needsGen;
+        });
+
+        if (viewsToGenerate.length === 0) {
+          console.log(`[Generate] Skipping look ${look.lookName}: All ready views already complete`);
+          continue;
+        }
 
         // Calculate how many outputs we actually need to generate
         const outputsNeeded = viewsToGenerate.reduce((sum, v) => {
@@ -552,9 +635,12 @@ export function GenerateTabEnhanced({
         // Add job ID immediately to enable progress tracking
         setCurrentBatchJobIds(prev => [...prev, newJob.id]);
         setSetupProgress({ current: lookIndex, total: selectedLooks.length });
+        jobsCreated++;
 
         // Start generation - fire and forget (no await)
         const viewsToProcess = viewsToGenerate.map(v => v.view);
+        
+        console.log(`[Generate] Starting job ${newJob.id} for look ${look.lookName} with ${viewsToProcess.length} views`);
         
         supabase.functions.invoke("generate-ai-apply", {
           body: {
@@ -572,10 +658,20 @@ export function GenerateTabEnhanced({
       }
 
       setSetupPhase(false);
-      toast({ 
-        title: "Generation started", 
-        description: `Processing ${selectedLooks.length} looks` 
-      });
+      
+      if (jobsCreated === 0) {
+        setIsGenerating(false);
+        toast({ 
+          title: "No generation needed", 
+          description: "All selected looks are either missing prerequisites or already complete.",
+          variant: "destructive" 
+        });
+      } else {
+        toast({ 
+          title: "Generation started", 
+          description: `Processing ${jobsCreated} looks (${selectedLooks.length - jobsCreated} skipped due to missing prerequisites)` 
+        });
+      }
 
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
