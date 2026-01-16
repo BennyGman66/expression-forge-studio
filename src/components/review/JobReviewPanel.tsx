@@ -47,6 +47,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { fixBrokenStorageUrl } from '@/lib/fileUtils';
 import {
   Tooltip,
   TooltipContent,
@@ -508,7 +509,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
             {selectedAsset?.file_url ? (
               <ImageViewer
                 ref={imageViewerRef}
-                src={selectedAsset.file_url}
+                src={fixBrokenStorageUrl(selectedAsset.file_url)}
                 alt={selectedAsset.label || 'Asset'}
                 annotations={annotations}
                 selectedAnnotationId={selectedAnnotationId}
