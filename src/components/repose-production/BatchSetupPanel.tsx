@@ -1,17 +1,47 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ArrowRight, AlertCircle, Shirt, Layers } from "lucide-react";
-import { useReposeBatch, useReposeBatchItems, useUpdateReposeBatchConfig } from "@/hooks/useReposeBatches";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { 
+  ArrowRight, 
+  AlertCircle, 
+  Shirt, 
+  Layers, 
+  Play, 
+  Square, 
+  CheckCircle2, 
+  XCircle, 
+  Loader2,
+  RotateCcw,
+  Eye,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
+  Sparkles
+} from "lucide-react";
+import { useReposeBatch, useReposeBatchItems, useReposeOutputs, useUpdateReposeBatchConfig, useUpdateReposeBatchStatus } from "@/hooks/useReposeBatches";
 import { useUpdateLookProductType } from "@/hooks/useProductionProjects";
+import { useBatchReposeRuns, useReposeRunCounts, useLastReposeRuns, useCreateReposeRuns, useUpdateReposeRun, useDetectStalledRuns } from "@/hooks/useReposeRuns";
+import { usePipelineJobs } from "@/hooks/usePipelineJobs";
 import { supabase } from "@/integrations/supabase/client";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
-import { useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReposeConfig } from "@/types/repose";
+import type { ReposeRun } from "@/hooks/useReposeRuns";
 import { ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS } from "@/types/shot-types";
+import { REPOSE_MODEL_OPTIONS, DEFAULT_REPOSE_MODEL } from "@/types/repose";
+import { cn } from "@/lib/utils";
+import { format, formatDistanceToNow } from "date-fns";
 
 interface BatchSetupPanelProps {
   batchId: string | undefined;
@@ -27,25 +57,49 @@ interface ClayPoseCount {
   BACK_FULL: number;
 }
 
-interface LookGroup {
+interface LookRow {
   lookId: string;
   lookName: string;
   productType: 'top' | 'trousers' | null;
   views: Array<{ view: string; sourceUrl: string }>;
+  isReady: boolean;
+  completedRuns: number;
+  lastRunStatus: string | null;
+  lastRunAt: string | null;
+  currentStatus: 'queued' | 'running' | null;
 }
 
 export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
+  const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   
-  const { data: batch, isLoading: batchLoading } = useReposeBatch(batchId);
+  // Data fetching
+  const { data: batch, isLoading: batchLoading, refetch: refetchBatch } = useReposeBatch(batchId);
   const { data: batchItems, isLoading: itemsLoading } = useReposeBatchItems(batchId);
+  const { data: runs, refetch: refetchRuns } = useBatchReposeRuns(batchId);
+  const { data: outputs, refetch: refetchOutputs } = useReposeOutputs(batchId);
   const updateConfig = useUpdateReposeBatchConfig();
+  const updateStatus = useUpdateReposeBatchStatus();
   const updateLookProductType = useUpdateLookProductType();
+  const createRuns = useCreateReposeRuns();
+  const updateRun = useUpdateReposeRun();
+  const detectStalled = useDetectStalledRuns();
+  const { createJob, updateProgress, setStatus } = usePipelineJobs();
 
+  // Local state
   const [selectedBrandId, setSelectedBrandId] = useState<string>("");
-  const [posesPerShotType, setPosesPerShotType] = useState(2);
+  const [rendersPerLook, setRendersPerLook] = useState(2);
+  const [selectedLookIds, setSelectedLookIds] = useState<Set<string>>(new Set());
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_REPOSE_MODEL);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [inspectedLookId, setInspectedLookId] = useState<string | null>(null);
   const [clayPoseCounts, setClayPoseCounts] = useState<ClayPoseCount[]>([]);
   const [loadingCounts, setLoadingCounts] = useState(false);
+  
+  const shouldStopRef = useRef(false);
+  const pipelineJobIdRef = useRef<string | null>(null);
 
   // Look up look_id via source_output_id for items with missing look_id
   const { data: outputLookMap } = useQuery({
@@ -59,7 +113,6 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
         .select("id, job:unified_jobs(look_id)")
         .in("id", outputIds);
       
-      // Build a map: source_output_id -> look_id
       const map: Record<string, string> = {};
       data?.forEach((output: any) => {
         if (output.job?.look_id) {
@@ -71,7 +124,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     enabled: !!batchItems && batchItems.some(i => !i.look_id && i.source_output_id),
   });
 
-  // Get unique look IDs from batch items (including fallback from output lookup)
+  // Get unique look IDs from batch items
   const lookIds = useMemo(() => {
     if (!batchItems?.length) return [];
     const ids = new Set<string>();
@@ -85,7 +138,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     return [...ids];
   }, [batchItems, outputLookMap]);
 
-  // Fetch look details (names and product types) for items in batch
+  // Fetch look details
   const { data: lookDetails } = useQuery({
     queryKey: ["batch-look-details", lookIds],
     queryFn: async () => {
@@ -99,23 +152,37 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     enabled: lookIds.length > 0,
   });
 
-  // Group batch items by look
-  const lookGroups = useMemo((): LookGroup[] => {
+  // Get run counts and last runs
+  const { data: runCounts } = useReposeRunCounts(lookIds, selectedBrandId);
+  const { data: lastRuns } = useLastReposeRuns(lookIds, selectedBrandId);
+
+  // Build look rows with all info
+  const lookRows = useMemo((): LookRow[] => {
     if (!batchItems?.length) return [];
     
-    const grouped = new Map<string, LookGroup>();
+    const grouped = new Map<string, LookRow>();
     
     batchItems.forEach(item => {
-      // Use look_id from item, or fall back to the output lookup
       const lookId = item.look_id || outputLookMap?.[item.source_output_id || ''] || 'unknown';
       
       if (!grouped.has(lookId)) {
         const lookDetail = lookDetails?.find(l => l.id === lookId);
+        const runCount = runCounts?.[lookId] || 0;
+        const lastRun = lastRuns?.[lookId];
+        
+        // Check current run status from runs data
+        const activeRun = runs?.find(r => r.look_id === lookId && (r.status === 'running' || r.status === 'queued'));
+        
         grouped.set(lookId, {
           lookId,
           lookName: lookDetail?.name || 'Unknown Look',
           productType: (lookDetail?.product_type as 'top' | 'trousers' | null) || null,
           views: [],
+          isReady: true, // Will check below
+          completedRuns: runCount,
+          lastRunStatus: lastRun?.status || null,
+          lastRunAt: lastRun?.completed_at || null,
+          currentStatus: activeRun?.status as 'queued' | 'running' | null || null,
         });
       }
       grouped.get(lookId)!.views.push({
@@ -124,8 +191,13 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
       });
     });
     
-    return Array.from(grouped.values());
-  }, [batchItems, lookDetails, outputLookMap]);
+    // Check readiness (has all required views)
+    grouped.forEach((row) => {
+      row.isReady = row.productType !== null && row.views.length >= 1;
+    });
+    
+    return Array.from(grouped.values()).sort((a, b) => a.lookName.localeCompare(b.lookName));
+  }, [batchItems, lookDetails, outputLookMap, runCounts, lastRuns, runs]);
 
   // Load clay pose counts per brand
   useEffect(() => {
@@ -194,53 +266,372 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     if (batch) {
       if (batch.brand_id) setSelectedBrandId(batch.brand_id);
       const config = batch.config_json as ReposeConfig;
-      if (config?.posesPerShotType) setPosesPerShotType(config.posesPerShotType);
+      if (config?.posesPerShotType) setRendersPerLook(config.posesPerShotType);
+      if (config?.model) setSelectedModel(config.model);
     }
   }, [batch]);
 
+  // Realtime subscription for runs
+  useEffect(() => {
+    if (!batchId) return;
+
+    const channel = supabase
+      .channel(`repose-runs-${batchId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'repose_runs',
+          filter: `batch_id=eq.${batchId}`,
+        },
+        () => {
+          refetchRuns();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [batchId, refetchRuns]);
+
+  // Realtime subscription for outputs
+  useEffect(() => {
+    if (!batchId) return;
+
+    const channel = supabase
+      .channel(`repose-outputs-${batchId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'repose_outputs',
+          filter: `batch_id=eq.${batchId}`,
+        },
+        () => {
+          refetchOutputs();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [batchId, refetchOutputs]);
+
+  // Track generation based on runs
+  useEffect(() => {
+    const hasRunning = runs?.some(r => r.status === 'running');
+    const hasQueued = runs?.some(r => r.status === 'queued');
+    setIsGenerating(hasRunning || false);
+    
+    // Update batch status if needed
+    if (batch?.status === 'DRAFT' && (hasRunning || hasQueued)) {
+      updateStatus.mutate({ batchId: batchId!, status: 'RUNNING' });
+    }
+  }, [runs, batch?.status, batchId]);
+
+  // Stall detection
+  useEffect(() => {
+    if (!isGenerating) return;
+    
+    const interval = setInterval(() => {
+      detectStalled.mutate(5);
+    }, 60000); // Check every minute
+    
+    return () => clearInterval(interval);
+  }, [isGenerating]);
+
   const selectedBrandCounts = clayPoseCounts.find(c => c.brandId === selectedBrandId);
 
-  // Calculate estimated outputs based on unique looks (not individual images)
-  const estimatedOutputs = useMemo(() => {
-    if (!lookGroups.length || !selectedBrandCounts) return 0;
-    // looks × 4 output types × poses per type
-    return lookGroups.length * 4 * posesPerShotType;
-  }, [lookGroups, selectedBrandCounts, posesPerShotType]);
+  // Selection handlers
+  const toggleLook = (lookId: string) => {
+    const newSet = new Set(selectedLookIds);
+    if (newSet.has(lookId)) {
+      newSet.delete(lookId);
+    } else {
+      newSet.add(lookId);
+    }
+    setSelectedLookIds(newSet);
+  };
 
-  // Check if all looks have product type set
-  const allLooksHaveProductType = lookGroups.every(l => l.productType !== null);
-  const looksWithoutProductType = lookGroups.filter(l => l.productType === null).length;
+  const selectAll = () => {
+    setSelectedLookIds(new Set(lookRows.map(l => l.lookId)));
+  };
+
+  const clearSelection = () => {
+    setSelectedLookIds(new Set());
+  };
 
   const handleProductTypeChange = (lookId: string, productType: 'top' | 'trousers') => {
     updateLookProductType.mutate({ lookId, productType });
   };
 
-  // Bulk set all looks to same product type
   const handleBulkSetProductType = (productType: 'top' | 'trousers') => {
-    lookGroups.forEach(look => {
+    lookRows.forEach(look => {
       if (look.lookId !== 'unknown') {
         updateLookProductType.mutate({ lookId: look.lookId, productType });
       }
     });
   };
 
-  const handleSaveAndProceed = () => {
+  // Queue stats
+  const queueStats = useMemo(() => {
+    if (!runs) return { queued: 0, running: 0, complete: 0, failed: 0 };
+    return {
+      queued: runs.filter(r => r.status === 'queued').length,
+      running: runs.filter(r => r.status === 'running').length,
+      complete: runs.filter(r => r.status === 'complete').length,
+      failed: runs.filter(r => r.status === 'failed').length,
+    };
+  }, [runs]);
+
+  const totalRuns = queueStats.queued + queueStats.running + queueStats.complete + queueStats.failed;
+  const progressPercent = totalRuns > 0 ? ((queueStats.complete + queueStats.failed) / totalRuns) * 100 : 0;
+
+  // Estimated outputs calculation
+  const selectedLooks = lookRows.filter(l => selectedLookIds.has(l.lookId));
+  const readySelectedLooks = selectedLooks.filter(l => l.isReady);
+  const estimatedNewRuns = selectedLooks.length * rendersPerLook;
+
+  // Start generation
+  const handleStartGeneration = async () => {
+    if (!batchId || selectedLooks.length === 0 || !selectedBrandId) return;
+
+    shouldStopRef.current = false;
+    setIsGenerating(true);
+
+    try {
+      // Save config
+      const config: ReposeConfig = {
+        posesPerShotType: rendersPerLook,
+        attemptsPerPose: 1,
+        model: selectedModel,
+      };
+      await updateConfig.mutateAsync({ batchId, config, brandId: selectedBrandId });
+
+      // Create runs for selected looks
+      const lookIdsToQueue = selectedLooks.map(l => l.lookId);
+
+      // Build run records for each look
+      const runsToCreate: Array<Record<string, unknown>> = [];
+      
+      for (const lookId of lookIdsToQueue) {
+        // Get next run index
+        const existingRuns = runs?.filter(r => r.look_id === lookId) || [];
+        const maxIndex = existingRuns.reduce((max, r) => Math.max(max, r.run_index), 0);
+        
+        for (let i = 0; i < rendersPerLook; i++) {
+          runsToCreate.push({
+            batch_id: batchId,
+            look_id: lookId,
+            brand_id: selectedBrandId,
+            run_index: maxIndex + 1 + i,
+            config_snapshot: { ...config, brand_id: selectedBrandId } as Record<string, unknown>,
+          });
+        }
+      }
+
+      const { error: insertError } = await supabase
+        .from('repose_runs')
+        .insert(runsToCreate as any);
+      
+      if (insertError) throw insertError;
+
+      toast.success(`Queued ${runsToCreate.length} render runs`);
+      
+      // Update batch status
+      updateStatus.mutate({ batchId, status: 'RUNNING' });
+      
+      // Clear selection
+      setSelectedLookIds(new Set());
+      
+      // Refetch runs
+      await refetchRuns();
+
+      // Create pipeline job for tracking
+      const pipelineJobId = await createJob({
+        type: 'REPOSE_GENERATION',
+        title: `Repose: ${lookIdsToQueue.length} looks`,
+        total: runsToCreate.length,
+        origin_route: `/repose-production/batch/${batchId}?tab=setup`,
+        origin_context: { batchId, model: selectedModel },
+        supports_pause: true,
+        supports_retry: false,
+        supports_restart: false,
+      });
+      pipelineJobIdRef.current = pipelineJobId;
+
+      // Start processing queue
+      await processQueue(pipelineJobId);
+
+    } catch (error) {
+      console.error('Generation error:', error);
+      toast.error(`Generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setIsGenerating(false);
+    }
+  };
+
+  // Process queue
+  const processQueue = async (pipelineJobId: string) => {
     if (!batchId) return;
 
-    const config: ReposeConfig = {
-      posesPerShotType,
-      attemptsPerPose: 1,
-    };
+    const concurrency = 3;
+    let processedCount = 0;
+    let failedCount = 0;
 
-    updateConfig.mutate(
-      { batchId, config, brandId: selectedBrandId || undefined },
-      {
-        onSuccess: () => {
-          setSearchParams({ tab: 'generate' });
-        },
+    while (!shouldStopRef.current) {
+      // Get next queued runs
+      const { data: queuedRuns } = await supabase
+        .from('repose_runs')
+        .select('*')
+        .eq('batch_id', batchId)
+        .eq('status', 'queued')
+        .order('created_at', { ascending: true })
+        .limit(concurrency);
+
+      if (!queuedRuns?.length) {
+        // Check if all done
+        const { data: remaining } = await supabase
+          .from('repose_runs')
+          .select('id')
+          .eq('batch_id', batchId)
+          .in('status', ['queued', 'running']);
+
+        if (!remaining?.length) {
+          updateStatus.mutate({ batchId, status: 'COMPLETE' });
+          setStatus(pipelineJobId, 'COMPLETED');
+          toast.success('All runs complete!');
+        }
+        break;
       }
-    );
+
+      // Process batch concurrently
+      await Promise.all(queuedRuns.map(async (run) => {
+        if (shouldStopRef.current) return;
+
+        try {
+          // Mark as running
+          await supabase
+            .from('repose_runs')
+            .update({ status: 'running', started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString() })
+            .eq('id', run.id);
+
+          // Process the run (create outputs and generate)
+          const configSnapshot = run.config_snapshot as Record<string, unknown> | null;
+          const runBrandId = (configSnapshot?.brand_id as string) || selectedBrandId;
+          const runModel = (configSnapshot?.model as string) || selectedModel;
+          await processReposeRun(run.id, run.look_id, runBrandId, runModel);
+
+          // Mark as complete
+          await supabase
+            .from('repose_runs')
+            .update({ status: 'complete', completed_at: new Date().toISOString() })
+            .eq('id', run.id);
+
+          processedCount++;
+        } catch (err) {
+          console.error(`Error processing run ${run.id}:`, err);
+          await supabase
+            .from('repose_runs')
+            .update({ status: 'failed', error_message: err instanceof Error ? err.message : 'Unknown error' })
+            .eq('id', run.id);
+          failedCount++;
+        }
+
+        // Update pipeline progress
+        await updateProgress(pipelineJobId, { doneDelta: 1, failedDelta: failedCount > 0 ? 1 : 0 });
+      }));
+
+      // Refresh
+      await refetchRuns();
+      await refetchOutputs();
+    }
+
+    if (shouldStopRef.current) {
+      setStatus(pipelineJobId, 'PAUSED');
+      toast.info('Generation paused');
+    }
+    
+    setIsGenerating(false);
   };
+
+  // Process a single repose run
+  const processReposeRun = async (runId: string, lookId: string, brandId: string, model: string) => {
+    // Get batch items for this look
+    const lookItems = batchItems?.filter(item => 
+      item.look_id === lookId || outputLookMap?.[item.source_output_id || ''] === lookId
+    ) || [];
+
+    if (!lookItems.length) return;
+
+    // Get look product type
+    const lookDetail = lookDetails?.find(l => l.id === lookId);
+    const productType = lookDetail?.product_type || 'top';
+
+    // For each item, generate outputs
+    for (const item of lookItems) {
+      // Call the generate-repose-single edge function
+      // First create an output record, then call generate
+      const { error } = await supabase.functions.invoke('generate-repose-single', {
+        body: {
+          batchItemId: item.id,
+          lookId,
+          brandId,
+          model,
+          productType,
+          runId,
+        },
+      });
+
+      if (error) {
+        console.error(`Generation failed for item ${item.id}:`, error);
+        throw error;
+      }
+
+      // Update heartbeat
+      await supabase
+        .from('repose_runs')
+        .update({ heartbeat_at: new Date().toISOString() })
+        .eq('id', runId);
+    }
+  };
+
+  // Stop generation
+  const handleStopGeneration = () => {
+    shouldStopRef.current = true;
+    toast.info('Stopping generation...');
+  };
+
+  // Retry failed runs
+  const handleRetryFailed = async () => {
+    if (!batchId) return;
+
+    const { error } = await supabase
+      .from('repose_runs')
+      .update({ status: 'queued', error_message: null, started_at: null })
+      .eq('batch_id', batchId)
+      .eq('status', 'failed');
+
+    if (error) {
+      toast.error('Failed to retry');
+      return;
+    }
+
+    toast.success('Failed runs queued for retry');
+    await refetchRuns();
+
+    // Resume processing
+    if (pipelineJobIdRef.current) {
+      await processQueue(pipelineJobIdRef.current);
+    }
+  };
+
+  // Inspect look
+  const inspectedLook = lookRows.find(l => l.lookId === inspectedLookId);
+  const inspectedLookRuns = runs?.filter(r => r.look_id === inspectedLookId) || [];
 
   if (batchLoading || itemsLoading) {
     return (
@@ -259,84 +650,151 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     );
   }
 
+  const looksWithoutProductType = lookRows.filter(l => l.productType === null).length;
+
   return (
-    <div className="space-y-6 max-w-4xl">
-      {/* Setup Card - Pose Library & Renders */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Setup</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Pose Library */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Pose Library</label>
-              <Select value={selectedBrandId} onValueChange={setSelectedBrandId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a brand..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {clayPoseCounts.map((counts) => (
-                    <SelectItem key={counts.brandId} value={counts.brandId}>
-                      <div className="flex items-center gap-2">
-                        <span>{counts.brandName}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {counts.total} poses
-                        </Badge>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+    <div className="flex gap-6">
+      {/* Main Content */}
+      <div className="flex-1 space-y-6">
+        {/* Setup Card - Pose Library & Renders */}
+        <Card>
+          <CardHeader className="py-4">
+            <CardTitle className="text-lg">Setup</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Pose Library */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Pose Library</label>
+                <Select value={selectedBrandId} onValueChange={setSelectedBrandId}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Select a brand..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clayPoseCounts.map((counts) => (
+                      <SelectItem key={counts.brandId} value={counts.brandId}>
+                        <div className="flex items-center gap-2">
+                          <span>{counts.brandName}</span>
+                          <Badge variant="outline" className="text-xs">
+                            {counts.total} poses
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            {/* Renders per Look */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Renders per Look</label>
-              <Select 
-                value={posesPerShotType.toString()} 
-                onValueChange={(v) => setPosesPerShotType(parseInt(v))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[1, 2, 3, 4].map(n => (
-                    <SelectItem key={n} value={n.toString()}>{n}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Brand pose breakdown */}
-          {selectedBrandCounts && (
-            <div className="mt-4 p-3 bg-secondary/30 rounded-lg">
-              <div className="flex items-center gap-4 text-sm">
-                <span className="text-muted-foreground">{selectedBrandCounts.brandName}:</span>
-                {ALL_OUTPUT_SHOT_TYPES.map((shotType) => (
-                  <span key={shotType} className="text-muted-foreground">
-                    {OUTPUT_SHOT_LABELS[shotType]}: <span className="font-medium text-foreground">{selectedBrandCounts[shotType]}</span>
-                  </span>
-                ))}
+              {/* Renders per Look */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Renders per Look</label>
+                <Select 
+                  value={rendersPerLook.toString()} 
+                  onValueChange={(v) => setRendersPerLook(parseInt(v))}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4, 5].map(n => (
+                      <SelectItem key={n} value={n.toString()}>{n}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
 
-      {/* Looks with Per-Look Product Type */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Looks in Batch ({lookGroups.length})</CardTitle>
+            {/* Brand pose breakdown */}
+            {selectedBrandCounts && (
+              <div className="mt-3 p-2.5 bg-secondary/30 rounded-lg">
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="text-muted-foreground">{selectedBrandCounts.brandName}:</span>
+                  {ALL_OUTPUT_SHOT_TYPES.map((shotType) => (
+                    <span key={shotType} className="text-muted-foreground">
+                      {OUTPUT_SHOT_LABELS[shotType]}: <span className="font-medium text-foreground">{selectedBrandCounts[shotType]}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Advanced options */}
+            <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced} className="mt-3">
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
+                  <Settings2 className="w-3.5 h-3.5" />
+                  Advanced
+                  {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Model</label>
+                  <Select value={selectedModel} onValueChange={setSelectedModel}>
+                    <SelectTrigger className="h-9 w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REPOSE_MODEL_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </CardContent>
+        </Card>
+
+        {/* Live Progress (when running) */}
+        {(queueStats.running > 0 || queueStats.queued > 0) && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary animate-pulse" />
+                  <span className="font-medium">Generating</span>
+                </div>
+                <span className="text-sm text-muted-foreground">
+                  {queueStats.complete + queueStats.failed} / {totalRuns} runs
+                </span>
+              </div>
+              <Progress value={progressPercent} className="h-2" />
+              <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  {queueStats.running} running
+                </span>
+                <span className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-muted-foreground" />
+                  {queueStats.queued} queued
+                </span>
+                <span className="flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-green-500" />
+                  {queueStats.complete} complete
+                </span>
+                {queueStats.failed > 0 && (
+                  <span className="flex items-center gap-1 text-red-500">
+                    <XCircle className="w-3 h-3" />
+                    {queueStats.failed} failed
+                  </span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Looks Table */}
+        <Card>
+          <CardHeader className="py-3 flex flex-row items-center justify-between">
+            <CardTitle className="text-lg">Looks in Batch ({lookRows.length})</CardTitle>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Set all to:</span>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => handleBulkSetProductType('top')}
-                className="gap-1"
+                className="gap-1 h-7"
               >
                 <Shirt className="w-3 h-3" />
                 Tops
@@ -345,100 +803,290 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
                 size="sm"
                 variant="outline"
                 onClick={() => handleBulkSetProductType('trousers')}
-                className="gap-1"
+                className="gap-1 h-7"
               >
                 <Layers className="w-3 h-3" />
                 Trousers
               </Button>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {lookGroups.length > 0 ? (
-            <div className="space-y-3">
-              {lookGroups.map((look) => (
-                <div 
-                  key={look.lookId}
-                  className="flex items-center gap-4 p-3 border rounded-lg bg-card"
-                >
-                  {/* Look Name */}
-                  <div className="w-48 flex-shrink-0">
-                    <p className="font-medium truncate">{look.lookName}</p>
-                    <p className="text-xs text-muted-foreground">{look.views.length} views</p>
-                  </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {looksWithoutProductType > 0 && (
+              <div className="mx-4 mb-2 p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-700 dark:text-amber-400 text-sm">
+                <AlertCircle className="w-4 h-4 inline-block mr-2" />
+                {looksWithoutProductType} look{looksWithoutProductType > 1 ? 's' : ''} need product type set
+              </div>
+            )}
 
-                  {/* View Thumbnails */}
-                  <div className="flex gap-2 flex-1">
-                    {look.views.map((v, i) => (
-                      <div 
-                        key={i} 
-                        className="w-12 h-16 bg-muted rounded overflow-hidden border flex-shrink-0"
-                        title={v.view}
-                      >
-                        <img 
-                          src={v.sourceUrl} 
-                          alt={v.view}
-                          className="w-full h-full object-cover" 
+            <ScrollArea className="h-[400px]">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-10">
+                      <Checkbox 
+                        checked={selectedLookIds.size === lookRows.length && lookRows.length > 0}
+                        onCheckedChange={(checked) => checked ? selectAll() : clearSelection()}
+                      />
+                    </TableHead>
+                    <TableHead>Look / SKU</TableHead>
+                    <TableHead className="w-32">Product Type</TableHead>
+                    <TableHead className="w-24 text-center">Rendered</TableHead>
+                    <TableHead className="w-32">Last Run</TableHead>
+                    <TableHead className="w-24 text-center">Status</TableHead>
+                    <TableHead className="w-16"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lookRows.map((look) => (
+                    <TableRow 
+                      key={look.lookId} 
+                      className={cn(
+                        "transition-colors",
+                        selectedLookIds.has(look.lookId) && "bg-primary/5",
+                        look.currentStatus === 'running' && "bg-blue-500/5"
+                      )}
+                    >
+                      <TableCell>
+                        <Checkbox 
+                          checked={selectedLookIds.has(look.lookId)}
+                          onCheckedChange={() => toggleLook(look.lookId)}
                         />
-                      </div>
-                    ))}
-                  </div>
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium truncate max-w-[200px]">{look.lookName}</p>
+                          <p className="text-xs text-muted-foreground">{look.views.length} views</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant={look.productType === 'top' ? 'default' : 'outline'}
+                            onClick={() => handleProductTypeChange(look.lookId, 'top')}
+                            className="h-6 px-2 text-xs"
+                            disabled={look.lookId === 'unknown'}
+                          >
+                            Top
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={look.productType === 'trousers' ? 'default' : 'outline'}
+                            onClick={() => handleProductTypeChange(look.lookId, 'trousers')}
+                            className="h-6 px-2 text-xs"
+                            disabled={look.lookId === 'unknown'}
+                          >
+                            Trousers
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="secondary" className="text-xs">
+                          {look.completedRuns} runs
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {look.lastRunAt ? (
+                          <div className="text-xs">
+                            <p className="text-muted-foreground">
+                              {formatDistanceToNow(new Date(look.lastRunAt), { addSuffix: true })}
+                            </p>
+                            <Badge 
+                              variant="outline" 
+                              className={cn(
+                                "text-[10px] px-1",
+                                look.lastRunStatus === 'complete' && "text-green-600 border-green-500/30",
+                                look.lastRunStatus === 'failed' && "text-red-600 border-red-500/30"
+                              )}
+                            >
+                              {look.lastRunStatus}
+                            </Badge>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {look.currentStatus === 'running' && (
+                          <Badge className="bg-blue-500/20 text-blue-600 border-blue-500/30 text-xs gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Running
+                          </Badge>
+                        )}
+                        {look.currentStatus === 'queued' && (
+                          <Badge variant="outline" className="text-xs">
+                            <Clock className="w-3 h-3 mr-1" />
+                            Queued
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setInspectedLookId(look.lookId)}
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </CardContent>
+        </Card>
 
-                  {/* Product Type Toggle */}
-                  <div className="flex gap-2 flex-shrink-0">
-                    <Button
-                      size="sm"
-                      variant={look.productType === 'top' ? 'default' : 'outline'}
-                      onClick={() => handleProductTypeChange(look.lookId, 'top')}
-                      className="gap-1"
-                      disabled={look.lookId === 'unknown'}
-                    >
-                      <Shirt className="w-3 h-3" />
-                      Top
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={look.productType === 'trousers' ? 'default' : 'outline'}
-                      onClick={() => handleProductTypeChange(look.lookId, 'trousers')}
-                      className="gap-1"
-                      disabled={look.lookId === 'unknown'}
-                    >
-                      <Layers className="w-3 h-3" />
-                      Trousers
-                    </Button>
-                  </div>
-                </div>
-              ))}
+        {/* Sticky Action Bar */}
+        <div className="sticky bottom-0 bg-background border-t pt-4 pb-2 -mx-6 px-6">
+          <div className="flex items-center justify-between p-4 bg-primary/5 rounded-lg border border-primary/20">
+            <div>
+              <p className="text-sm text-muted-foreground">
+                {selectedLookIds.size} looks selected × {rendersPerLook} renders = <span className="font-bold text-foreground">{estimatedNewRuns} runs</span>
+              </p>
             </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">No looks in this batch yet.</p>
-          )}
-
-          {looksWithoutProductType > 0 && (
-            <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-700 dark:text-amber-400 text-sm">
-              <AlertCircle className="w-4 h-4 inline-block mr-2" />
-              {looksWithoutProductType} look{looksWithoutProductType > 1 ? 's' : ''} need{looksWithoutProductType === 1 ? 's' : ''} a product type (Top/Trousers) assigned.
+            <div className="flex items-center gap-2">
+              {queueStats.failed > 0 && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handleRetryFailed}
+                  className="gap-1.5"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Retry {queueStats.failed} Failed
+                </Button>
+              )}
+              {selectedLookIds.size > 0 && (
+                <Button variant="ghost" size="sm" onClick={clearSelection}>
+                  Clear Selection
+                </Button>
+              )}
+              {isGenerating ? (
+                <Button 
+                  onClick={handleStopGeneration}
+                  variant="destructive"
+                  className="gap-2"
+                >
+                  <Square className="w-4 h-4" />
+                  Stop
+                </Button>
+              ) : (
+                <Button 
+                  onClick={handleStartGeneration}
+                  disabled={selectedLookIds.size === 0 || !selectedBrandId}
+                  className="gap-2"
+                >
+                  <Play className="w-4 h-4" />
+                  Start Generation
+                </Button>
+              )}
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Generate Button */}
-      <div className="flex items-center justify-between p-4 bg-primary/5 rounded-lg border border-primary/20">
-        <div>
-          <p className="text-sm text-muted-foreground">Estimated Outputs</p>
-          <p className="text-2xl font-bold">{estimatedOutputs}</p>
+          </div>
         </div>
-        <Button 
-          onClick={handleSaveAndProceed}
-          disabled={!selectedBrandId || !allLooksHaveProductType || updateConfig.isPending}
-          size="lg"
-          className="gap-2"
-        >
-          Generate {estimatedOutputs} Repose Images
-          <ArrowRight className="w-4 h-4" />
-        </Button>
       </div>
+
+      {/* Right Drawer (Look Inspector) */}
+      <Sheet open={!!inspectedLookId} onOpenChange={(open) => !open && setInspectedLookId(null)}>
+        <SheetContent className="w-[400px] sm:w-[450px]">
+          <SheetHeader>
+            <SheetTitle>{inspectedLook?.lookName || 'Look Details'}</SheetTitle>
+            <SheetDescription>
+              View sources and render history
+            </SheetDescription>
+          </SheetHeader>
+          
+          {inspectedLook && (
+            <div className="mt-6 space-y-6">
+              {/* Source thumbnails */}
+              <div>
+                <h4 className="text-sm font-medium mb-2">Source Views</h4>
+                <div className="grid grid-cols-4 gap-2">
+                  {inspectedLook.views.map((v, i) => (
+                    <div key={i} className="aspect-[3/4] bg-muted rounded-lg overflow-hidden border">
+                      <img src={v.sourceUrl} alt={v.view} className="w-full h-full object-cover" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Product type */}
+              <div>
+                <h4 className="text-sm font-medium mb-2">Product Type</h4>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant={inspectedLook.productType === 'top' ? 'default' : 'outline'}
+                    onClick={() => handleProductTypeChange(inspectedLook.lookId, 'top')}
+                    className="gap-1"
+                  >
+                    <Shirt className="w-3 h-3" />
+                    Top
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={inspectedLook.productType === 'trousers' ? 'default' : 'outline'}
+                    onClick={() => handleProductTypeChange(inspectedLook.lookId, 'trousers')}
+                    className="gap-1"
+                  >
+                    <Layers className="w-3 h-3" />
+                    Trousers
+                  </Button>
+                </div>
+              </div>
+
+              {/* Run history */}
+              <div>
+                <h4 className="text-sm font-medium mb-2">Render History ({inspectedLookRuns.length} runs)</h4>
+                {inspectedLookRuns.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No renders yet</p>
+                ) : (
+                  <ScrollArea className="h-[200px]">
+                    <div className="space-y-2">
+                      {inspectedLookRuns.map((run) => (
+                        <div 
+                          key={run.id} 
+                          className="flex items-center justify-between p-2 bg-muted/50 rounded-lg text-sm"
+                        >
+                          <div>
+                            <p className="font-medium">Run #{run.run_index}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {run.created_at && format(new Date(run.created_at), 'MMM d, h:mm a')}
+                            </p>
+                          </div>
+                          <Badge 
+                            variant="outline"
+                            className={cn(
+                              run.status === 'complete' && "text-green-600 border-green-500/30",
+                              run.status === 'failed' && "text-red-600 border-red-500/30",
+                              run.status === 'running' && "text-blue-600 border-blue-500/30"
+                            )}
+                          >
+                            {run.status}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+              </div>
+
+              {/* Quick re-run */}
+              <Button 
+                className="w-full gap-2"
+                onClick={() => {
+                  setSelectedLookIds(new Set([inspectedLook.lookId]));
+                  setInspectedLookId(null);
+                }}
+              >
+                <Play className="w-4 h-4" />
+                Queue This Look
+              </Button>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
