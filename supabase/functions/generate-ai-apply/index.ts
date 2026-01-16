@@ -541,18 +541,40 @@ ${STUDIO_LIGHTING_PROMPT}`;
       .select('status')
       .eq('job_id', jobId);
 
-    const allDone = finalOutputs?.every(o => o.status === 'completed' || o.status === 'failed');
-    const anyFailed = finalOutputs?.some(o => o.status === 'failed');
+    // IMPORTANT: If no outputs were created at all, mark job as failed (not completed)
+    // This prevents "0/0" stalling where job looks done but nothing was generated
+    if (!finalOutputs || finalOutputs.length === 0) {
+      console.log(`[AI Apply] Job ${jobId} has NO outputs - marking as failed (prerequisites likely missing)`);
+      await supabase
+        .from('ai_apply_jobs')
+        .update({ 
+          status: 'failed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+    } else {
+      const allDone = finalOutputs.every(o => o.status === 'completed' || o.status === 'failed');
+      const anyFailed = finalOutputs.some(o => o.status === 'failed');
+      const allFailed = finalOutputs.every(o => o.status === 'failed');
 
-    await supabase
-      .from('ai_apply_jobs')
-      .update({ 
-        status: allDone ? (anyFailed ? 'failed' : 'completed') : 'running',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', jobId);
+      // Determine appropriate status
+      let newStatus = 'running';
+      if (allDone) {
+        newStatus = allFailed ? 'failed' : (anyFailed ? 'partial' : 'completed');
+      }
 
-    console.log(`[AI Apply] Job ${jobId} completed for look ${lookId}`);
+      await supabase
+        .from('ai_apply_jobs')
+        .update({ 
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+
+      console.log(`[AI Apply] Job ${jobId} status: ${newStatus} (${finalOutputs.filter(o => o.status === 'completed').length} completed, ${finalOutputs.filter(o => o.status === 'failed').length} failed)`);
+    }
+
+    console.log(`[AI Apply] Job ${jobId} finished processing for look ${lookId}`);
 
     return new Response(
       JSON.stringify({ success: true, jobId }),

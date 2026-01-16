@@ -31,6 +31,7 @@ export interface LookGenerationStats {
     view: string;
     head_cropped_url: string | null;
     source_url: string;
+    matched_face_url: string | null;
   }>;
   lastGeneratedAt: string | null;
   isNewSinceLastRun: boolean;
@@ -98,7 +99,7 @@ export function useGenerationTracking({
       // Fetch source images with crops for all looks
       const { data: sourceImages, error: srcError } = await supabase
         .from("look_source_images")
-        .select("id, look_id, view, head_cropped_url, source_url")
+        .select("id, look_id, view, head_cropped_url, source_url, matched_face_url")
         .in("look_id", filteredLooks.map(l => l.id))
         .not("head_cropped_url", "is", null)
         .order("view");
@@ -182,6 +183,7 @@ export function useGenerationTracking({
             view: s.view,
             head_cropped_url: s.head_cropped_url,
             source_url: s.source_url,
+            matched_face_url: s.matched_face_url,
           })),
           lastGeneratedAt,
           isNewSinceLastRun,
