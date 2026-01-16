@@ -194,7 +194,7 @@ serve(async (req) => {
     }
 
     // Determine which views to process
-    const viewsToProcess = view ? [view] : ['full_front', 'cropped_front', 'back', 'detail'];
+    const viewsToProcess = view ? [view] : ['front', 'back', 'detail'];
 
     // Get source images (simplified query - no FK join needed)
     const { data: sourceImages } = await supabase
@@ -226,8 +226,7 @@ serve(async (req) => {
 
     // View name mapping: generation views -> database views
     const viewAliases: Record<string, string[]> = {
-      'full_front': ['full_front', 'front'],
-      'cropped_front': ['cropped_front', 'front'],
+      'front': ['front', 'full_front', 'cropped_front'],
       'back': ['back'],
       'detail': ['detail', 'side'],
     };
@@ -273,7 +272,7 @@ serve(async (req) => {
           console.log(`[AI Apply] SKIP: No back body image for back view`);
           continue;
         }
-        bodyImage = sourceImages?.find(s => ['full_front', 'cropped_front', 'front'].includes(s.view));
+        bodyImage = sourceImages?.find(s => ['front', 'full_front'].includes(s.view));
       }
 
       if (!bodyImage) {
