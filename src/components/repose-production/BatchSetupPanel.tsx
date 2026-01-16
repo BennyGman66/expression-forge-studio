@@ -582,37 +582,163 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     setIsGenerating(false);
   };
 
-  // Process a single repose run
+  // Process a single repose run - follows same pattern as useReposeQueue
   const processReposeRun = async (runId: string, lookId: string, brandId: string, model: string) => {
     // Get batch items for this look
     const lookItems = batchItems?.filter(item => 
       item.look_id === lookId || outputLookMap?.[item.source_output_id || ''] === lookId
     ) || [];
 
-    if (!lookItems.length) return;
+    if (!lookItems.length) {
+      console.log(`[processReposeRun] No batch items for look ${lookId}`);
+      return;
+    }
+
+    console.log(`[processReposeRun] Processing run ${runId} for look ${lookId} with ${lookItems.length} items`);
 
     // Get look product type
     const lookDetail = lookDetails?.find(l => l.id === lookId);
     const productType = lookDetail?.product_type || 'top';
 
-    // For each item, generate outputs
-    for (const item of lookItems) {
-      // Call the generate-repose-single edge function
-      // First create an output record, then call generate
-      const { error } = await supabase.functions.invoke('generate-repose-single', {
-        body: {
-          batchItemId: item.id,
-          lookId,
-          brandId,
-          model,
-          productType,
-          runId,
-        },
-      });
+    // Get the brand library for approved poses
+    const { data: library } = await supabase
+      .from('brand_pose_libraries')
+      .select('id')
+      .eq('brand_id', brandId)
+      .single();
 
-      if (error) {
-        console.error(`Generation failed for item ${item.id}:`, error);
-        throw error;
+    if (!library) {
+      throw new Error('No pose library found for brand');
+    }
+
+    // Get approved poses with clay image URLs
+    const { data: poses } = await supabase
+      .from('library_poses')
+      .select(`
+        id,
+        slot,
+        product_type,
+        clay_images (id, stored_url)
+      `)
+      .eq('library_id', library.id)
+      .eq('curation_status', 'approved')
+      .not('clay_images', 'is', null);
+
+    if (!poses?.length) {
+      throw new Error('No approved poses found in library');
+    }
+
+    console.log(`[processReposeRun] Found ${poses.length} approved poses`);
+
+    // Create output records for each batch item
+    const outputsToCreate: Array<{
+      batch_id: string;
+      batch_item_id: string;
+      run_id: string;
+      pose_id: string | null;
+      pose_url: string | null;
+      shot_type: string;
+      attempt_index: number;
+      status: string;
+    }> = [];
+
+    const posesPerType = rendersPerLook || 2;
+
+    for (const item of lookItems) {
+      const view = item.view?.toLowerCase() || '';
+      let shotTypes: string[] = [];
+      
+      if (view.includes('front')) {
+        shotTypes = ['FRONT_FULL', 'FRONT_CROPPED'];
+      } else if (view.includes('back')) {
+        shotTypes = ['BACK_FULL'];
+      } else if (view.includes('detail')) {
+        shotTypes = ['DETAIL'];
+      }
+
+      for (const shotType of shotTypes) {
+        // Filter poses by slot mapping
+        const relevantPoses = (poses || []).filter(p => {
+          const slot = p.slot?.toUpperCase() || '';
+          if (shotType === 'FRONT_FULL' || shotType === 'FRONT_CROPPED') {
+            return slot.includes('A') || slot.includes('B');
+          }
+          if (shotType === 'BACK_FULL') return slot.includes('C');
+          if (shotType === 'DETAIL') return slot.includes('D');
+          return true;
+        });
+
+        // Take random poses up to posesPerType
+        const shuffled = relevantPoses.sort(() => Math.random() - 0.5);
+        const selectedPoses = shuffled.slice(0, posesPerType);
+
+        for (const pose of selectedPoses) {
+          const clayImage = pose.clay_images as { id: string; stored_url: string } | null;
+          if (!clayImage?.stored_url) continue;
+
+          outputsToCreate.push({
+            batch_id: batchId!,
+            batch_item_id: item.id,
+            run_id: runId,
+            pose_id: pose.id,
+            pose_url: clayImage.stored_url, // Critical: store the pose URL!
+            shot_type: shotType,
+            attempt_index: 0,
+            status: 'queued',
+          });
+        }
+      }
+    }
+
+    if (outputsToCreate.length === 0) {
+      console.log(`[processReposeRun] No outputs to create`);
+      return;
+    }
+
+    console.log(`[processReposeRun] Creating ${outputsToCreate.length} output records`);
+
+    // Insert outputs
+    const { data: createdOutputs, error: insertError } = await supabase
+      .from('repose_outputs')
+      .insert(outputsToCreate)
+      .select('id');
+
+    if (insertError) {
+      console.error(`[processReposeRun] Failed to insert outputs:`, insertError);
+      throw insertError;
+    }
+
+    console.log(`[processReposeRun] Created ${createdOutputs?.length} outputs, calling edge function...`);
+
+    // Call generate-repose-single for each output with correct payload
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const output of createdOutputs || []) {
+      if (shouldStopRef.current) break;
+
+      try {
+        const { error } = await supabase.functions.invoke('generate-repose-single', {
+          body: { outputId: output.id, model },
+        });
+
+        if (error) {
+          console.error(`[processReposeRun] Generation failed for output ${output.id}:`, error);
+          await supabase
+            .from('repose_outputs')
+            .update({ status: 'failed' })
+            .eq('id', output.id);
+          failCount++;
+        } else {
+          successCount++;
+        }
+      } catch (err) {
+        console.error(`[processReposeRun] Error calling edge function:`, err);
+        await supabase
+          .from('repose_outputs')
+          .update({ status: 'failed' })
+          .eq('id', output.id);
+        failCount++;
       }
 
       // Update heartbeat
@@ -620,7 +746,18 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
         .from('repose_runs')
         .update({ heartbeat_at: new Date().toISOString() })
         .eq('id', runId);
+
+      // Small delay between calls to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
+
+    console.log(`[processReposeRun] Completed: ${successCount} success, ${failCount} failed`);
+
+    // Update run with output count
+    await supabase
+      .from('repose_runs')
+      .update({ output_count: successCount })
+      .eq('id', runId);
   };
 
   // Stop generation
