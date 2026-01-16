@@ -196,13 +196,17 @@ serve(async (req) => {
     // Determine which views to process
     const viewsToProcess = view ? [view] : ['full_front', 'cropped_front', 'back', 'detail'];
 
-    // Get source images with Digital Talent portrait (join digital_talents table)
+    // Get source images with Digital Talent portrait via talent_looks join
+    // The digital_talent_id is stored on talent_looks, NOT on look_source_images
     const { data: sourceImages } = await supabase
       .from('look_source_images')
       .select(`
-        id, look_id, view, source_url, head_cropped_url, matched_face_url, digital_talent_id,
-        digital_talent:digital_talents!digital_talent_id (
-          id, name, front_face_url
+        id, look_id, view, source_url, head_cropped_url, matched_face_url,
+        talent_look:talent_looks!look_id (
+          digital_talent_id,
+          digital_talent:digital_talents!digital_talent_id (
+            id, name, front_face_url
+          )
         )
       `)
       .eq('look_id', lookId);
@@ -211,7 +215,7 @@ serve(async (req) => {
     
     // Log what we have for debugging
     for (const img of sourceImages || []) {
-      const talentPortrait = (img.digital_talent as any)?.front_face_url;
+      const talentPortrait = (img.talent_look as any)?.digital_talent?.front_face_url;
       console.log(`[AI Apply] Source image ${img.view}: crop=${img.head_cropped_url ? 'YES' : 'NO'}, paired_face=${img.matched_face_url ? 'YES' : 'NO'}, talent_portrait=${talentPortrait ? 'YES' : 'NO'}`);
     }
 
@@ -251,7 +255,7 @@ serve(async (req) => {
       // - Image 3: digital_talents.front_face_url (talent's primary portrait)
       const cropImageUrl = bodyImage.head_cropped_url;                              // Image 1
       const pairedFaceUrl = bodyImage.matched_face_url;                             // Image 2
-      const talentPortraitUrl = (bodyImage.digital_talent as any)?.front_face_url;  // Image 3
+      const talentPortraitUrl = (bodyImage.talent_look as any)?.digital_talent?.front_face_url;  // Image 3
 
       if (!cropImageUrl) {
         console.log(`[AI Apply] SKIP: No head_cropped_url for ${currentView} - Head Crop stage not completed`);
