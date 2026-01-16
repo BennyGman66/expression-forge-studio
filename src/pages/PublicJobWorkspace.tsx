@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useFreelancerIdentity } from '@/hooks/useFreelancerIdentity';
 import { usePublicJobById, usePublicJobInputs, usePublicJobOutputs, usePublicJobNotes, usePublicLatestSubmission } from '@/hooks/usePublicJob';
@@ -11,23 +11,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye, RotateCcw, Trash2, MessageSquare, Plus, Loader2 } from 'lucide-react';
+import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, FileText, User, ArrowLeft, Eye, Trash2, MessageSquare, Plus, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { FreelancerNamePrompt } from '@/components/freelancer/FreelancerNamePrompt';
 import { FreelancerNeedsChangesView } from '@/components/freelancer/FreelancerNeedsChangesView';
+import { SimpleFileUpload } from '@/components/freelancer/SimpleFileUpload';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { JOB_TYPE_CONFIG } from '@/lib/jobTypes';
-
-interface PendingUpload {
-  id: string;
-  file: File;
-  view: 'front' | 'side' | 'back' | 'other' | null;
-  preview: string;
-}
 
 interface GroupedInput {
   view: string;
@@ -63,13 +56,10 @@ export default function PublicJobWorkspace() {
 
   const [noteText, setNoteText] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
-  const [isDragOver, setIsDragOver] = useState(false);
   const [identitySaving, setIdentitySaving] = useState(false);
   const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
   const [replacements, setReplacements] = useState<Map<string, { file: File; preview: string }>>(new Map());
   const [needsChangesMode, setNeedsChangesMode] = useState<'review' | 'upload'>('review');
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Group inputs by view for Foundation Face Replace jobs
   const groupedInputs = useMemo(() => {
@@ -417,178 +407,57 @@ export default function PublicJobWorkspace() {
     addNote.mutate({ body: noteText });
   };
 
-  // File handling
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(true);
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-  }, []);
-
-  const addFilesToPending = useCallback((files: File[]) => {
-    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
+  // Simple file upload handler - used by SimpleFileUpload component
+  const handleSimpleUpload = useCallback(async (files: File[]) => {
+    if (files.length === 0 || !job?.id) return;
     
-    console.log('[Upload] addFilesToPending called with', files.length, 'files');
-    
-    const validFiles = files.filter(file => {
-      if (file.size > MAX_FILE_SIZE) {
-        toast.error(`${file.name} is too large (max 100MB)`);
-        return false;
-      }
-      return true;
-    });
-    
-    console.log('[Upload] Valid files:', validFiles.length);
-    
-    // Only show preview for actual image types that browsers can display
-    const canPreview = (file: File) => 
-      file.type.startsWith('image/') && 
-      !file.name.toLowerCase().endsWith('.psd') &&
-      !file.name.toLowerCase().endsWith('.ai');
-    
-    const newUploads: PendingUpload[] = validFiles.map(file => ({
-      id: crypto.randomUUID(),
-      file,
-      view: null,
-      preview: canPreview(file) ? URL.createObjectURL(file) : ''
-    }));
-    
-    console.log('[Upload] Created pending uploads:', newUploads.length);
-    
-    setPendingUploads(prev => {
-      console.log('[Upload] Current pending:', prev.length, 'Adding:', newUploads.length);
-      return [...prev, ...newUploads];
-    });
-    
-    if (newUploads.length > 0) {
-      toast.success(`${newUploads.length} file(s) ready to upload`);
-    }
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    
-    // Enhanced logging for debugging
-    console.log('[Upload] Drop event triggered');
-    console.log('[Upload] dataTransfer types:', Array.from(e.dataTransfer.types));
-    console.log('[Upload] dataTransfer items count:', e.dataTransfer.items?.length);
-    
-    let files = Array.from(e.dataTransfer.files);
-    console.log('[Upload] Dropped files:', files.length, files.map(f => ({ name: f.name, type: f.type, size: f.size })));
-    
-    if (files.length === 0) {
-      // Try using items API as fallback (works in some browsers like Safari)
-      if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-        console.log('[Upload] Trying items API fallback...');
-        const itemFiles: File[] = [];
-        for (let i = 0; i < e.dataTransfer.items.length; i++) {
-          const item = e.dataTransfer.items[i];
-          if (item.kind === 'file') {
-            const file = item.getAsFile();
-            if (file) itemFiles.push(file);
-          }
-        }
-        if (itemFiles.length > 0) {
-          console.log('[Upload] Items API recovered files:', itemFiles.length);
-          addFilesToPending(itemFiles);
-          return;
-        }
-      }
-      
-      toast.error('Drag-and-drop failed. Please use the "Browse Files" button instead.', { duration: 5000 });
-      return;
-    }
-    
-    addFilesToPending(files);
-  }, [addFilesToPending]);
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('[Upload] File input change triggered');
-    const files = e.target.files;
-    console.log('[Upload] Files selected:', files?.length, files ? Array.from(files).map(f => f.name) : 'none');
-    if (!files?.length) {
-      console.log('[Upload] No files to add');
-      return;
-    }
-    addFilesToPending(Array.from(files));
-    e.target.value = '';
-  };
-
-  const updatePendingView = (fileId: string, view: 'front' | 'side' | 'back' | 'other' | null) => {
-    setPendingUploads(prev => prev.map(f => 
-      f.id === fileId ? { ...f, view } : f
-    ));
-  };
-
-  const removePendingFile = (fileId: string) => {
-    setPendingUploads(prev => {
-      const file = prev.find(f => f.id === fileId);
-      if (file?.preview) {
-        URL.revokeObjectURL(file.preview);
-      }
-      return prev.filter(f => f.id !== fileId);
-    });
-  };
-
-  const handleUploadPending = async () => {
-    if (pendingUploads.length === 0) {
-      toast.error('No files to upload');
-      return;
-    }
-
+    console.log('[SimpleUpload] Starting upload of', files.length, 'files');
     setUploading(true);
+    
     try {
-      for (const pending of pendingUploads) {
-        const viewLabel = pending.view 
-          ? `${pending.view.charAt(0).toUpperCase()}${pending.view.slice(1)} View - `
-          : '';
-        const safeName = sanitizeFileName(pending.file.name);
-        const fileName = `public/${job?.id}/${Date.now()}-${pending.view || 'output'}-${safeName}`;
+      for (const file of files) {
+        const safeName = sanitizeFileName(file.name);
+        const fileName = `public/${job.id}/${Date.now()}-${safeName}`;
+        
+        console.log('[SimpleUpload] Uploading:', file.name, '→', fileName);
+        
         const { error: uploadError } = await supabase.storage
           .from('images')
-          .upload(fileName, pending.file);
-
-        if (uploadError) throw uploadError;
-
+          .upload(fileName, file);
+        
+        if (uploadError) {
+          console.error('[SimpleUpload] Storage error:', uploadError);
+          throw uploadError;
+        }
+        
         const { data: { publicUrl } } = supabase.storage
           .from('images')
           .getPublicUrl(fileName);
-
-        await supabase.from('job_outputs').insert({
-          job_id: job?.id,
+        
+        const { error: insertError } = await supabase.from('job_outputs').insert({
+          job_id: job.id,
           file_url: publicUrl,
-          label: `${viewLabel}${pending.file.name}`,
+          label: file.name,
           freelancer_identity_id: identity?.id,
         });
-
-        if (pending.preview) {
-          URL.revokeObjectURL(pending.preview);
+        
+        if (insertError) {
+          console.error('[SimpleUpload] Insert error:', insertError);
+          throw insertError;
         }
+        
+        console.log('[SimpleUpload] Successfully uploaded:', file.name);
       }
       
-      setPendingUploads([]);
+      toast.success(`${files.length} file(s) uploaded successfully`);
       refetchOutputs();
-      toast.success(`${pendingUploads.length} output(s) uploaded successfully`);
     } catch (error) {
-      console.error('Upload error:', error);
-      toast.error('Failed to upload outputs');
+      console.error('[SimpleUpload] Upload failed:', error);
+      toast.error('Failed to upload files. Please try again.');
     } finally {
       setUploading(false);
     }
-  };
+  }, [job?.id, identity?.id, refetchOutputs]);
 
   const handleDownloadAll = async () => {
     toast.info(`Downloading ${inputs.length} files...`);
@@ -621,28 +490,6 @@ export default function PublicJobWorkspace() {
     
     toast.success('Downloads complete!');
   };
-
-  // Check which views are already uploaded
-  const uploadedViews = useMemo(() => {
-    const views = new Set<string>();
-    outputs.forEach((output: any) => {
-      const label = output.label?.toLowerCase() || '';
-      if (label.includes('front')) views.add('front');
-      if (label.includes('side')) views.add('side');
-      if (label.includes('back')) views.add('back');
-    });
-    return views;
-  }, [outputs]);
-
-  const pendingViews = useMemo(() => {
-    const views = new Set<string>();
-    pendingUploads.forEach(p => {
-      if (p.view) views.add(p.view);
-    });
-    return views;
-  }, [pendingUploads]);
-
-  const pendingWithViews = pendingUploads.filter(f => f.view !== null);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -801,16 +648,6 @@ export default function PublicJobWorkspace() {
         </div>
       )}
 
-      {/* Stable file input - rendered once outside all conditionals */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept="*/*"
-        onChange={handleFileInputChange}
-        className="hidden"
-        aria-hidden="true"
-      />
 
       {/* Header */}
       <header className="border-b border-border bg-card">
@@ -1021,86 +858,12 @@ export default function PublicJobWorkspace() {
                       <Progress value={uploadProgress} className="h-2" />
                     </div>
 
-                    {/* Drop Zone */}
-                    <div
-                      className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                        isDragOver ? 'border-primary bg-primary/5' : 'border-border'
-                      }`}
-                      onDragEnter={handleDragEnter}
-                      onDragOver={handleDragOver}
-                      onDragLeave={handleDragLeave}
-                      onDrop={handleDrop}
-                    >
-                      <Upload className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
-                      <p className="text-sm font-medium mb-1">Drag & drop files here</p>
-                      <p className="text-xs text-muted-foreground mb-3">or click to browse</p>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        type="button"
-                        onClick={() => {
-                          console.log('[Upload] Browse button clicked, ref:', fileInputRef.current);
-                          fileInputRef.current?.click();
-                        }}
-                      >
-                        <Upload className="h-4 w-4 mr-2" />
-                        Browse Files
-                      </Button>
-                    </div>
-
-                    {/* Pending Uploads */}
-                    {pendingUploads.length > 0 && (
-                      <div className="space-y-3">
-                        <Label className="text-sm font-medium">Pending Uploads ({pendingUploads.length})</Label>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          {pendingUploads.map((pending) => (
-                            <div key={pending.id} className="relative border rounded-lg p-2 space-y-2">
-                              {pending.preview ? (
-                                <img
-                                  src={pending.preview}
-                                  alt={pending.file.name}
-                                  className="w-full aspect-square object-cover rounded"
-                                />
-                              ) : (
-                                <div className="w-full aspect-square bg-muted rounded flex items-center justify-center">
-                                  <FileImage className="h-8 w-8 text-muted-foreground" />
-                                </div>
-                              )}
-                              <p className="text-xs truncate">{pending.file.name}</p>
-                              <Select
-                                value={pending.view || ''}
-                                onValueChange={(v) => updatePendingView(pending.id, v as any)}
-                              >
-                                <SelectTrigger className="h-7 text-xs">
-                                  <SelectValue placeholder="Select view" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="front">Front</SelectItem>
-                                  <SelectItem value="side">Side</SelectItem>
-                                  <SelectItem value="back">Back</SelectItem>
-                                  <SelectItem value="other">Other</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="absolute top-1 right-1 h-6 w-6"
-                                onClick={() => removePendingFile(pending.id)}
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                        <Button
-                          onClick={handleUploadPending}
-                          disabled={uploading || pendingUploads.length === 0}
-                          className="w-full"
-                        >
-                          {uploading ? 'Uploading...' : `Upload ${pendingUploads.length} File${pendingUploads.length !== 1 ? 's' : ''}`}
-                        </Button>
-                      </div>
-                    )}
+                    {/* Simple File Upload */}
+                    <SimpleFileUpload 
+                      onFilesReady={handleSimpleUpload} 
+                      disabled={false}
+                      uploading={uploading}
+                    />
 
                     {/* Existing Outputs */}
                     {outputs.length > 0 && (
@@ -1310,33 +1073,12 @@ export default function PublicJobWorkspace() {
                       <Progress value={uploadProgress} className="h-2" />
                     </div>
 
-                    {/* Drop Zone */}
-                    <div
-                      className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                        isDragOver ? 'border-primary bg-primary/5' : 'border-border'
-                      }`}
-                      onDragEnter={handleDragEnter}
-                      onDragOver={handleDragOver}
-                      onDragLeave={handleDragLeave}
-                      onDrop={handleDrop}
-                    >
-                      <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                      <p className="text-sm text-muted-foreground mb-2">
-                        Drag & drop files here, or click to browse
-                      </p>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        type="button"
-                        onClick={() => {
-                          console.log('[Upload] Browse button clicked, ref:', fileInputRef.current);
-                          fileInputRef.current?.click();
-                        }}
-                      >
-                        <Upload className="h-4 w-4 mr-2" />
-                        Browse Files
-                      </Button>
-                    </div>
+                    {/* Simple File Upload */}
+                    <SimpleFileUpload 
+                      onFilesReady={handleSimpleUpload} 
+                      disabled={false}
+                      uploading={uploading}
+                    />
 
                     {/* Uploaded Files Grid */}
                     {outputs.length > 0 && (
