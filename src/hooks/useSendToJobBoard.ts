@@ -184,7 +184,7 @@ export function useSendToJobBoard() {
               look_id: look.id,
               type: renderType as any,
               file_url: viewData.selectedUrl,
-              source_table: 'face_application_outputs',
+              source_table: 'ai_apply_outputs',
               source_id: viewData.outputId,
               metadata: { view: viewKey },
             })

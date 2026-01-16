@@ -56,11 +56,11 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
 
       if (sourceError) throw sourceError;
 
-      // 3. Fetch all selected outputs for these looks (via jobs)
+      // 3. Fetch all AI Apply jobs for this project
       const { data: jobs, error: jobsError } = await supabase
-        .from('face_application_jobs')
+        .from('ai_apply_jobs')
         .select('id, look_id')
-        .in('look_id', lookIds);
+        .eq('project_id', projectId);
 
       if (jobsError) throw jobsError;
 
@@ -77,18 +77,24 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
 
       const jobIds = jobs?.map(j => j.id) || [];
       
+      // Build job_id -> look_id map
+      const jobToLook: Record<string, string> = {};
+      jobs?.forEach(j => {
+        if (j.look_id) jobToLook[j.id] = j.look_id;
+      });
+      
       let selectedOutputs: Array<{
         id: string;
         job_id: string;
         view: string;
         stored_url: string;
-        look_source_image_id: string;
+        look_id: string;
       }> = [];
 
       if (jobIds.length > 0) {
         const { data: outputs, error: outputsError } = await supabase
-          .from('face_application_outputs')
-          .select('id, job_id, view, stored_url, look_source_image_id')
+          .from('ai_apply_outputs')
+          .select('id, job_id, view, stored_url, look_id')
           .in('job_id', jobIds)
           .eq('is_selected', true)
           .eq('status', 'completed');
@@ -97,11 +103,7 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
         selectedOutputs = outputs || [];
       }
 
-      // Build job_id -> look_id map
-      const jobToLook: Record<string, string> = {};
-      jobs?.forEach(j => {
-        jobToLook[j.id] = j.look_id;
-      });
+      // 5. Build look handoff statuses
 
       // 4. Build look handoff statuses
       const lookStatuses: LookHandoffStatus[] = looksData.map(look => {
@@ -114,9 +116,9 @@ export function useLookHandoffData(projectId: string): UseLookHandoffDataResult 
             si => si.look_id === look.id && normalizeView(si.view) === view
           );
 
-          // Find selected output for this view
+          // Find selected output for this view (ai_apply_outputs has direct look_id)
           const selectedOutput = selectedOutputs.find(
-            o => jobToLook[o.job_id] === look.id && normalizeView(o.view) === view
+            o => (o.look_id === look.id || jobToLook[o.job_id] === look.id) && normalizeView(o.view) === view
           );
 
           const hasSelection = !!selectedOutput?.stored_url;
