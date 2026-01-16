@@ -1,14 +1,15 @@
-// Standard 4-view system for face application
-export const VIEW_TYPES = ['full_front', 'cropped_front', 'back', 'detail'] as const;
+// Standard 3-view system for face application
+export const VIEW_TYPES = ['front', 'back', 'detail'] as const;
 export type ViewType = typeof VIEW_TYPES[number];
 
 export const VIEW_LABELS: Record<string, string> = {
-  full_front: 'Full Front',
-  cropped_front: 'Cropped Front',
   front: 'Front',
   back: 'Back',
-  side: 'Side',
   detail: 'Detail',
+  // Legacy aliases for backwards compatibility
+  full_front: 'Front',
+  cropped_front: 'Front',
+  side: 'Detail',
 };
 
 export interface LookSourceImage {
