@@ -989,6 +989,25 @@ export default function PublicJobWorkspace() {
                   <CardTitle className="text-lg">Actions</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {isPreviewMode && (
+                    <>
+                      <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-sm">
+                        <p className="text-blue-200 font-medium mb-1">Preview Mode</p>
+                        <p className="text-blue-300/80 text-xs">
+                          This job is open. Click "Start Job" to claim it and begin working.
+                        </p>
+                      </div>
+                      <Button 
+                        onClick={() => claimJob.mutate()}
+                        disabled={claimJob.isPending}
+                        className="w-full"
+                      >
+                        <Play className="h-4 w-4 mr-2" />
+                        {claimJob.isPending ? 'Claiming...' : 'Start Job'}
+                      </Button>
+                    </>
+                  )}
+                  
                   {canUpload && (
                     <>
                       <Button 
