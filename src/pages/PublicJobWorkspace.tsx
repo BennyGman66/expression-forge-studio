@@ -12,8 +12,9 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye } from 'lucide-react';
+import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye, RotateCcw } from 'lucide-react';
 import { format } from 'date-fns';
 import { FreelancerNamePrompt } from '@/components/freelancer/FreelancerNamePrompt';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -63,6 +64,7 @@ export default function PublicJobWorkspace() {
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [identitySaving, setIdentitySaving] = useState(false);
+  const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
 
   // Group inputs by view for Foundation Face Replace jobs
   const groupedInputs = useMemo(() => {
@@ -129,6 +131,37 @@ export default function PublicJobWorkspace() {
     onError: (error: any) => {
       queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
       toast.error(error.message || 'Failed to claim job');
+    },
+  });
+
+  // Abandon job mutation - returns job to OPEN status
+  const abandonJob = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase
+        .from('unified_jobs')
+        .update({ 
+          status: 'OPEN',
+          freelancer_identity_id: null,
+          started_at: null
+        })
+        .eq('id', jobId)
+        .eq('freelancer_identity_id', identity?.id)
+        .in('status', ['IN_PROGRESS', 'NEEDS_CHANGES'])
+        .select()
+        .single();
+      
+      if (error) throw error;
+      if (!data) throw new Error('Cannot return this job');
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['public-freelancer-jobs'] });
+      toast.success('Job returned to pool. Another freelancer can now claim it.');
+      navigate('/work');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to return job');
     },
   });
 
@@ -857,6 +890,20 @@ export default function PublicJobWorkspace() {
                     {createSubmission.isPending ? 'Submitting...' : 'Submit for Review'}
                   </Button>
                 )}
+                  
+                {/* Return Job button for claimed jobs */}
+                {(job.status === 'IN_PROGRESS' || job.status === 'NEEDS_CHANGES') && 
+                 job.freelancer_identity_id === identity?.id && (
+                  <Button 
+                    variant="outline"
+                    className="w-full text-muted-foreground hover:text-orange-400 hover:border-orange-400/50"
+                    onClick={() => setShowAbandonConfirm(true)}
+                    disabled={abandonJob.isPending}
+                  >
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    {abandonJob.isPending ? 'Returning...' : 'Return Job to Pool'}
+                  </Button>
+                )}
 
                 {isReadOnly && (
                   <p className="text-sm text-muted-foreground text-center">
@@ -930,6 +977,28 @@ export default function PublicJobWorkspace() {
           </div>
         </div>
       </main>
+
+      {/* Abandon Job Confirmation Dialog */}
+      <AlertDialog open={showAbandonConfirm} onOpenChange={setShowAbandonConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Return this job?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will release the job back to the pool. Any uploaded outputs will remain, 
+              but another freelancer may claim this job.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Working</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => abandonJob.mutate()}
+              className="bg-orange-500 hover:bg-orange-600"
+            >
+              Return Job
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
