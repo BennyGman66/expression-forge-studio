@@ -2966,10 +2966,13 @@ export type Database = {
           batch_id: string
           batch_item_id: string
           created_at: string | null
+          favorite_rank: number | null
           id: string
+          is_favorite: boolean | null
           pose_id: string | null
           pose_url: string | null
           result_url: string | null
+          selected_at: string | null
           shot_type: string | null
           slot: string | null
           status: string
@@ -2979,10 +2982,13 @@ export type Database = {
           batch_id: string
           batch_item_id: string
           created_at?: string | null
+          favorite_rank?: number | null
           id?: string
+          is_favorite?: boolean | null
           pose_id?: string | null
           pose_url?: string | null
           result_url?: string | null
+          selected_at?: string | null
           shot_type?: string | null
           slot?: string | null
           status?: string
@@ -2992,10 +2998,13 @@ export type Database = {
           batch_id?: string
           batch_item_id?: string
           created_at?: string | null
+          favorite_rank?: number | null
           id?: string
+          is_favorite?: boolean | null
           pose_id?: string | null
           pose_url?: string | null
           result_url?: string | null
+          selected_at?: string | null
           shot_type?: string | null
           slot?: string | null
           status?: string
