@@ -559,6 +559,24 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     }
   }, [groupedByLook, buildLookHandoffStatus, sendToJobBoard, projectId, projectName, toast]);
 
+  // Filter groups for "selected only" mode and exclude sent looks
+  // NOTE: This must be before early returns to maintain hook order
+  const displayGroups = useMemo(() => {
+    let groups = groupedByLook;
+    
+    // Filter to show only groups with selections if in selected-only mode
+    if (showSelectedOnly) {
+      groups = groups.filter(g => g.selectedCount > 0);
+    }
+    
+    // Filter out looks that have already been sent to the Job Board
+    groups = groups.filter(g => !sentLookIds.has(g.lookId));
+    
+    return groups;
+  }, [groupedByLook, showSelectedOnly, sentLookIds]);
+
+  const hasNoSelectionsInSelectedMode = showSelectedOnly && stats.selectedViews === 0;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -595,23 +613,6 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
       </Card>
     );
   }
-
-  // Filter groups for "selected only" mode and exclude sent looks
-  const displayGroups = useMemo(() => {
-    let groups = groupedByLook;
-    
-    // Filter to show only groups with selections if in selected-only mode
-    if (showSelectedOnly) {
-      groups = groups.filter(g => g.selectedCount > 0);
-    }
-    
-    // Filter out looks that have already been sent to the Job Board
-    groups = groups.filter(g => !sentLookIds.has(g.lookId));
-    
-    return groups;
-  }, [groupedByLook, showSelectedOnly, sentLookIds]);
-
-  const hasNoSelectionsInSelectedMode = showSelectedOnly && stats.selectedViews === 0;
 
   return (
     <div className="space-y-4">
