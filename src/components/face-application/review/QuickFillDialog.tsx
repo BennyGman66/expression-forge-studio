@@ -620,6 +620,52 @@ export function QuickFillDialog({
         .update({ is_selected: true })
         .eq('id', selectedOutputId);
 
+      // Sync to existing Job Board job if one exists
+      const { data: existingJob } = await supabase
+        .from('unified_jobs')
+        .select('id')
+        .eq('look_id', lookId)
+        .in('status', ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'NEEDS_CHANGES'])
+        .maybeSingle();
+
+      if (existingJob) {
+        const selectedOutput = generatedOutputs.find(o => o.id === selectedOutputId);
+        if (selectedOutput?.stored_url) {
+          // Determine artifact type based on view
+          const viewUpper = normalizedSelectedView.toUpperCase();
+          const artifactType = viewUpper === 'FRONT' ? 'HEAD_RENDER_FRONT' 
+            : viewUpper === 'SIDE' ? 'HEAD_RENDER_SIDE'
+            : viewUpper === 'BACK' ? 'HEAD_RENDER_BACK'
+            : 'HEAD_RENDER_FRONT';
+
+          // Create artifact for the new head render
+          const { data: artifact } = await supabase
+            .from('unified_artifacts')
+            .insert({
+              project_id: projectId,
+              look_id: lookId,
+              type: artifactType,
+              file_url: selectedOutput.stored_url,
+              source_table: 'ai_apply_outputs',
+              source_id: selectedOutputId,
+              metadata: { view: normalizedSelectedView, added_after_handoff: true },
+            })
+            .select()
+            .single();
+
+          if (artifact) {
+            // Link to job as an input
+            await supabase
+              .from('job_inputs')
+              .insert({
+                job_id: existingJob.id,
+                artifact_id: artifact.id,
+                label: `Head render ${normalizedSelectedView} (new)`,
+              });
+          }
+        }
+      }
+
       toast({ title: "Selection saved", description: `${VIEW_LABELS[selectedView] || selectedView} view completed!` });
       onComplete();
       onClose();
