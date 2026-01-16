@@ -228,10 +228,15 @@ export default function PublicJobWorkspace() {
       if (assetError) throw assetError;
 
       // Update job status
-      await supabase
+      const { error: statusError } = await supabase
         .from('unified_jobs')
         .update({ status: 'SUBMITTED' })
         .eq('id', job?.id);
+
+      if (statusError) {
+        console.error('Failed to update job status:', statusError);
+        throw new Error('Failed to update job status');
+      }
 
       return submission;
     },
