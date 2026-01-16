@@ -415,6 +415,15 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
   const totalRuns = queueStats.queued + queueStats.running + queueStats.complete + queueStats.failed;
   const progressPercent = totalRuns > 0 ? ((queueStats.complete + queueStats.failed) / totalRuns) * 100 : 0;
 
+  // Detect abandoned queued runs (queued but nothing running and not actively generating)
+  const hasAbandonedQueue = useMemo(() => {
+    if (!runs || !batchId) return false;
+    const hasQueued = runs.some(r => r.status === 'queued');
+    const hasRunning = runs.some(r => r.status === 'running');
+    // Abandoned if we have queued but nothing running
+    return hasQueued && !hasRunning && !isGenerating;
+  }, [runs, batchId, isGenerating]);
+
   // Estimated outputs calculation
   const selectedLooks = lookRows.filter(l => selectedLookIds.has(l.lookId));
   const readySelectedLooks = selectedLooks.filter(l => l.isReady);
@@ -790,6 +799,67 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     }
   };
 
+  // Resume abandoned queue
+  const handleResumeQueue = async () => {
+    if (!batchId) return;
+
+    shouldStopRef.current = false;
+    setIsGenerating(true);
+
+    try {
+      const existingQueued = queueStats.queued;
+      const existingComplete = queueStats.complete + queueStats.failed;
+
+      // Create pipeline job for tracking
+      const pipelineJobId = await createJob({
+        type: 'REPOSE_GENERATION',
+        title: `Repose Resume: ${existingQueued} remaining`,
+        total: existingQueued + existingComplete,
+        origin_route: `/repose-production/batch/${batchId}?tab=setup`,
+        origin_context: { batchId, model: selectedModel },
+        supports_pause: true,
+      });
+
+      // Pre-populate progress with already completed
+      if (existingComplete > 0) {
+        await updateProgress(pipelineJobId, { doneDelta: existingComplete });
+      }
+
+      pipelineJobIdRef.current = pipelineJobId;
+
+      // Update batch status back to RUNNING
+      updateStatus.mutate({ batchId, status: 'RUNNING' });
+
+      toast.success(`Resuming ${existingQueued} queued runs`);
+
+      // Resume processing
+      await processQueue(pipelineJobId);
+
+    } catch (error) {
+      console.error('Resume error:', error);
+      toast.error(`Resume failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setIsGenerating(false);
+    }
+  };
+
+  // Clear abandoned queue
+  const handleClearAbandonedQueue = async () => {
+    if (!batchId) return;
+
+    const { error } = await supabase
+      .from('repose_runs')
+      .delete()
+      .eq('batch_id', batchId)
+      .eq('status', 'queued');
+
+    if (error) {
+      toast.error('Failed to clear queue');
+    } else {
+      toast.success('Cleared abandoned queue');
+      refetchRuns();
+    }
+  };
+
   // Inspect look
   const inspectedLook = lookRows.find(l => l.lookId === inspectedLookId);
   const inspectedLookRuns = runs?.filter(r => r.look_id === inspectedLookId) || [];
@@ -907,8 +977,37 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
           </CardContent>
         </Card>
 
+        {/* Abandoned Queue Alert */}
+        {hasAbandonedQueue && !isGenerating && (
+          <Card className="border-amber-500/30 bg-amber-500/5">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600" />
+                  <div>
+                    <p className="font-medium text-amber-800 dark:text-amber-400">Abandoned Queue Detected</p>
+                    <p className="text-sm text-amber-700/80 dark:text-amber-500/80">
+                      {queueStats.queued} runs were queued but never completed
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={handleClearAbandonedQueue}>
+                    <XCircle className="w-4 h-4 mr-1.5" />
+                    Clear Queue
+                  </Button>
+                  <Button size="sm" onClick={handleResumeQueue} className="gap-1.5">
+                    <Play className="w-4 h-4" />
+                    Resume ({queueStats.queued})
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Live Progress (when running) */}
-        {(queueStats.running > 0 || queueStats.queued > 0) && (
+        {(queueStats.running > 0 || (queueStats.queued > 0 && isGenerating)) && (
           <Card className="border-primary/30 bg-primary/5">
             <CardContent className="py-4">
               <div className="flex items-center justify-between mb-2">
