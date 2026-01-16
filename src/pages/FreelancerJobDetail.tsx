@@ -209,24 +209,27 @@ export default function FreelancerJobDetail() {
   }, []);
 
   const addFilesToPending = (files: File[]) => {
-    const imageFiles = files.filter(file => {
-      const name = file.name.toLowerCase();
-      return file.type.startsWith('image/') || 
-        name.endsWith('.psd') || 
-        name.endsWith('.tiff') ||
-        name.endsWith('.tif') ||
-        name.endsWith('.ai') ||
-        name.endsWith('.pdf') ||
-        name.endsWith('.png') ||
-        name.endsWith('.jpg') ||
-        name.endsWith('.jpeg');
+    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
+    
+    const validFiles = files.filter(file => {
+      if (file.size > MAX_FILE_SIZE) {
+        toast.error(`${file.name} is too large (max 100MB)`);
+        return false;
+      }
+      return true;
     });
     
-    const newUploads: PendingUpload[] = imageFiles.map(file => ({
+    // Only show preview for actual image types that browsers can display
+    const canPreview = (file: File) => 
+      file.type.startsWith('image/') && 
+      !file.name.toLowerCase().endsWith('.psd') &&
+      !file.name.toLowerCase().endsWith('.ai');
+    
+    const newUploads: PendingUpload[] = validFiles.map(file => ({
       id: crypto.randomUUID(),
       file,
       view: null,
-      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+      preview: canPreview(file) ? URL.createObjectURL(file) : ''
     }));
     
     setPendingUploads(prev => [...prev, ...newUploads]);
@@ -767,7 +770,7 @@ export default function FreelancerJobDetail() {
                     <Input
                       type="file"
                       multiple
-                      accept="image/*,.psd,.ai,.pdf,.tiff"
+                      accept="*/*"
                       onChange={handleFileInputChange}
                       disabled={uploading}
                       className="hidden"
