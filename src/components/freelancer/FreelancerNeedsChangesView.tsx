@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { fixBrokenStorageUrl } from '@/lib/fileUtils';
 
 interface JobInput {
   id: string;
@@ -266,7 +267,7 @@ export function FreelancerNeedsChangesView({
     );
   }
 
-  const selectedImageUrl = selectedAsset?.file_url || '';
+  const selectedImageUrl = fixBrokenStorageUrl(selectedAsset?.file_url);
   const replacement = selectedAsset ? replacements.get(selectedAsset.id) : null;
   const displayUrl = replacement?.preview || selectedImageUrl;
   const selectedAssetCommentCount = selectedAsset ? getAssetCommentCount(selectedAsset.id) : 0;
@@ -303,7 +304,7 @@ export function FreelancerNeedsChangesView({
                     {/* Thumbnail - 3:4 aspect ratio for full image visibility */}
                     <div className="relative aspect-[3/4] bg-muted">
                       <img
-                        src={assetReplacement?.preview || asset.file_url || ''}
+                        src={assetReplacement?.preview || fixBrokenStorageUrl(asset.file_url)}
                         alt={asset.label || 'Asset'}
                         className="w-full h-full object-contain"
                       />
@@ -699,7 +700,7 @@ export function FreelancerNeedsChangesView({
                       <div key={input.id} className="space-y-1">
                         <div className="aspect-[3/4] bg-muted rounded-md overflow-hidden border border-border">
                           <img
-                            src={input.artifact?.preview_url || input.artifact?.file_url || ''}
+                            src={fixBrokenStorageUrl(input.artifact?.preview_url || input.artifact?.file_url)}
                             alt={input.label || 'Reference'}
                             className="w-full h-full object-contain"
                           />

@@ -14,6 +14,7 @@ import { CheckCircle, AlertTriangle, Clock, Upload, X, FileImage } from 'lucide-
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { fixBrokenStorageUrl } from '@/lib/fileUtils';
 
 interface SubmissionReviewViewerProps {
   submissionId: string;
@@ -146,7 +147,7 @@ export function SubmissionReviewViewer({
     );
   }
 
-  const selectedImageUrl = selectedAsset?.file_url || '';
+  const selectedImageUrl = fixBrokenStorageUrl(selectedAsset?.file_url);
   const replacement = selectedAsset ? replacements.get(selectedAsset.id) : null;
   const displayUrl = replacement?.preview || selectedImageUrl;
 
@@ -181,7 +182,7 @@ export function SubmissionReviewViewer({
                   {/* Thumbnail */}
                   <div className="relative aspect-square bg-muted">
                     <img
-                      src={assetReplacement?.preview || asset.file_url || ''}
+                      src={assetReplacement?.preview || fixBrokenStorageUrl(asset.file_url)}
                       alt={asset.label || 'Asset'}
                       className="w-full h-full object-cover"
                     />
