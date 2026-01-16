@@ -6,6 +6,7 @@ import { LooksUploadTab } from "@/components/face-application/LooksUploadTab";
 import { HeadCropTab } from "@/components/face-application/HeadCropTab";
 import { FaceMatchTab } from "@/components/face-application/FaceMatchTab";
 import { GenerateTabEnhanced } from "@/components/face-application/generate";
+import { ReviewSelectTab } from "@/components/face-application/ReviewSelectTab";
 import { SendToJobBoardTab } from "@/components/face-application/SendToJobBoardTab";
 import { FaceAppProjectsGrid } from "@/components/face-application/FaceAppProjectsGrid";
 import { useFaceApplicationProjects } from "@/hooks/useFaceApplicationProjects";
@@ -15,12 +16,13 @@ import { WorkflowFilterBar } from "@/components/face-application/WorkflowFilterB
 import { TabBadge } from "@/components/face-application/TabBadge";
 import { TAB_NAMES, TAB_LABELS, type TabName } from "@/types/workflow-state";
 
-// Tab configuration - streamlined workflow
+// Tab configuration - with Review & Select
 const TABS: { value: TabName; label: string }[] = [
   { value: 'upload', label: 'Looks Upload' },
   { value: 'crop', label: 'Head Crop' },
   { value: 'match', label: 'Face Match' },
   { value: 'generate', label: 'Generate' },
+  { value: 'review', label: 'Review & Select' },
   { value: 'handoff', label: 'Send to Job Board' },
 ];
 
@@ -227,6 +229,13 @@ function FaceApplicationWorkspace({
               lookId={selectedLookId}
               talentId={selectedTalentId}
               selectedLookIds={selectedLookIds}
+              onContinue={() => setActiveTab("review")}
+            />
+          </TabsContent>
+
+          <TabsContent value="review" className="mt-0">
+            <ReviewSelectTab
+              projectId={projectId}
               onContinue={() => setActiveTab("handoff")}
             />
           </TabsContent>
