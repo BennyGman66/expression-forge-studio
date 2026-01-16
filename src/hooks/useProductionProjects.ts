@@ -147,6 +147,7 @@ export function useApprovedProjectLooks(projectId: string | null) {
           id,
           name,
           project_id,
+          product_type,
           digital_talent_id,
           digital_talent:digital_talents(id, name, front_face_url)
         `)
@@ -181,12 +182,36 @@ export function useApprovedProjectLooks(projectId: string | null) {
           id: l.id,
           look_name: l.name,
           project_id: l.project_id,
+          product_type: l.product_type as 'top' | 'trousers' | null,
           selected_talent: l.digital_talent,
           job_id: jobMap.get(l.id)?.id,
           job_outputs: jobMap.get(l.id)?.job_outputs,
         }));
     },
     enabled: !!projectId,
+  });
+}
+
+// Update look product type (Top/Trousers)
+export function useUpdateLookProductType() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ lookId, productType }: { 
+      lookId: string; 
+      productType: 'top' | 'trousers' 
+    }) => {
+      const { error } = await supabase
+        .from("talent_looks")
+        .update({ product_type: productType })
+        .eq("id", lookId);
+        
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["approved-project-looks"] });
+      queryClient.invalidateQueries({ queryKey: ["batch-look-details"] });
+    },
   });
 }
 
