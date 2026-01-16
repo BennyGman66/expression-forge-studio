@@ -246,6 +246,19 @@ serve(async (req) => {
       );
     }
 
+    // RESUME LOGIC: Reset any outputs stuck in 'generating' for over 5 minutes
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: stalledOutputs } = await supabase
+      .from('ai_apply_outputs')
+      .update({ status: 'pending' })
+      .eq('status', 'generating')
+      .lt('created_at', fiveMinutesAgo)
+      .select('id');
+    
+    if (stalledOutputs && stalledOutputs.length > 0) {
+      console.log(`[AI Apply] Reset ${stalledOutputs.length} stalled outputs to 'pending'`);
+    }
+
     // Process each view
     for (const currentView of viewsToProcess) {
       console.log(`[AI Apply] Processing view: ${currentView}`);
@@ -310,6 +323,19 @@ serve(async (req) => {
         }
       }
 
+      // Check for existing pending outputs that can be resumed
+      const { data: pendingToResume } = await supabase
+        .from('ai_apply_outputs')
+        .select('id')
+        .eq('job_id', jobId)
+        .eq('view', currentView)
+        .eq('status', 'pending');
+      
+      const pendingCount = pendingToResume?.length || 0;
+      if (pendingCount > 0) {
+        console.log(`[AI Apply] Found ${pendingCount} pending outputs to resume for ${currentView}`);
+      }
+
       // Get current attempt count for this view
       const { data: existingOutputs } = await supabase
         .from('ai_apply_outputs')
@@ -321,8 +347,11 @@ serve(async (req) => {
 
       const startIndex = existingOutputs?.[0]?.attempt_index ?? -1;
 
-      // Create output records
-      for (let i = 0; i < attemptsToCreate; i++) {
+      // Only create NEW outputs if we need more than what's already pending
+      const newOutputsNeeded = Math.max(0, attemptsToCreate - pendingCount);
+      
+      // Create output records with 'pending' status (not 'generating')
+      for (let i = 0; i < newOutputsNeeded; i++) {
         const attemptIndex = startIndex + 1 + i;
         
         await supabase.from('ai_apply_outputs').insert({
@@ -334,7 +363,7 @@ serve(async (req) => {
           head_image_url: talentPortraitUrl,  // Store talent portrait as reference
           body_image_id: bodyImage.id,
           body_image_url: cropImageUrl,        // Store the crop as the body reference
-          status: 'generating',
+          status: 'pending',  // Start as pending, mark generating only when actively processing
           prompt_version: 'v4-3-image-dynamic',
         });
       }
@@ -357,15 +386,21 @@ serve(async (req) => {
       // This only needs to be done once per view, not per attempt
       const outfitDescription = await generateOutfitDescription(cropImageUrl, supabaseUrl, supabaseKey);
 
-      // Process each pending output for this view
-      const { data: pendingOutputs } = await supabase
+      // Process pending outputs for this view (including newly reset ones)
+      const { data: outputsToProcess } = await supabase
         .from('ai_apply_outputs')
         .select('*')
         .eq('job_id', jobId)
         .eq('view', currentView)
-        .eq('status', 'generating');
+        .in('status', ['pending', 'generating'])  // Process both pending and generating (for resume)
+        .order('attempt_index', { ascending: true });
 
-      for (const output of pendingOutputs || []) {
+      for (const output of outputsToProcess || []) {
+        // Mark as 'generating' right before we start processing
+        await supabase
+          .from('ai_apply_outputs')
+          .update({ status: 'generating' })
+          .eq('id', output.id);
         try {
           // Build the prompt with dynamic outfit description
           const viewPrompt = VIEW_PROMPTS[currentView] || VIEW_PROMPTS.front || '';
