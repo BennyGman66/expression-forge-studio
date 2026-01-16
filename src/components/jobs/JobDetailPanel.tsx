@@ -27,7 +27,10 @@ import {
   useAssignJob,
   useAddJobNote,
   useResetJob,
+  useAddJobOutput,
 } from "@/hooks/useJobs";
+import { supabase } from "@/integrations/supabase/client";
+import { Input } from "@/components/ui/input";
 import { useFreelancers } from "@/hooks/useUsers";
 import { useReposeBatchByJobId, useCreateReposeBatch } from "@/hooks/useReposeBatches";
 import { JobStatus } from "@/types/jobs";
@@ -41,6 +44,8 @@ import {
   Upload,
   Sparkles,
   RotateCcw,
+  Plus,
+  CheckCircle,
 } from "lucide-react";
 import { format } from "date-fns";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -69,6 +74,7 @@ const typeLabels: Record<string, string> = {
 export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
   const navigate = useNavigate();
   const [newNote, setNewNote] = useState("");
+  const [uploadingFiles, setUploadingFiles] = useState(false);
 
   const { data: job, isLoading: jobLoading } = useJob(jobId);
   const { data: inputs } = useJobInputs(jobId);
@@ -82,6 +88,48 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
   const addNote = useAddJobNote();
   const createBatch = useCreateReposeBatch();
   const resetJob = useResetJob();
+  const addOutput = useAddJobOutput();
+
+  const handleAdminUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || !jobId || !job) return;
+
+    setUploadingFiles(true);
+    try {
+      for (const file of Array.from(files)) {
+        // Sanitize filename
+        const safeName = file.name.replace(/[#%&{}\\<>*?/$!'":@+`|=]/g, '_').replace(/\s+/g, '_');
+        const fileName = `admin-uploads/${jobId}/${Date.now()}-${safeName}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('images')
+          .upload(fileName, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('images')
+          .getPublicUrl(fileName);
+
+        await addOutput.mutateAsync({
+          jobId,
+          fileUrl: publicUrl,
+          label: `Admin upload: ${file.name}`,
+        });
+      }
+    } catch (error) {
+      console.error('Admin upload error:', error);
+    } finally {
+      setUploadingFiles(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleMarkAsSubmitted = () => {
+    if (jobId && outputs && outputs.length > 0) {
+      updateStatus.mutate({ jobId, status: 'SUBMITTED' });
+    }
+  };
 
   const handleResetToOpen = () => {
     if (jobId) {
@@ -332,6 +380,38 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
                 ) : (
                   <p className="text-sm text-muted-foreground">No outputs uploaded yet</p>
                 )}
+
+                {/* Admin Upload Section */}
+                <div className="mt-4 space-y-3">
+                  <div className="border border-dashed border-muted-foreground/30 rounded-lg p-4">
+                    <label className="flex flex-col items-center cursor-pointer">
+                      <Plus className="h-6 w-6 text-muted-foreground mb-2" />
+                      <span className="text-sm text-muted-foreground text-center">
+                        {uploadingFiles ? 'Uploading...' : 'Upload outputs on behalf of user'}
+                      </span>
+                      <Input
+                        type="file"
+                        multiple
+                        accept="image/*,.psd,.tif,.tiff"
+                        onChange={handleAdminUpload}
+                        disabled={uploadingFiles}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Mark as Submitted Button */}
+                  {outputs && outputs.length > 0 && job?.status !== 'SUBMITTED' && job?.status !== 'APPROVED' && (
+                    <Button
+                      onClick={handleMarkAsSubmitted}
+                      disabled={updateStatus.isPending}
+                      className="w-full gap-2 bg-cyan-600 hover:bg-cyan-700"
+                    >
+                      <CheckCircle className="h-4 w-4" />
+                      Mark as Ready for Review
+                    </Button>
+                  )}
+                </div>
 
                 {/* Create Repose Batch button - only show for APPROVED jobs with outputs */}
                 {job.status === 'APPROVED' && outputs && outputs.length > 0 && (
