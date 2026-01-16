@@ -26,7 +26,8 @@ import {
   ChevronDown,
   ChevronUp,
   Settings2,
-  Sparkles
+  Sparkles,
+  Image as ImageIcon
 } from "lucide-react";
 import { useReposeBatch, useReposeBatchItems, useReposeOutputs, useUpdateReposeBatchConfig, useUpdateReposeBatchStatus } from "@/hooks/useReposeBatches";
 import { useUpdateLookProductType } from "@/hooks/useProductionProjects";
@@ -34,6 +35,7 @@ import { useBatchReposeRuns, useReposeRunCounts, useLastReposeRuns, useCreateRep
 import { usePipelineJobs } from "@/hooks/usePipelineJobs";
 import { supabase } from "@/integrations/supabase/client";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
+import { OptimizedImage } from "@/components/shared/OptimizedImage";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReposeConfig } from "@/types/repose";
@@ -67,6 +69,7 @@ interface LookRow {
   lastRunStatus: string | null;
   lastRunAt: string | null;
   currentStatus: 'queued' | 'running' | null;
+  thumbnailUrl: string | null;
 }
 
 export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
@@ -152,6 +155,26 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     enabled: lookIds.length > 0,
   });
 
+  // Fetch detail images for thumbnails
+  const { data: detailImages } = useQuery({
+    queryKey: ["batch-look-detail-images", lookIds],
+    queryFn: async () => {
+      if (lookIds.length === 0) return {};
+      const { data } = await supabase
+        .from("look_source_images")
+        .select("look_id, source_url")
+        .in("look_id", lookIds)
+        .eq("view", "detail");
+      
+      const map: Record<string, string> = {};
+      data?.forEach(img => {
+        if (img.look_id) map[img.look_id] = img.source_url;
+      });
+      return map;
+    },
+    enabled: lookIds.length > 0,
+  });
+
   // Get run counts and last runs
   const { data: runCounts } = useReposeRunCounts(lookIds, selectedBrandId);
   const { data: lastRuns } = useLastReposeRuns(lookIds, selectedBrandId);
@@ -183,6 +206,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
           lastRunStatus: lastRun?.status || null,
           lastRunAt: lastRun?.completed_at || null,
           currentStatus: activeRun?.status as 'queued' | 'running' | null || null,
+          thumbnailUrl: detailImages?.[lookId] || null,
         });
       }
       grouped.get(lookId)!.views.push({
@@ -197,7 +221,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     });
     
     return Array.from(grouped.values()).sort((a, b) => a.lookName.localeCompare(b.lookName));
-  }, [batchItems, lookDetails, outputLookMap, runCounts, lastRuns, runs]);
+  }, [batchItems, lookDetails, outputLookMap, runCounts, lastRuns, runs, detailImages]);
 
   // Load clay pose counts per brand
   useEffect(() => {
@@ -828,6 +852,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
                         onCheckedChange={(checked) => checked ? selectAll() : clearSelection()}
                       />
                     </TableHead>
+                    <TableHead className="w-14"></TableHead>
                     <TableHead>Look / SKU</TableHead>
                     <TableHead className="w-32">Product Type</TableHead>
                     <TableHead className="w-24 text-center">Rendered</TableHead>
@@ -851,6 +876,22 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
                           checked={selectedLookIds.has(look.lookId)}
                           onCheckedChange={() => toggleLook(look.lookId)}
                         />
+                      </TableCell>
+                      <TableCell className="py-1.5">
+                        <div className="w-10 h-10 rounded overflow-hidden bg-muted">
+                          {look.thumbnailUrl ? (
+                            <OptimizedImage
+                              src={look.thumbnailUrl}
+                              tier="tiny"
+                              alt={look.lookName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div>
