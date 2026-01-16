@@ -611,7 +611,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
       throw new Error('No pose library found for brand');
     }
 
-    // Get approved poses with clay image URLs
+    // Get usable poses with clay image URLs (approved or pending)
     const { data: poses } = await supabase
       .from('library_poses')
       .select(`
@@ -621,14 +621,14 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
         clay_images (id, stored_url)
       `)
       .eq('library_id', library.id)
-      .eq('curation_status', 'approved')
+      .in('curation_status', ['approved', 'pending'])
       .not('clay_images', 'is', null);
 
     if (!poses?.length) {
-      throw new Error('No approved poses found in library');
+      throw new Error('No usable poses found in library');
     }
 
-    console.log(`[processReposeRun] Found ${poses.length} approved poses`);
+    console.log(`[processReposeRun] Found ${poses.length} usable poses`);
 
     // Create output records for each batch item
     const outputsToCreate: Array<{
