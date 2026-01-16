@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff, RefreshCw, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { OptimizedImage } from '@/components/shared/OptimizedImage';
 
@@ -43,66 +43,122 @@ const VIEW_LABELS: Record<string, string> = {
   detail: 'Detail',
 };
 
+// Helper to chunk an array into smaller arrays
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
 export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps) {
   const [outputs, setOutputs] = useState<OutputItem[]>([]);
   const [looks, setLooks] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [expandedLooks, setExpandedLooks] = useState<Set<string>>(new Set());
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [expandedUnselectedViews, setExpandedUnselectedViews] = useState<Set<string>>(new Set());
 
-  // Fetch outputs and look names
+  // Fetch outputs and look names with chunked queries to avoid size limits
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
+      setFetchError(null);
       
-      // Get all jobs for this project
-      const { data: jobs } = await supabase
-        .from('ai_apply_jobs')
-        .select('id, look_id')
-        .eq('project_id', projectId);
+      try {
+        // Get all jobs for this project
+        const { data: jobs, error: jobsError } = await supabase
+          .from('ai_apply_jobs')
+          .select('id, look_id')
+          .eq('project_id', projectId);
 
-      if (!jobs || jobs.length === 0) {
-        setLoading(false);
-        return;
-      }
+        if (jobsError) {
+          console.error('Error fetching jobs:', jobsError);
+          setFetchError(`Failed to load jobs: ${jobsError.message}`);
+          setLoading(false);
+          return;
+        }
 
-      const jobIds = jobs.map(j => j.id);
-      const lookIds = [...new Set(jobs.map(j => j.look_id).filter(Boolean))];
+        if (!jobs || jobs.length === 0) {
+          setLoading(false);
+          return;
+        }
 
-      // Get outputs
-      const { data: outputData } = await supabase
-        .from('ai_apply_outputs')
-        .select('*')
-        .in('job_id', jobIds)
-        .eq('status', 'completed')
-        .not('stored_url', 'is', null)
-        .order('look_id')
-        .order('view')
-        .order('attempt_index');
+        const jobIds = jobs.map(j => j.id);
+        const lookIds = [...new Set(jobs.map(j => j.look_id).filter(Boolean))];
 
-      // Get look names
-      const { data: lookData } = await supabase
-        .from('talent_looks')
-        .select('id, name, look_code')
-        .in('id', lookIds as string[]);
+        // Fetch outputs in chunks to avoid query size limits
+        const CHUNK_SIZE = 50;
+        const jobIdChunks = chunkArray(jobIds, CHUNK_SIZE);
+        
+        const allOutputs: OutputItem[] = [];
+        const outputIds = new Set<string>();
+        
+        for (const chunk of jobIdChunks) {
+          const { data: chunkData, error: chunkError } = await supabase
+            .from('ai_apply_outputs')
+            .select('*')
+            .in('job_id', chunk)
+            .eq('status', 'completed')
+            .not('stored_url', 'is', null);
+          
+          if (chunkError) {
+            console.error('Error fetching output chunk:', chunkError);
+            continue; // Continue with other chunks even if one fails
+          }
+          
+          if (chunkData) {
+            for (const output of chunkData) {
+              // Deduplicate in case of overlapping results
+              if (!outputIds.has(output.id)) {
+                outputIds.add(output.id);
+                allOutputs.push(output as OutputItem);
+              }
+            }
+          }
+        }
 
-      const lookMap: Record<string, string> = {};
-      lookData?.forEach(l => {
-        lookMap[l.id] = l.look_code || l.name || l.id.slice(0, 8);
-      });
+        // Sort outputs after fetching all chunks
+        allOutputs.sort((a, b) => {
+          if (a.look_id !== b.look_id) return (a.look_id || '').localeCompare(b.look_id || '');
+          if (a.view !== b.view) return a.view.localeCompare(b.view);
+          return a.attempt_index - b.attempt_index;
+        });
 
-      setOutputs(outputData || []);
-      setLooks(lookMap);
-      
-      // Auto-expand all looks initially
-      setExpandedLooks(new Set(lookIds as string[]));
-      
-      // Auto-enable "selected only" if there are selections
-      const hasSelections = outputData?.some(o => o.is_selected);
-      if (hasSelections) {
-        setShowSelectedOnly(true);
+        // Get look names (also chunk if many looks)
+        const lookIdChunks = chunkArray(lookIds as string[], CHUNK_SIZE);
+        const lookMap: Record<string, string> = {};
+        
+        for (const chunk of lookIdChunks) {
+          const { data: lookData } = await supabase
+            .from('talent_looks')
+            .select('id, name, look_code')
+            .in('id', chunk);
+          
+          lookData?.forEach(l => {
+            lookMap[l.id] = l.look_code || l.name || l.id.slice(0, 8);
+          });
+        }
+
+        setOutputs(allOutputs);
+        setLooks(lookMap);
+        
+        // Auto-expand all looks initially
+        setExpandedLooks(new Set(lookIds as string[]));
+        
+        // Auto-enable "selected only" if there are selections
+        const hasSelections = allOutputs.some(o => o.is_selected);
+        if (hasSelections) {
+          setShowSelectedOnly(true);
+        }
+        
+        console.log(`Loaded ${allOutputs.length} outputs from ${jobIds.length} jobs (${jobIdChunks.length} chunks)`);
+      } catch (err) {
+        console.error('Unexpected error in fetchData:', err);
+        setFetchError(`Unexpected error: ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
       
       setLoading(false);
@@ -269,11 +325,39 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     });
   };
 
+  // Refetch function for refresh button
+  const refetch = () => {
+    setOutputs([]);
+    setLooks({});
+    setFetchError(null);
+    setLoading(true);
+    // Trigger re-fetch by updating a dependency (we'll use a workaround by resetting state)
+    // The useEffect will re-run when loading changes back from the component remount
+    // For now, just reload the effect manually
+    window.location.reload(); // Simple approach; can be improved with a refetch key
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <Card className="border-destructive">
+        <CardContent className="py-8 text-center space-y-4">
+          <AlertCircle className="h-8 w-8 text-destructive mx-auto" />
+          <p className="text-destructive font-medium">Failed to load outputs</p>
+          <p className="text-sm text-muted-foreground">{fetchError}</p>
+          <Button variant="outline" onClick={refetch} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
