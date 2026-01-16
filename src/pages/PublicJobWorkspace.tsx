@@ -435,6 +435,46 @@ export default function PublicJobWorkspace() {
     setIsDragOver(false);
   }, []);
 
+  const addFilesToPending = useCallback((files: File[]) => {
+    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
+    
+    console.log('[Upload] addFilesToPending called with', files.length, 'files');
+    
+    const validFiles = files.filter(file => {
+      if (file.size > MAX_FILE_SIZE) {
+        toast.error(`${file.name} is too large (max 100MB)`);
+        return false;
+      }
+      return true;
+    });
+    
+    console.log('[Upload] Valid files:', validFiles.length);
+    
+    // Only show preview for actual image types that browsers can display
+    const canPreview = (file: File) => 
+      file.type.startsWith('image/') && 
+      !file.name.toLowerCase().endsWith('.psd') &&
+      !file.name.toLowerCase().endsWith('.ai');
+    
+    const newUploads: PendingUpload[] = validFiles.map(file => ({
+      id: crypto.randomUUID(),
+      file,
+      view: null,
+      preview: canPreview(file) ? URL.createObjectURL(file) : ''
+    }));
+    
+    console.log('[Upload] Created pending uploads:', newUploads.length);
+    
+    setPendingUploads(prev => {
+      console.log('[Upload] Current pending:', prev.length, 'Adding:', newUploads.length);
+      return [...prev, ...newUploads];
+    });
+    
+    if (newUploads.length > 0) {
+      toast.success(`${newUploads.length} file(s) ready to upload`);
+    }
+  }, []);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -472,38 +512,16 @@ export default function PublicJobWorkspace() {
     }
     
     addFilesToPending(files);
-  }, []);
-
-  const addFilesToPending = (files: File[]) => {
-    const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB per file
-    
-    const validFiles = files.filter(file => {
-      if (file.size > MAX_FILE_SIZE) {
-        toast.error(`${file.name} is too large (max 100MB)`);
-        return false;
-      }
-      return true;
-    });
-    
-    // Only show preview for actual image types that browsers can display
-    const canPreview = (file: File) => 
-      file.type.startsWith('image/') && 
-      !file.name.toLowerCase().endsWith('.psd') &&
-      !file.name.toLowerCase().endsWith('.ai');
-    
-    const newUploads: PendingUpload[] = validFiles.map(file => ({
-      id: crypto.randomUUID(),
-      file,
-      view: null,
-      preview: canPreview(file) ? URL.createObjectURL(file) : ''
-    }));
-    
-    setPendingUploads(prev => [...prev, ...newUploads]);
-  };
+  }, [addFilesToPending]);
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('[Upload] File input change triggered');
     const files = e.target.files;
-    if (!files?.length) return;
+    console.log('[Upload] Files selected:', files?.length, files ? Array.from(files).map(f => f.name) : 'none');
+    if (!files?.length) {
+      console.log('[Upload] No files to add');
+      return;
+    }
     addFilesToPending(Array.from(files));
     e.target.value = '';
   };
