@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { HubHeader } from "@/components/layout/HubHeader";
 import { Button } from "@/components/ui/button";
@@ -76,6 +78,7 @@ const reviewableStatuses: JobStatus[] = ["IN_PROGRESS", "SUBMITTED", "NEEDS_CHAN
 
 export default function JobBoard() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [reviewJobId, setReviewJobId] = useState<string | null>(null);
@@ -97,6 +100,28 @@ export default function JobBoard() {
       setGroupFilter(groupParam);
     }
   }, [searchParams]);
+
+  // Real-time subscription for job updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('unified-jobs-realtime-admin')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'unified_jobs'
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['unified-jobs'] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   // Clear group filter handler
   const clearGroupFilter = () => {
