@@ -23,7 +23,7 @@ import { JOB_TYPE_CONFIG } from '@/lib/jobTypes';
 interface PendingUpload {
   id: string;
   file: File;
-  view: 'front' | 'side' | 'back' | null;
+  view: 'front' | 'side' | 'back' | 'other' | null;
   preview: string;
 }
 
@@ -321,7 +321,7 @@ export default function PublicJobWorkspace() {
     e.target.value = '';
   };
 
-  const updatePendingView = (fileId: string, view: 'front' | 'side' | 'back') => {
+  const updatePendingView = (fileId: string, view: 'front' | 'side' | 'back' | 'other' | null) => {
     setPendingUploads(prev => prev.map(f => 
       f.id === fileId ? { ...f, view } : f
     ));
@@ -338,16 +338,18 @@ export default function PublicJobWorkspace() {
   };
 
   const handleUploadPending = async () => {
-    const filesToUpload = pendingUploads.filter(f => f.view !== null);
-    if (filesToUpload.length === 0) {
-      toast.error('Please assign a view (Front/Side/Back) to each file');
+    if (pendingUploads.length === 0) {
+      toast.error('No files to upload');
       return;
     }
 
     setUploading(true);
     try {
-      for (const pending of filesToUpload) {
-        const fileName = `public/${job?.id}/${Date.now()}-${pending.view}-${pending.file.name}`;
+      for (const pending of pendingUploads) {
+        const viewLabel = pending.view 
+          ? `${pending.view.charAt(0).toUpperCase()}${pending.view.slice(1)} View - `
+          : '';
+        const fileName = `public/${job?.id}/${Date.now()}-${pending.view || 'output'}-${pending.file.name}`;
         const { error: uploadError } = await supabase.storage
           .from('images')
           .upload(fileName, pending.file);
@@ -361,7 +363,7 @@ export default function PublicJobWorkspace() {
         await supabase.from('job_outputs').insert({
           job_id: job?.id,
           file_url: publicUrl,
-          label: `${pending.view?.charAt(0).toUpperCase()}${pending.view?.slice(1)} View - ${pending.file.name}`,
+          label: `${viewLabel}${pending.file.name}`,
           freelancer_identity_id: identity?.id,
         });
 
@@ -370,9 +372,9 @@ export default function PublicJobWorkspace() {
         }
       }
       
-      setPendingUploads(prev => prev.filter(f => f.view === null));
+      setPendingUploads([]);
       refetchOutputs();
-      toast.success(`${filesToUpload.length} output(s) uploaded successfully`);
+      toast.success(`${pendingUploads.length} output(s) uploaded successfully`);
     } catch (error) {
       console.error('Upload error:', error);
       toast.error('Failed to upload outputs');
@@ -793,7 +795,7 @@ export default function PublicJobWorkspace() {
                   {/* Pending Uploads */}
                   {pendingUploads.length > 0 && (
                     <div className="space-y-3">
-                      <Label>Assign Views to Files</Label>
+                      <Label>Files to Upload <span className="text-muted-foreground font-normal">(view optional)</span></Label>
                       {pendingUploads.map((pending) => (
                         <div key={pending.id} className="flex items-center gap-3 p-2 border rounded">
                           {pending.preview ? (
@@ -808,21 +810,22 @@ export default function PublicJobWorkspace() {
                           </div>
                           <Select
                             value={pending.view || ''}
-                            onValueChange={(v) => updatePendingView(pending.id, v as 'front' | 'side' | 'back')}
+                            onValueChange={(v) => updatePendingView(pending.id, v === '' ? null : v as 'front' | 'side' | 'back' | 'other')}
                           >
                             <SelectTrigger className="w-28">
                               <SelectValue placeholder="View" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="front" disabled={uploadedViews.has('front') || (pendingViews.has('front') && pending.view !== 'front')}>
-                                Front
+                              <SelectItem value="front">
+                                Front {uploadedViews.has('front') && <span className="text-muted-foreground">(exists)</span>}
                               </SelectItem>
-                              <SelectItem value="side" disabled={uploadedViews.has('side') || (pendingViews.has('side') && pending.view !== 'side')}>
-                                Side
+                              <SelectItem value="side">
+                                Side {uploadedViews.has('side') && <span className="text-muted-foreground">(exists)</span>}
                               </SelectItem>
-                              <SelectItem value="back" disabled={uploadedViews.has('back') || (pendingViews.has('back') && pending.view !== 'back')}>
-                                Back
+                              <SelectItem value="back">
+                                Back {uploadedViews.has('back') && <span className="text-muted-foreground">(exists)</span>}
                               </SelectItem>
+                              <SelectItem value="other">Other</SelectItem>
                             </SelectContent>
                           </Select>
                           <Button variant="ghost" size="icon" onClick={() => removePendingFile(pending.id)}>
@@ -832,10 +835,10 @@ export default function PublicJobWorkspace() {
                       ))}
                       <Button 
                         onClick={handleUploadPending} 
-                        disabled={pendingWithViews.length === 0 || uploading}
+                        disabled={pendingUploads.length === 0 || uploading}
                         className="w-full"
                       >
-                        {uploading ? 'Uploading...' : `Upload ${pendingWithViews.length} File(s)`}
+                        {uploading ? 'Uploading...' : `Upload ${pendingUploads.length} File(s)`}
                       </Button>
                     </div>
                   )}
