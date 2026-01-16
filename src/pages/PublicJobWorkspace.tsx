@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye, RotateCcw, Trash2, MessageSquare, Plus } from 'lucide-react';
+import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye, RotateCcw, Trash2, MessageSquare, Plus, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { FreelancerNamePrompt } from '@/components/freelancer/FreelancerNamePrompt';
 import { FreelancerNeedsChangesView } from '@/components/freelancer/FreelancerNeedsChangesView';
@@ -382,8 +382,8 @@ export default function PublicJobWorkspace() {
       queryClient.invalidateQueries({ queryKey: ['public-job-outputs', jobId] });
     },
     onError: (error: any) => {
-      toast.error('Failed to delete output');
-      console.error(error);
+      toast.error('Failed to delete output. Please try again.');
+      console.error('Delete error:', error);
     },
   });
   const handleIdentitySubmit = async (firstName: string, lastName: string) => {
@@ -1093,8 +1093,13 @@ export default function PublicJobWorkspace() {
                                   size="icon"
                                   className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
                                   onClick={() => deleteOutput.mutate(output.id)}
+                                  disabled={deleteOutput.isPending}
                                 >
-                                  <Trash2 className="h-3 w-3" />
+                                  {deleteOutput.isPending ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-3 w-3" />
+                                  )}
                                 </Button>
                               </div>
                             );
@@ -1317,9 +1322,14 @@ export default function PublicJobWorkspace() {
                             />
                             <button
                               onClick={() => deleteOutput.mutate(output.id)}
-                              className="absolute top-1 right-1 p-1 bg-red-500/80 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                              disabled={deleteOutput.isPending}
+                              className="absolute top-1 right-1 p-1 bg-red-500/80 rounded-full opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
                             >
-                              <Trash2 className="h-3 w-3 text-white" />
+                              {deleteOutput.isPending ? (
+                                <Loader2 className="h-3 w-3 text-white animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3 w-3 text-white" />
+                              )}
                             </button>
                             {output.label && (
                               <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-white px-1 py-0.5 truncate">
