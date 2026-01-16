@@ -103,6 +103,41 @@ export function GenerateTabEnhanced({
   
   const { toast } = useToast();
 
+  // Restore active generation state on mount (handles tab switching)
+  useEffect(() => {
+    const restoreActiveGeneration = async () => {
+      // Query for any running/pending jobs for this project
+      const { data: activeJobs, error } = await supabase
+        .from("ai_apply_jobs")
+        .select("id, created_at, status")
+        .eq("project_id", projectId)
+        .in("status", ["pending", "running"])
+        .order("created_at", { ascending: true });
+
+      if (error || !activeJobs || activeJobs.length === 0) {
+        return; // No active generation to restore
+      }
+
+      // Restore the generation state
+      const jobIds = activeJobs.map(j => j.id);
+      setCurrentBatchJobIds(jobIds);
+      setIsGenerating(true);
+      
+      // Use the earliest job's created_at for the timer
+      const earliestJob = activeJobs[0];
+      if (earliestJob?.created_at) {
+        setGenerationStartTime(new Date(earliestJob.created_at));
+      }
+
+      toast({
+        title: "Generation in progress",
+        description: `Reconnected to ${activeJobs.length} active jobs`,
+      });
+    };
+
+    restoreActiveGeneration();
+  }, [projectId, toast]);
+
   // Use the generation tracking hook
   const { 
     looks, 
