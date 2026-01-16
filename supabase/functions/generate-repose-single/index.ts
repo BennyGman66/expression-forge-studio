@@ -42,7 +42,7 @@ serve(async (req) => {
       .from('repose_outputs')
       .select(`
         *,
-        repose_batch_items!batch_item_id(source_url, view)
+        repose_batch_items!batch_item_id(source_url, view, look_id)
       `)
       .eq('id', outputId)
       .single();
@@ -53,7 +53,8 @@ serve(async (req) => {
     }
 
     const sourceUrl = output.repose_batch_items?.source_url;
-    const poseUrl = output.pose_url; // We'll store this when creating outputs
+    const poseUrl = output.pose_url;
+    const shotType = output.shot_type || 'FRONT_FULL';
 
     if (!sourceUrl || !poseUrl) {
       console.error('[generate-repose-single] Missing source or pose URL');
@@ -69,21 +70,50 @@ serve(async (req) => {
 
     console.log(`[generate-repose-single] Source: ${sourceUrl}`);
     console.log(`[generate-repose-single] Pose: ${poseUrl}`);
+    console.log(`[generate-repose-single] Shot Type: ${shotType}`);
+
+    // Shot-type-specific framing instructions
+    const shotTypeInstructions: Record<string, string> = {
+      FRONT_FULL: 'Generate a full-body photograph from head to feet. The entire outfit should be visible.',
+      FRONT_CROPPED: 'Generate a CROPPED upper-body photograph showing ONLY waist up. Crop the image below the waist - do NOT show full legs.',
+      BACK_FULL: 'Generate a full-body back view photograph from head to feet. Show the back of the outfit completely.',
+      DETAIL: 'Generate a close-up detail shot focusing on a specific area of the outfit.',
+    };
+
+    const framingInstruction = shotTypeInstructions[shotType] || shotTypeInstructions.FRONT_FULL;
 
     // Generate the reposed image using AI
-    const prompt = `You are a fashion photography expert specializing in pose transfer.
+    const prompt = `You are a fashion photography expert specializing in pose transfer for e-commerce.
 
-TASK: Transfer the exact body pose from the grey clay mannequin reference onto the fashion model in the product image.
+TASK: ${framingInstruction}
 
-CRITICAL REQUIREMENTS:
-1. POSE TRANSFER: Copy the mannequin's body position, arm placement, leg stance, and overall posture EXACTLY
-2. PRESERVE CLOTHING: Keep ALL clothing details unchanged - colors, patterns, fit, styling, accessories
-3. PRESERVE FACE: Maintain the model's exact facial features and expression
-4. PRESERVE BACKGROUND: Keep the original background/setting from the product image
-5. MAINTAIN PROPORTIONS: Keep the model's natural body proportions while adopting the pose
-6. PROFESSIONAL QUALITY: Output should look like a natural fashion photograph, not AI-generated
+Transfer the exact body pose from the grey clay mannequin reference onto the fashion model in the product image.
 
-The first image is the product photograph to repose. The second image is the grey clay mannequin showing the target pose.`;
+CRITICAL - READ CAREFULLY:
+
+IMAGE 1 (Product Photo): This is your ONLY source for:
+- The model's face, skin tone, and hair
+- ALL clothing items, colors, patterns, accessories, and styling
+- The background and lighting style
+
+IMAGE 2 (Grey Clay Mannequin): This is ONLY a pose reference showing:
+- Body position and posture
+- Arm and hand placement
+- Leg stance and orientation
+- The mannequin is a GREY SCULPTURE with NO CLOTHING - ignore any apparent texture
+
+REQUIREMENTS:
+1. POSE: Exactly replicate the mannequin's body position
+2. CLOTHING: Use ONLY the exact clothing from Image 1 - same colors, same items, same accessories
+3. FACE: Keep the model's exact facial features from Image 1
+4. FRAMING: ${framingInstruction}
+5. QUALITY: Output should look like a professional fashion photograph
+
+NEVER:
+- Change the clothing color or style
+- Add or remove accessories
+- Take any styling cues from the grey mannequin
+- Generate different garments than what appears in Image 1`;
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',

@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { useBrands, Brand } from "@/hooks/useBrands";
 import { useBrandLibraries } from "@/hooks/useBrandLibraries";
-import { useLibraryPoses, PoseFilters, LibraryPose, OutputShotType, CurationStatus } from "@/hooks/useLibraryPoses";
+import { useLibraryPoses, PoseFilters, LibraryPose, OutputShotType, CurationStatus, CropTarget } from "@/hooks/useLibraryPoses";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { BrandSelector } from "@/components/shared/BrandSelector";
 import { LibraryHeader } from "./LibraryHeader";
@@ -40,6 +40,7 @@ export function ClayPoseLibraryReview() {
     updatePoseStatus,
     movePosesToShotType,
     deletePoses,
+    setCropTarget,
     filterPoses,
   } = useLibraryPoses(activeLibrary?.id || null);
 
@@ -126,6 +127,11 @@ export function ClayPoseLibraryReview() {
     clearSelection();
   }, [selectedIds, isLocked, deletePoses, clearSelection]);
 
+  const handleBulkSetCropTarget = useCallback((cropTarget: CropTarget) => {
+    if (selectedIds.size === 0 || isLocked) return;
+    setCropTarget(Array.from(selectedIds), cropTarget);
+  }, [selectedIds, isLocked, setCropTarget]);
+
   // Quick actions
   const handleQuickInclude = useCallback((id: string) => {
     if (isLocked) return;
@@ -149,6 +155,12 @@ export function ClayPoseLibraryReview() {
     movePosesToShotType([inspectedPose.id], shotType);
     setInspectedPose((prev) => prev ? { ...prev, shotType } : null);
   }, [inspectedPose, isLocked, movePosesToShotType]);
+
+  const handleInspectorSetCropTarget = useCallback((cropTarget: CropTarget) => {
+    if (!inspectedPose || isLocked) return;
+    setCropTarget([inspectedPose.id], cropTarget);
+    setInspectedPose((prev) => prev ? { ...prev, crop_target: cropTarget } : null);
+  }, [inspectedPose, isLocked, setCropTarget]);
 
   // Library actions
   const handleCreateVersion = useCallback(async () => {
@@ -286,6 +298,7 @@ export function ClayPoseLibraryReview() {
           onClose={() => setInspectedPose(null)}
           onUpdateStatus={handleInspectorUpdateStatus}
           onMoveToShotType={handleInspectorMoveShotType}
+          onSetCropTarget={handleInspectorSetCropTarget}
           isLocked={isLocked}
         />
 
@@ -296,6 +309,7 @@ export function ClayPoseLibraryReview() {
           onBulkInclude={handleBulkInclude}
           onBulkExclude={handleBulkExclude}
           onBulkMove={handleBulkMove}
+          onBulkSetCropTarget={handleBulkSetCropTarget}
           onBulkDelete={handleBulkDelete}
           isLocked={isLocked}
         />
