@@ -385,147 +385,144 @@ serve(async (req) => {
       // This only needs to be done once per view, not per attempt
       const outfitDescription = await generateOutfitDescription(cropImageUrl, supabaseUrl, supabaseKey);
 
-      // Process pending outputs for this view (including newly reset ones)
+      // Process ONLY ONE pending output at a time to avoid timeout
+      // The UI will poll and re-invoke for remaining outputs
       const { data: outputsToProcess } = await supabase
         .from('ai_apply_outputs')
         .select('*')
         .eq('job_id', jobId)
         .eq('view', currentView)
-        .in('status', ['pending', 'generating'])  // Process both pending and generating (for resume)
-        .order('attempt_index', { ascending: true });
+        .in('status', ['pending', 'generating'])
+        .order('attempt_index', { ascending: true })
+        .limit(1);  // Process ONE at a time
 
-      for (const output of outputsToProcess || []) {
-        // Mark as 'generating' right before we start processing
-        await supabase
-          .from('ai_apply_outputs')
-          .update({ status: 'generating' })
-          .eq('id', output.id);
-        try {
-          // Build the prompt with dynamic outfit description
-          const viewPrompt = VIEW_PROMPTS[currentView] || VIEW_PROMPTS.front || '';
-          
-          let finalPrompt: string;
-          if (customPrompt) {
-            // Use custom prompt if provided, but still append view-specific instructions
-            finalPrompt = `${customPrompt}
+      const output = outputsToProcess?.[0];
+      if (!output) {
+        console.log(`[AI Apply] No pending outputs for ${currentView}`);
+        continue;
+      }
 
-${viewPrompt}
+      // Mark as 'generating' right before we start processing
+      await supabase
+        .from('ai_apply_outputs')
+        .update({ status: 'generating' })
+        .eq('id', output.id);
 
-Keep face and lighting consistent from image 3.
-
-${STUDIO_LIGHTING_PROMPT}`;
-          } else {
-            // Default prompt with dynamic outfit description
-            finalPrompt = `Recreate image 1 with "${outfitDescription}", keep the crop, pose and clothing exactly the same but put the head of image 2 on it.
+      try {
+        // Build the prompt with dynamic outfit description
+        const viewPrompt = VIEW_PROMPTS[currentView] || VIEW_PROMPTS.front || '';
+        
+        let finalPrompt: string;
+        if (customPrompt) {
+          finalPrompt = `${customPrompt}
 
 ${viewPrompt}
 
 Keep face and lighting consistent from image 3.
 
 ${STUDIO_LIGHTING_PROMPT}`;
+        } else {
+          finalPrompt = `Recreate image 1 with "${outfitDescription}", keep the crop, pose and clothing exactly the same but put the head of image 2 on it.
+
+${viewPrompt}
+
+Keep face and lighting consistent from image 3.
+
+${STUDIO_LIGHTING_PROMPT}`;
+        }
+
+        console.log(`[AI Apply] Generating output ${output.id} for ${currentView} attempt ${output.attempt_index}`);
+
+        const aiResponse = await fetch(
+          "https://ai.gateway.lovable.dev/v1/chat/completions",
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${lovableApiKey}`,
+            },
+            body: JSON.stringify({
+              model: model,
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: finalPrompt },
+                    { type: 'image_url', image_url: { url: cropImageUrl } },
+                    { type: 'image_url', image_url: { url: pairedFaceUrl } },
+                    { type: 'image_url', image_url: { url: talentPortraitUrl } },
+                  ],
+                },
+              ],
+              modalities: ['image', 'text'],
+            }),
           }
+        );
 
-          console.log(`[AI Apply] Generating output ${output.id} for ${currentView} attempt ${output.attempt_index}`);
+        if (!aiResponse.ok) {
+          const errorText = await aiResponse.text();
+          console.error(`[AI Apply] AI API error: ${aiResponse.status}`, errorText);
+          throw new Error(`AI generation failed: ${aiResponse.status} - ${errorText}`);
+        }
 
-          // Call Lovable AI Gateway with 3 images
-          // CRITICAL: Image order matters!
-          // Image 1 = crop (outfit/pose)
-          // Image 2 = paired face (from Face Match)
-          // Image 3 = talent portrait (identity reference)
-          const aiResponse = await fetch(
-            "https://ai.gateway.lovable.dev/v1/chat/completions",
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${lovableApiKey}`,
-              },
-              body: JSON.stringify({
-                model: model,
-                messages: [
-                  {
-                    role: 'user',
-                    content: [
-                      { type: 'text', text: finalPrompt },
-                      { type: 'image_url', image_url: { url: cropImageUrl } },         // Image 1 = Crop (outfit)
-                      { type: 'image_url', image_url: { url: pairedFaceUrl } },        // Image 2 = Paired face
-                      { type: 'image_url', image_url: { url: talentPortraitUrl } },    // Image 3 = Talent portrait
-                    ],
-                  },
-                ],
-                modalities: ['image', 'text'],
-              }),
-            }
+        const aiResult = await aiResponse.json();
+        console.log(`[AI Apply] AI response received for ${output.id}`);
+
+        const imageData = aiResult.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+
+        if (imageData) {
+          const storedUrl = await uploadToStorage(
+            supabase,
+            imageData,
+            jobId,
+            currentView,
+            output.attempt_index
           );
 
-          if (!aiResponse.ok) {
-            const errorText = await aiResponse.text();
-            console.error(`[AI Apply] AI API error: ${aiResponse.status}`, errorText);
-            throw new Error(`AI generation failed: ${aiResponse.status} - ${errorText}`);
-          }
+          if (storedUrl) {
+            await supabase
+              .from('ai_apply_outputs')
+              .update({
+                stored_url: storedUrl,
+                status: 'completed',
+                final_prompt: finalPrompt,
+              })
+              .eq('id', output.id);
 
-          const aiResult = await aiResponse.json();
-          console.log(`[AI Apply] AI response received for ${output.id}`);
-
-          // Extract the image from the response
-          const imageData = aiResult.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-
-          if (imageData) {
-            // Upload to Supabase Storage
-            const storedUrl = await uploadToStorage(
-              supabase,
-              imageData,
-              jobId,
-              currentView,
-              output.attempt_index
-            );
-
-            if (storedUrl) {
-              // Update output with result
-              await supabase
-                .from('ai_apply_outputs')
-                .update({
-                  stored_url: storedUrl,
-                  status: 'completed',
-                  final_prompt: finalPrompt,
-                })
-                .eq('id', output.id);
-
-              console.log(`[AI Apply] SUCCESS: Output ${output.id} saved to ${storedUrl.substring(0, 60)}...`);
-            } else {
-              throw new Error('Failed to upload image to storage');
-            }
+            console.log(`[AI Apply] SUCCESS: Output ${output.id} saved to ${storedUrl.substring(0, 60)}...`);
           } else {
-            console.error(`[AI Apply] No image in response:`, JSON.stringify(aiResult).slice(0, 500));
-            throw new Error('No image in AI response');
+            throw new Error('Failed to upload image to storage');
           }
-
-          // Update job progress
-          const { data: completedOutputs } = await supabase
-            .from('ai_apply_outputs')
-            .select('id')
-            .eq('job_id', jobId)
-            .eq('status', 'completed');
-
-          await supabase
-            .from('ai_apply_jobs')
-            .update({ 
-              progress: completedOutputs?.length || 0,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', jobId);
-
-        } catch (error: any) {
-          console.error(`[AI Apply] Error generating output ${output.id}:`, error);
-          
-          await supabase
-            .from('ai_apply_outputs')
-            .update({
-              status: 'failed',
-              error_message: error.message,
-            })
-            .eq('id', output.id);
+        } else {
+          console.error(`[AI Apply] No image in response:`, JSON.stringify(aiResult).slice(0, 500));
+          throw new Error('No image in AI response');
         }
+
+        // Update job progress
+        const { data: completedOutputs } = await supabase
+          .from('ai_apply_outputs')
+          .select('id')
+          .eq('job_id', jobId)
+          .eq('status', 'completed');
+
+        await supabase
+          .from('ai_apply_jobs')
+          .update({ 
+            progress: completedOutputs?.length || 0,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', jobId);
+
+      } catch (error: any) {
+        console.error(`[AI Apply] Error generating output ${output.id}:`, error);
+        
+        await supabase
+          .from('ai_apply_outputs')
+          .update({
+            status: 'failed',
+            error_message: error.message,
+          })
+          .eq('id', output.id);
       }
     }
 
