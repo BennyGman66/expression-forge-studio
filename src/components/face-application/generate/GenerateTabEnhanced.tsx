@@ -87,6 +87,11 @@ export function GenerateTabEnhanced({
   const [setupPhase, setSetupPhase] = useState(false);
   const [setupProgress, setSetupProgress] = useState({ current: 0, total: 0 });
   
+  // Job-level progress tracking
+  const [jobStatusCounts, setJobStatusCounts] = useState({ 
+    total: 0, queued: 0, running: 0, done: 0, failed: 0, partial: 0 
+  });
+  
   // Auxiliary data
   const [faceFoundations, setFaceFoundations] = useState<FaceFoundation[]>([]);
   const [talentInfo, setTalentInfo] = useState<{ name: string; front_face_url: string | null } | null>(null);
@@ -297,9 +302,13 @@ export function GenerateTabEnhanced({
     return () => clearInterval(interval);
   }, [currentBatchJobIds]);
 
-  // Check for job completion - with chunked queries
+  // Check for job completion AND track job-level progress - with chunked queries
   useEffect(() => {
-    if (!isGenerating || currentBatchJobIds.length === 0) return;
+    if (currentBatchJobIds.length === 0) {
+      // Reset job status counts when no active batch
+      setJobStatusCounts({ total: 0, queued: 0, running: 0, done: 0, failed: 0, partial: 0 });
+      return;
+    }
 
     const checkJobs = async () => {
       try {
@@ -322,23 +331,40 @@ export function GenerateTabEnhanced({
           }
         }
 
-        const allDone = allJobs.length > 0 && allJobs.every(j => j.status === "completed" || j.status === "failed");
-        if (allDone) {
-          setIsGenerating(false);
-          refreshTracking();
-          toast({ 
-            title: "Generation complete", 
-            description: `Generated ${outputCounts.completed} images` 
-          });
+        // Compute job-level status counts
+        const counts = {
+          total: allJobs.length,
+          queued: allJobs.filter(j => j.status === "pending").length,
+          running: allJobs.filter(j => j.status === "running").length,
+          done: allJobs.filter(j => j.status === "completed").length,
+          failed: allJobs.filter(j => j.status === "failed").length,
+          partial: allJobs.filter(j => j.status === "partial").length,
+        };
+        setJobStatusCounts(counts);
+
+        // Check if all done
+        if (isGenerating) {
+          const allDone = allJobs.length > 0 && allJobs.every(j => 
+            j.status === "completed" || j.status === "failed" || j.status === "partial"
+          );
+          if (allDone) {
+            setIsGenerating(false);
+            refreshTracking();
+            toast({ 
+              title: "Generation complete", 
+              description: `Completed ${counts.done} jobs (${counts.failed} failed)` 
+            });
+          }
         }
       } catch (error) {
         console.error("Error in checkJobs:", error);
       }
     };
 
-    const interval = setInterval(checkJobs, 3000);
+    checkJobs(); // Run immediately
+    const interval = setInterval(checkJobs, 2000);
     return () => clearInterval(interval);
-  }, [isGenerating, currentBatchJobIds, outputCounts.completed, refreshTracking, toast]);
+  }, [isGenerating, currentBatchJobIds, refreshTracking, toast]);
 
   // Continuous processing loop - re-invoke edge function for pending outputs
   // This is needed because the edge function processes only ONE output per invocation
@@ -679,21 +705,25 @@ export function GenerateTabEnhanced({
     }
   };
 
-  // Cancel generation
+  // Cancel generation - with chunked queries
   const handleCancelGeneration = async () => {
     if (currentBatchJobIds.length === 0) return;
     
     try {
-      await supabase
-        .from("ai_apply_jobs")
-        .update({ status: "canceled" })
-        .in("id", currentBatchJobIds);
+      const chunks = chunkArray(currentBatchJobIds, CHUNK_SIZE);
       
-      await supabase
-        .from("ai_apply_outputs")
-        .delete()
-        .in("job_id", currentBatchJobIds)
-        .in("status", ["pending", "generating", "queued"]);
+      for (const chunk of chunks) {
+        await supabase
+          .from("ai_apply_jobs")
+          .update({ status: "canceled" })
+          .in("id", chunk);
+        
+        await supabase
+          .from("ai_apply_outputs")
+          .delete()
+          .in("job_id", chunk)
+          .in("status", ["pending", "generating", "queued"]);
+      }
       
       setIsGenerating(false);
       refreshTracking();
@@ -783,7 +813,7 @@ export function GenerateTabEnhanced({
     }
   };
 
-  // Retry failed
+  // Retry failed - with chunked queries
   const handleRetryFailed = async () => {
     if (currentBatchJobIds.length === 0) return;
     
@@ -791,11 +821,15 @@ export function GenerateTabEnhanced({
     setGenerationStartTime(new Date());
 
     try {
-      await supabase
-        .from("ai_apply_outputs")
-        .delete()
-        .in("job_id", currentBatchJobIds)
-        .eq("status", "failed");
+      const chunks = chunkArray(currentBatchJobIds, CHUNK_SIZE);
+      
+      for (const chunk of chunks) {
+        await supabase
+          .from("ai_apply_outputs")
+          .delete()
+          .in("job_id", chunk)
+          .eq("status", "failed");
+      }
 
       for (const jobId of currentBatchJobIds) {
         await supabase
@@ -1006,18 +1040,22 @@ export function GenerateTabEnhanced({
           </Alert>
         )}
 
-        {/* Progress panel */}
+        {/* Progress panel - uses job-level progress when batch is active, falls back to output-level */}
         <GenerationProgressPanel
           isGenerating={isGenerating}
-          progress={outputCounts.completed}
-          total={outputCounts.completed + outputCounts.failed + outputCounts.pending + outputCounts.generating}
-          completedCount={outputCounts.completed}
-          failedCount={outputCounts.failed}
-          pendingCount={outputCounts.pending}
-          runningCount={outputCounts.generating}
+          progress={jobStatusCounts.total > 0 ? jobStatusCounts.done + jobStatusCounts.partial : outputCounts.completed}
+          total={jobStatusCounts.total > 0 ? jobStatusCounts.total : outputCounts.completed + outputCounts.failed + outputCounts.pending + outputCounts.generating}
+          completedCount={jobStatusCounts.total > 0 ? jobStatusCounts.done : outputCounts.completed}
+          failedCount={jobStatusCounts.total > 0 ? jobStatusCounts.failed : outputCounts.failed}
+          pendingCount={jobStatusCounts.total > 0 ? jobStatusCounts.queued : outputCounts.pending}
+          runningCount={jobStatusCounts.total > 0 ? jobStatusCounts.running : outputCounts.generating}
           elapsedTime={elapsedDisplay}
           lastActivitySeconds={lastActivitySeconds}
-          currentProcessingInfo={`${outputCounts.generating} generating, ${outputCounts.pending} queued`}
+          currentProcessingInfo={
+            jobStatusCounts.total > 0 
+              ? `${jobStatusCounts.running} jobs generating, ${jobStatusCounts.queued} queued`
+              : `${outputCounts.generating} generating, ${outputCounts.pending} queued`
+          }
           onCancel={handleCancelGeneration}
           onRetryFailed={handleRetryFailed}
           setupPhase={setupPhase}
