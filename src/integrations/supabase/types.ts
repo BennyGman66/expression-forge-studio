@@ -2649,6 +2649,7 @@ export type Database = {
       product_images: {
         Row: {
           created_at: string
+          crop_target: string | null
           id: string
           product_id: string
           shot_type: string | null
@@ -2658,6 +2659,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          crop_target?: string | null
           id?: string
           product_id: string
           shot_type?: string | null
@@ -2667,6 +2669,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          crop_target?: string | null
           id?: string
           product_id?: string
           shot_type?: string | null

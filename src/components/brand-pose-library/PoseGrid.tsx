@@ -98,14 +98,26 @@ export function PoseGrid({
                 title={pose.curation_status}
               />
 
-              {/* Shot type badge */}
-              <Badge
-                variant="secondary"
-                className="absolute bottom-1 left-1 text-xs px-1.5 py-0"
-                title={OUTPUT_SHOT_LABELS[pose.shotType]}
-              >
-                {SHORT_LABELS[pose.shotType]}
-              </Badge>
+              {/* Shot type badge + crop target indicator */}
+              <div className="absolute bottom-1 left-1 flex items-center gap-0.5">
+                <Badge
+                  variant="secondary"
+                  className="text-xs px-1.5 py-0"
+                  title={OUTPUT_SHOT_LABELS[pose.shotType]}
+                >
+                  {SHORT_LABELS[pose.shotType]}
+                </Badge>
+                {/* Show crop target for FRONT_CROPPED poses */}
+                {pose.shotType === 'FRONT_CROPPED' && pose.crop_target && (
+                  <Badge
+                    variant="outline"
+                    className="text-xs px-1 py-0 bg-background/80"
+                    title={`Crop target: ${pose.crop_target}`}
+                  >
+                    {pose.crop_target === 'top' ? '👕' : '👖'}
+                  </Badge>
+                )}
+              </div>
 
               {/* Gender badge */}
               {pose.gender && (

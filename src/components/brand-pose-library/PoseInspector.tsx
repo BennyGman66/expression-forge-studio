@@ -1,4 +1,4 @@
-import { LibraryPose, CurationStatus, OutputShotType, ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS } from "@/hooks/useLibraryPoses";
+import { LibraryPose, CurationStatus, OutputShotType, ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS, CropTarget } from "@/hooks/useLibraryPoses";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -10,6 +10,7 @@ interface PoseInspectorProps {
   onClose: () => void;
   onUpdateStatus: (status: CurationStatus) => void;
   onMoveToShotType: (shotType: OutputShotType) => void;
+  onSetCropTarget?: (cropTarget: CropTarget) => void;
   isLocked: boolean;
 }
 
@@ -26,6 +27,7 @@ export function PoseInspector({
   onClose,
   onUpdateStatus,
   onMoveToShotType,
+  onSetCropTarget,
   isLocked,
 }: PoseInspectorProps) {
   if (!pose) {
@@ -73,6 +75,15 @@ export function PoseInspector({
           <span className="text-sm text-muted-foreground">Product</span>
           <Badge variant="outline">{pose.product_type || "Unknown"}</Badge>
         </div>
+        {/* Show crop target for FRONT_CROPPED poses */}
+        {pose.shotType === 'FRONT_CROPPED' && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Crop Target</span>
+            <Badge variant="outline" className="flex items-center gap-1">
+              {pose.crop_target === 'top' ? '👕 Top' : pose.crop_target === 'trousers' ? '👖 Trousers' : 'Not set'}
+            </Badge>
+          </div>
+        )}
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">Status</span>
           <Badge
@@ -117,6 +128,31 @@ export function PoseInspector({
               </Button>
             </div>
           </div>
+
+          {/* Crop Target - only show for FRONT_CROPPED */}
+          {pose.shotType === 'FRONT_CROPPED' && onSetCropTarget && (
+            <div>
+              <p className="text-sm font-medium mb-2">Crop Target</p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant={pose.crop_target === "top" ? "default" : "outline"}
+                  className="flex-1"
+                  onClick={() => onSetCropTarget("top")}
+                >
+                  👕 Top
+                </Button>
+                <Button
+                  size="sm"
+                  variant={pose.crop_target === "trousers" ? "default" : "outline"}
+                  className="flex-1"
+                  onClick={() => onSetCropTarget("trousers")}
+                >
+                  👖 Trousers
+                </Button>
+              </div>
+            </div>
+          )}
 
           <div>
             <p className="text-sm font-medium mb-2">Move to Shot Type</p>

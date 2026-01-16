@@ -180,7 +180,7 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
       let totalOutputs = existingOutputs?.length || 0;
 
       if (!existingOutputs?.length) {
-        // Step 2: Fetch clay poses for the brand via product_images join
+        // Step 2: Fetch clay poses for the brand via product_images join (including crop_target)
         console.log('Fetching clay poses for brand:', batch.brand_id);
         const { data: productImages, error: posesError } = await supabase
           .from('product_images')
@@ -188,6 +188,7 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
             id,
             slot,
             shot_type,
+            crop_target,
             products!inner(brand_id),
             clay_images(id, stored_url)
           `)
@@ -198,15 +199,28 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
           throw posesError;
         }
 
-        // Group poses by shot type (with fallback to slot mapping)
-        const posesByShotType: Record<OutputShotType, Array<{ id: string; url: string }>> = {
+        // Fetch look product types for crop_target matching
+        const lookIds = [...new Set(batchItems.map(item => item.look_id).filter(Boolean))];
+        const { data: lookData } = await supabase
+          .from('talent_looks')
+          .select('id, product_type')
+          .in('id', lookIds);
+        
+        const lookProductTypes: Record<string, string | null> = {};
+        lookData?.forEach(look => {
+          lookProductTypes[look.id] = look.product_type;
+        });
+
+        // Group poses by shot type AND crop_target (with fallback to slot mapping)
+        type PoseEntry = { id: string; url: string; crop_target: string | null };
+        const posesByShotType: Record<OutputShotType, PoseEntry[]> = {
           FRONT_FULL: [],
           FRONT_CROPPED: [],
           DETAIL: [],
           BACK_FULL: [],
         };
 
-        productImages?.forEach((pi) => {
+        productImages?.forEach((pi: any) => {
           // Prefer shot_type, fall back to slot mapping
           let shotType: OutputShotType | null = pi.shot_type as OutputShotType;
           if (!shotType && pi.slot) {
@@ -223,7 +237,11 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
             const clayImages = Array.isArray(pi.clay_images) ? pi.clay_images : [pi.clay_images];
             clayImages.forEach((ci: { id: string; stored_url: string }) => {
               if (ci?.id && ci?.stored_url) {
-                posesByShotType[shotType!].push({ id: ci.id, url: ci.stored_url });
+                posesByShotType[shotType!].push({ 
+                  id: ci.id, 
+                  url: ci.stored_url, 
+                  crop_target: pi.crop_target 
+                });
               }
             });
           }
@@ -249,9 +267,28 @@ export function GeneratePanel({ batchId }: GeneratePanelProps) {
 
           // Get allowed output shot types for this input (enforced camera rules)
           const allowedOutputs = getAllowedOutputsForInput(inputType);
+          
+          // Determine the look's product type for FRONT_CROPPED filtering
+          const lookProductType = item.look_id ? lookProductTypes[item.look_id] : null;
+          // Map product_type to crop_target: 'top' -> 'top', 'trousers' -> 'trousers', default 'top'
+          const desiredCropTarget = lookProductType === 'trousers' ? 'trousers' : 'top';
 
           for (const shotType of allowedOutputs) {
-            const posesInType = posesByShotType[shotType] || [];
+            let posesInType = posesByShotType[shotType] || [];
+            
+            // For FRONT_CROPPED, filter by crop_target to get the right cropped poses
+            if (shotType === 'FRONT_CROPPED') {
+              // Filter to only poses matching the desired crop_target
+              const matchingCropPoses = posesInType.filter(p => p.crop_target === desiredCropTarget);
+              // Fall back to all FRONT_CROPPED if no matching crop_target poses
+              if (matchingCropPoses.length > 0) {
+                posesInType = matchingCropPoses;
+                console.log(`Using ${matchingCropPoses.length} ${desiredCropTarget} crop poses for item ${item.id}`);
+              } else {
+                console.log(`No ${desiredCropTarget} crop poses found, using all ${posesInType.length} FRONT_CROPPED poses`);
+              }
+            }
+            
             // Randomly select poses for this shot type
             const shuffled = [...posesInType].sort(() => Math.random() - 0.5);
             const selectedPoses = shuffled.slice(0, posesPerShotType);

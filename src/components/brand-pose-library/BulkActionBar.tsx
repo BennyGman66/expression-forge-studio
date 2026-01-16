@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { CurationStatus, OutputShotType, ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS } from "@/hooks/useLibraryPoses";
+import { CurationStatus, OutputShotType, ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS, CropTarget } from "@/hooks/useLibraryPoses";
 import { CheckCircle2, XCircle, Move, Trash2, X, RotateCcw } from "lucide-react";
 
 interface BulkActionBarProps {
@@ -10,6 +10,7 @@ interface BulkActionBarProps {
   onBulkInclude: () => void;
   onBulkExclude: () => void;
   onBulkMove: (shotType: OutputShotType) => void;
+  onBulkSetCropTarget?: (cropTarget: CropTarget) => void;
   onBulkDelete: () => void;
   isLocked: boolean;
 }
@@ -20,6 +21,7 @@ export function BulkActionBar({
   onBulkInclude,
   onBulkExclude,
   onBulkMove,
+  onBulkSetCropTarget,
   onBulkDelete,
   isLocked,
 }: BulkActionBarProps) {
@@ -76,6 +78,34 @@ export function BulkActionBar({
                 </Button>
               ))}
             </div>
+
+            {/* Crop Target Buttons */}
+            {onBulkSetCropTarget && (
+              <>
+                <Separator orientation="vertical" className="h-6" />
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground mr-1">Crop:</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="px-2"
+                    onClick={() => onBulkSetCropTarget('top')}
+                    title="Set as Top crop (waist-up)"
+                  >
+                    👕 Top
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="px-2"
+                    onClick={() => onBulkSetCropTarget('trousers')}
+                    title="Set as Trousers crop (waist-down)"
+                  >
+                    👖 Trousers
+                  </Button>
+                </div>
+              </>
+            )}
 
             <Separator orientation="vertical" className="h-6" />
 

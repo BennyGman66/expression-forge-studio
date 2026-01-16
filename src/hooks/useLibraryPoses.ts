@@ -12,6 +12,7 @@ import {
 export type CurationStatus = "pending" | "included" | "excluded" | "failed";
 export type Gender = "women" | "men";
 export type ProductType = "tops" | "trousers";
+export type CropTarget = "top" | "trousers";
 
 // Re-export shot types for components that import from this hook
 export type { OutputShotType };
@@ -25,6 +26,7 @@ export interface LibraryPose {
   slot: string; // Keep legacy slot for backward compatibility
   gender: Gender | null;
   product_type: ProductType | null;
+  crop_target: CropTarget | null; // For FRONT_CROPPED: top = waist-up, trousers = waist-down
   curation_status: CurationStatus;
   notes: string | null;
   created_at: string;
@@ -84,7 +86,10 @@ export function useLibraryPoses(libraryId: string | null) {
         .from("library_poses")
         .select(`
           *,
-          clay_images!inner(stored_url)
+          clay_images!inner(
+            stored_url,
+            product_images!inner(crop_target)
+          )
         `)
         .eq("library_id", libraryId)
         .order("created_at", { ascending: true });
@@ -94,6 +99,8 @@ export function useLibraryPoses(libraryId: string | null) {
       const typedPoses: LibraryPose[] = (data || []).map((p: any) => {
         // Use shot_type if available, otherwise convert from slot
         const shotType = p.shot_type || slotToShotType(p.slot) || 'FRONT_FULL';
+        // Get crop_target from the nested product_images via clay_images
+        const cropTarget = p.clay_images?.product_images?.crop_target as CropTarget | null;
         return {
           id: p.id,
           library_id: p.library_id,
@@ -102,6 +109,7 @@ export function useLibraryPoses(libraryId: string | null) {
           slot: p.slot, // Keep legacy slot
           gender: p.gender as Gender | null,
           product_type: p.product_type as ProductType | null,
+          crop_target: cropTarget,
           curation_status: p.curation_status as CurationStatus,
           notes: p.notes,
           created_at: p.created_at,
@@ -233,6 +241,51 @@ export function useLibraryPoses(libraryId: string | null) {
     }
   }, [fetchPoses]);
 
+  // Update crop_target on the source product_image via clay_image
+  const setCropTarget = useCallback(async (poseIds: string[], cropTarget: CropTarget) => {
+    try {
+      // Get the clay_image_ids for the poses
+      const posesToUpdate = poses.filter(p => poseIds.includes(p.id));
+      const clayImageIds = posesToUpdate.map(p => p.clay_image_id);
+      
+      // Get product_image_ids from clay_images
+      const { data: clayImages, error: fetchError } = await supabase
+        .from("clay_images")
+        .select("id, product_image_id")
+        .in("id", clayImageIds);
+      
+      if (fetchError) throw fetchError;
+      
+      const productImageIds = clayImages?.map(ci => ci.product_image_id).filter(Boolean) || [];
+      
+      if (productImageIds.length === 0) {
+        toast.error("No product images found for these poses");
+        return;
+      }
+      
+      // Update crop_target on product_images
+      const { error: updateError } = await supabase
+        .from("product_images")
+        .update({ crop_target: cropTarget })
+        .in("id", productImageIds);
+
+      if (updateError) throw updateError;
+
+      // Optimistic update
+      setPoses((prev) =>
+        prev.map((p) =>
+          poseIds.includes(p.id) ? { ...p, crop_target: cropTarget } : p
+        )
+      );
+
+      toast.success(`Set crop target to "${cropTarget}" for ${poseIds.length} pose(s)`);
+    } catch (err) {
+      console.error("Error setting crop target:", err);
+      toast.error("Failed to set crop target");
+      fetchPoses();
+    }
+  }, [poses, fetchPoses]);
+
   const filterPoses = useCallback((filters: PoseFilters): LibraryPose[] => {
     return poses.filter((p) => {
       if (filters.shotType !== "all" && p.shotType !== filters.shotType) return false;
@@ -249,6 +302,7 @@ export function useLibraryPoses(libraryId: string | null) {
     updatePoseStatus,
     movePosesToShotType,
     deletePoses,
+    setCropTarget,
     filterPoses,
     refetch: fetchPoses,
   };
