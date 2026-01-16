@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,9 +6,11 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff, RefreshCw, AlertCircle } from 'lucide-react';
+import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff, RefreshCw, AlertCircle, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { OptimizedImage } from '@/components/shared/OptimizedImage';
+import { QuickFillDialog } from './review/QuickFillDialog';
+import { LookSourceImage } from '@/types/face-application';
 
 interface ReviewSelectTabProps {
   projectId: string;
@@ -31,6 +33,24 @@ interface LookGroup {
   lookName: string;
   views: Record<string, OutputItem[]>;
   selectedCount: number;
+  digitalTalentId?: string | null;
+}
+
+interface SourceImageInfo {
+  id: string;
+  look_id: string;
+  view: string;
+  source_url: string;
+  head_cropped_url: string | null;
+  digital_talent_id: string | null;
+}
+
+interface QuickFillTarget {
+  lookId: string;
+  lookName: string;
+  view: string;
+  sourceImage: LookSourceImage;
+  digitalTalentId: string | null;
 }
 
 const VIEW_ORDER = ['full_front', 'cropped_front', 'front', 'back', 'side', 'detail'];
@@ -52,23 +72,74 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   return chunks;
 }
 
+// Normalize view names for comparison
+function normalizeView(view: string): string {
+  if (view === 'full_front' || view === 'cropped_front') return 'front';
+  return view;
+}
+
 export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps) {
   const [outputs, setOutputs] = useState<OutputItem[]>([]);
   const [looks, setLooks] = useState<Record<string, string>>({});
+  const [sourceImages, setSourceImages] = useState<SourceImageInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [expandedLooks, setExpandedLooks] = useState<Set<string>>(new Set());
   const [selectingId, setSelectingId] = useState<string | null>(null);
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [expandedUnselectedViews, setExpandedUnselectedViews] = useState<Set<string>>(new Set());
+  const [quickFillTarget, setQuickFillTarget] = useState<QuickFillTarget | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  // Fetch outputs and look names with chunked queries to avoid size limits
+  // Fetch outputs, look names, and source images with chunked queries
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
       setFetchError(null);
       
       try {
+        // Get all looks for this project first
+        const { data: allLooks, error: looksError } = await supabase
+          .from('talent_looks')
+          .select('id, name, look_code, digital_talent_id')
+          .eq('project_id', projectId);
+
+        if (looksError) {
+          console.error('Error fetching looks:', looksError);
+          setFetchError(`Failed to load looks: ${looksError.message}`);
+          setLoading(false);
+          return;
+        }
+
+        const lookIds = allLooks?.map(l => l.id) || [];
+        const lookMap: Record<string, string> = {};
+        const lookTalentMap: Record<string, string | null> = {};
+        
+        allLooks?.forEach(l => {
+          lookMap[l.id] = l.look_code || l.name || l.id.slice(0, 8);
+          lookTalentMap[l.id] = l.digital_talent_id;
+        });
+
+        // Get all source images for these looks
+        if (lookIds.length > 0) {
+          const CHUNK_SIZE = 50;
+          const lookIdChunks = chunkArray(lookIds, CHUNK_SIZE);
+          const allSourceImages: SourceImageInfo[] = [];
+          
+          for (const chunk of lookIdChunks) {
+            const { data: sourceData } = await supabase
+              .from('look_source_images')
+              .select('id, look_id, view, source_url, head_cropped_url, digital_talent_id')
+              .in('look_id', chunk);
+            
+            if (sourceData) {
+              allSourceImages.push(...sourceData);
+            }
+          }
+          
+          setSourceImages(allSourceImages);
+        }
+
         // Get all jobs for this project
         const { data: jobs, error: jobsError } = await supabase
           .from('ai_apply_jobs')
@@ -83,12 +154,12 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
         }
 
         if (!jobs || jobs.length === 0) {
+          setLooks(lookMap);
           setLoading(false);
           return;
         }
 
         const jobIds = jobs.map(j => j.id);
-        const lookIds = [...new Set(jobs.map(j => j.look_id).filter(Boolean))];
 
         // Fetch outputs in chunks to avoid query size limits
         const CHUNK_SIZE = 50;
@@ -107,12 +178,11 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
           
           if (chunkError) {
             console.error('Error fetching output chunk:', chunkError);
-            continue; // Continue with other chunks even if one fails
+            continue;
           }
           
           if (chunkData) {
             for (const output of chunkData) {
-              // Deduplicate in case of overlapping results
               if (!outputIds.has(output.id)) {
                 outputIds.add(output.id);
                 allOutputs.push(output as OutputItem);
@@ -128,26 +198,11 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
           return a.attempt_index - b.attempt_index;
         });
 
-        // Get look names (also chunk if many looks)
-        const lookIdChunks = chunkArray(lookIds as string[], CHUNK_SIZE);
-        const lookMap: Record<string, string> = {};
-        
-        for (const chunk of lookIdChunks) {
-          const { data: lookData } = await supabase
-            .from('talent_looks')
-            .select('id, name, look_code')
-            .in('id', chunk);
-          
-          lookData?.forEach(l => {
-            lookMap[l.id] = l.look_code || l.name || l.id.slice(0, 8);
-          });
-        }
-
         setOutputs(allOutputs);
         setLooks(lookMap);
         
         // Auto-expand all looks initially
-        setExpandedLooks(new Set(lookIds as string[]));
+        setExpandedLooks(new Set(lookIds));
         
         // Auto-enable "selected only" if there are selections
         const hasSelections = allOutputs.some(o => o.is_selected);
@@ -155,7 +210,7 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
           setShowSelectedOnly(true);
         }
         
-        console.log(`Loaded ${allOutputs.length} outputs from ${jobIds.length} jobs (${jobIdChunks.length} chunks)`);
+        console.log(`Loaded ${allOutputs.length} outputs, ${sourceImages.length} source images`);
       } catch (err) {
         console.error('Unexpected error in fetchData:', err);
         setFetchError(`Unexpected error: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -165,7 +220,7 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     }
 
     fetchData();
-  }, [projectId]);
+  }, [projectId, refreshKey]);
 
   // Subscribe to realtime updates
   useEffect(() => {
@@ -244,6 +299,35 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
 
     return groups;
   }, [outputs, looks]);
+
+  // Calculate missing views - source images that exist but have no outputs
+  const missingViewsByLook = useMemo(() => {
+    const missing: Record<string, { view: string; sourceImage: SourceImageInfo }[]> = {};
+    
+    for (const srcImg of sourceImages) {
+      if (!srcImg.look_id) continue;
+      
+      // Normalize the view name
+      const normalizedSrcView = normalizeView(srcImg.view);
+      
+      // Check if we have any outputs for this look+view
+      const hasOutputs = outputs.some(
+        o => o.look_id === srcImg.look_id && normalizeView(o.view) === normalizedSrcView
+      );
+      
+      if (!hasOutputs) {
+        if (!missing[srcImg.look_id]) missing[srcImg.look_id] = [];
+        missing[srcImg.look_id].push({ view: srcImg.view, sourceImage: srcImg });
+      }
+    }
+    
+    return missing;
+  }, [sourceImages, outputs]);
+
+  // Total count of missing views
+  const totalMissingViews = useMemo(() => {
+    return Object.values(missingViewsByLook).reduce((acc, arr) => acc + arr.length, 0);
+  }, [missingViewsByLook]);
 
   // Calculate selection stats
   const stats = useMemo(() => {
@@ -326,16 +410,19 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
   };
 
   // Refetch function for refresh button
-  const refetch = () => {
+  const refetch = useCallback(() => {
     setOutputs([]);
     setLooks({});
+    setSourceImages([]);
     setFetchError(null);
-    setLoading(true);
-    // Trigger re-fetch by updating a dependency (we'll use a workaround by resetting state)
-    // The useEffect will re-run when loading changes back from the component remount
-    // For now, just reload the effect manually
-    window.location.reload(); // Simple approach; can be improved with a refetch key
-  };
+    setRefreshKey(prev => prev + 1);
+  }, []);
+
+  // Handle quick fill completion
+  const handleQuickFillComplete = useCallback(() => {
+    setQuickFillTarget(null);
+    refetch();
+  }, [refetch]);
 
   if (loading) {
     return (
@@ -490,6 +577,44 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                         </CardTitle>
                       </div>
                       <div className="flex items-center gap-2">
+                        {/* Add missing views button */}
+                        {missingViewsByLook[group.lookId]?.length > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5 h-7 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const firstMissing = missingViewsByLook[group.lookId][0];
+                              // Find digital talent ID from source image or look
+                              const talentId = firstMissing.sourceImage.digital_talent_id || 
+                                sourceImages.find(s => s.look_id === group.lookId && s.digital_talent_id)?.digital_talent_id;
+                              
+                              setQuickFillTarget({
+                                lookId: group.lookId,
+                                lookName: group.lookName,
+                                view: firstMissing.view,
+                                sourceImage: {
+                                  id: firstMissing.sourceImage.id,
+                                  look_id: firstMissing.sourceImage.look_id,
+                                  digital_talent_id: firstMissing.sourceImage.digital_talent_id,
+                                  view: firstMissing.sourceImage.view as any,
+                                  source_url: firstMissing.sourceImage.source_url,
+                                  head_crop_x: null,
+                                  head_crop_y: null,
+                                  head_crop_width: null,
+                                  head_crop_height: null,
+                                  head_cropped_url: firstMissing.sourceImage.head_cropped_url,
+                                  created_at: '',
+                                },
+                                digitalTalentId: talentId || null,
+                              });
+                            }}
+                          >
+                            <Plus className="h-3 w-3" />
+                            Add {missingViewsByLook[group.lookId].length} missing
+                          </Button>
+                        )}
                         <Badge 
                           variant={selectedCount === viewCount ? "default" : "outline"}
                           className={cn(
@@ -610,6 +735,21 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
             })}
           </div>
         </ScrollArea>
+      )}
+
+      {/* Quick Fill Dialog */}
+      {quickFillTarget && (
+        <QuickFillDialog
+          open={!!quickFillTarget}
+          onClose={() => setQuickFillTarget(null)}
+          lookId={quickFillTarget.lookId}
+          lookName={quickFillTarget.lookName}
+          view={quickFillTarget.view}
+          sourceImage={quickFillTarget.sourceImage}
+          digitalTalentId={quickFillTarget.digitalTalentId}
+          projectId={projectId}
+          onComplete={handleQuickFillComplete}
+        />
       )}
     </div>
   );
