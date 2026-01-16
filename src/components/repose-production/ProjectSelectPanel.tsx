@@ -275,6 +275,15 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
     );
   }
 
+  // Sort projects: ready first, then by name
+  const sortedProjects = [...(eligibleProjects || [])].sort((a, b) => {
+    const aReady = (a.approved_looks_count || 0) > 0;
+    const bReady = (b.approved_looks_count || 0) > 0;
+    if (aReady && !bReady) return -1;
+    if (!aReady && bReady) return 1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
   // Project selection view
   return (
     <div className="space-y-6">
@@ -285,21 +294,21 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
             Select Production Project
           </CardTitle>
           <CardDescription>
-            Choose a project with approved looks to create a repose batch
+            Choose a project to create a repose batch. Projects pending Photoshop work will show when they become ready.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {!eligibleProjects || eligibleProjects.length === 0 ? (
+          {!sortedProjects || sortedProjects.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No projects with approved looks available.</p>
+              <p>No projects available.</p>
               <p className="text-sm mt-2">
-                Approve jobs in the Job Board to make projects available for reposing.
+                Send jobs to the Job Board to see projects here.
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {eligibleProjects.map((project) => (
+              {sortedProjects.map((project) => (
                 <ProjectTile
                   key={project.id}
                   project={project}
@@ -318,13 +327,18 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
 function ProjectTile({ project, onClick }: { project: ProductionProject; onClick: () => void }) {
   const approvedCount = project.approved_looks_count || 0;
   const totalCount = project.jobs_count || 0;
+  const openCount = (project as any).open_jobs_count || 0;
+  const inProgressCount = (project as any).in_progress_jobs_count || 0;
+  const pendingCount = openCount + inProgressCount;
   const isReady = approvedCount > 0;
+  const isPending = totalCount > 0 && approvedCount === 0;
 
   return (
     <Card 
       className={cn(
         "cursor-pointer transition-all hover:border-primary/50 hover:shadow-md",
-        isReady && "border-green-500/30"
+        isReady && "border-green-500/30",
+        isPending && "border-orange-500/30 bg-orange-50/30 dark:bg-orange-950/10"
       )}
       onClick={onClick}
     >
@@ -340,6 +354,11 @@ function ProjectTile({ project, onClick }: { project: ProductionProject; onClick
             <Badge variant="outline" className="text-green-600 border-green-500/30 bg-green-500/10">
               Ready
             </Badge>
+          ) : isPending ? (
+            <Badge variant="outline" className="text-orange-600 border-orange-500/30 bg-orange-500/10">
+              <Clock className="w-3 h-3 mr-1" />
+              Pending
+            </Badge>
           ) : (
             <Badge variant="secondary">In Progress</Badge>
           )}
@@ -351,8 +370,8 @@ function ProjectTile({ project, onClick }: { project: ProductionProject; onClick
             <span>{approvedCount} approved</span>
           </div>
           <div className="flex items-center gap-1.5 text-muted-foreground">
-            <Images className="w-3.5 h-3.5" />
-            <span>{totalCount} total</span>
+            <Clock className="w-3.5 h-3.5 text-orange-500" />
+            <span>{pendingCount} pending</span>
           </div>
         </div>
 
@@ -360,12 +379,17 @@ function ProjectTile({ project, onClick }: { project: ProductionProject; onClick
           <div className="mt-3">
             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
               <div 
-                className="h-full bg-green-500 transition-all"
-                style={{ width: `${(approvedCount / totalCount) * 100}%` }}
+                className={cn(
+                  "h-full transition-all",
+                  approvedCount > 0 ? "bg-green-500" : "bg-orange-300"
+                )}
+                style={{ width: `${approvedCount > 0 ? (approvedCount / totalCount) * 100 : 0}%` }}
               />
             </div>
             <p className="text-[10px] text-muted-foreground mt-1 text-right">
-              {Math.round((approvedCount / totalCount) * 100)}% complete
+              {approvedCount === 0 
+                ? 'Waiting for approvals' 
+                : `${Math.round((approvedCount / totalCount) * 100)}% complete`}
             </p>
           </div>
         )}

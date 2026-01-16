@@ -372,16 +372,15 @@ export function useBatchCreateProjectLooks() {
   });
 }
 
-// Projects eligible for repose (have at least one approved look)
+// Projects eligible for repose (show ALL projects with jobs, not just approved ones)
 export function useProjectsEligibleForRepose() {
   return useQuery({
     queryKey: ["projects-eligible-for-repose"],
     queryFn: async () => {
-      // Get projects that have approved jobs
+      // Get ALL projects that have jobs (not just approved ones)
       const { data: jobs } = await supabase
         .from("unified_jobs")
-        .select("project_id")
-        .in("status", ["APPROVED", "CLOSED"])
+        .select("project_id, status")
         .not("project_id", "is", null);
 
       const projectIds = [...new Set(jobs?.map(j => j.project_id).filter(Boolean))] as string[];
@@ -399,18 +398,21 @@ export function useProjectsEligibleForRepose() {
 
       if (error) throw error;
 
-      // Get approved job counts per project
-      const { data: jobCounts } = await supabase
-        .from("unified_jobs")
-        .select("project_id, status")
-        .in("project_id", projectIds);
-
-      const statsMap = new Map<string, { total: number; approved: number }>();
-      jobCounts?.forEach(j => {
+      // Calculate stats per project
+      const statsMap = new Map<string, { 
+        total: number; 
+        approved: number; 
+        open: number; 
+        in_progress: number 
+      }>();
+      
+      jobs?.forEach(j => {
         if (!j.project_id) return;
-        const current = statsMap.get(j.project_id) || { total: 0, approved: 0 };
+        const current = statsMap.get(j.project_id) || { total: 0, approved: 0, open: 0, in_progress: 0 };
         current.total++;
         if (j.status === 'APPROVED' || j.status === 'CLOSED') current.approved++;
+        if (j.status === 'OPEN') current.open++;
+        if (['IN_PROGRESS', 'SUBMITTED', 'NEEDS_CHANGES'].includes(j.status)) current.in_progress++;
         statsMap.set(j.project_id, current);
       });
 
@@ -418,6 +420,8 @@ export function useProjectsEligibleForRepose() {
         ...p,
         jobs_count: statsMap.get(p.id)?.total || 0,
         approved_looks_count: statsMap.get(p.id)?.approved || 0,
+        open_jobs_count: statsMap.get(p.id)?.open || 0,
+        in_progress_jobs_count: statsMap.get(p.id)?.in_progress || 0,
       })) as ProductionProject[];
     },
   });
