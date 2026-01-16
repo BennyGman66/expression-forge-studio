@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowRight, Play, User, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowRight, Play, User, RefreshCw, Sparkles, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { FaceFoundation, VIEW_LABELS } from "@/types/face-application";
@@ -16,6 +17,17 @@ import { GenerationPlanPreview } from "./GenerationPlanPreview";
 import { GenerationProgressPanel } from "./GenerationProgressPanel";
 import { GeneratedImagesGallery } from "./GeneratedImagesGallery";
 import { LiveGenerationFeed } from "./LiveGenerationFeed";
+
+// Helper to chunk arrays for large queries
+function chunkArray<T>(array: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
+}
+
+const CHUNK_SIZE = 30; // Safe size for Supabase .in() queries
 
 interface GenerateTabEnhancedProps {
   projectId: string;
@@ -79,6 +91,10 @@ export function GenerateTabEnhanced({
   const [faceFoundations, setFaceFoundations] = useState<FaceFoundation[]>([]);
   const [talentInfo, setTalentInfo] = useState<{ name: string; front_face_url: string | null } | null>(null);
   const [lastRunTimestamp, setLastRunTimestamp] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  
+  // Persistent active requests tracker for the processing loop
+  const activeRequestsRef = useRef(new Set<string>());
   
   const { toast } = useToast();
 
@@ -222,28 +238,44 @@ export function GenerateTabEnhanced({
     return () => clearInterval(interval);
   }, [generationStartTime, isGenerating]);
 
-  // Poll for output counts when generating
+  // Poll for output counts when generating - with chunked queries
   useEffect(() => {
     if (currentBatchJobIds.length === 0) {
       return;
     }
 
     const fetchOutputs = async () => {
-      const { data: outputs } = await supabase
-        .from("ai_apply_outputs")
-        .select("id, stored_url, view, attempt_index, status, look_id")
-        .in("job_id", currentBatchJobIds)
-        .order("created_at", { ascending: true });
+      try {
+        const chunks = chunkArray(currentBatchJobIds, CHUNK_SIZE);
+        const allOutputs: any[] = [];
 
-      if (outputs) {
+        for (const chunk of chunks) {
+          const { data: outputs, error } = await supabase
+            .from("ai_apply_outputs")
+            .select("id, stored_url, view, attempt_index, status, look_id")
+            .in("job_id", chunk)
+            .order("created_at", { ascending: true });
+
+          if (error) {
+            console.error("Error fetching outputs chunk:", error);
+            setFetchError(`Error fetching outputs: ${error.message}`);
+            return;
+          }
+
+          if (outputs) {
+            allOutputs.push(...outputs);
+          }
+        }
+
+        setFetchError(null);
         setOutputCounts({
-          completed: outputs.filter(o => o.status === "completed").length,
-          failed: outputs.filter(o => o.status === "failed").length,
-          pending: outputs.filter(o => o.status === "pending").length,
-          generating: outputs.filter(o => o.status === "generating").length,
+          completed: allOutputs.filter(o => o.status === "completed").length,
+          failed: allOutputs.filter(o => o.status === "failed").length,
+          pending: allOutputs.filter(o => o.status === "pending").length,
+          generating: allOutputs.filter(o => o.status === "generating").length,
         });
         
-        const completedWithImages = outputs
+        const completedWithImages = allOutputs
           .filter(o => o.status === "completed" && o.stored_url)
           .map(o => ({
             id: o.id,
@@ -254,6 +286,9 @@ export function GenerateTabEnhanced({
             look_id: o.look_id ?? "",
           }));
         setGeneratedOutputs(completedWithImages);
+      } catch (error: any) {
+        console.error("Error in fetchOutputs:", error);
+        setFetchError(`Error fetching outputs: ${error.message}`);
       }
     };
 
@@ -262,18 +297,32 @@ export function GenerateTabEnhanced({
     return () => clearInterval(interval);
   }, [currentBatchJobIds]);
 
-  // Check for job completion
+  // Check for job completion - with chunked queries
   useEffect(() => {
     if (!isGenerating || currentBatchJobIds.length === 0) return;
 
     const checkJobs = async () => {
-      const { data: jobs } = await supabase
-        .from("ai_apply_jobs")
-        .select("id, status")
-        .in("id", currentBatchJobIds);
+      try {
+        const chunks = chunkArray(currentBatchJobIds, CHUNK_SIZE);
+        const allJobs: any[] = [];
 
-      if (jobs) {
-        const allDone = jobs.every(j => j.status === "completed" || j.status === "failed");
+        for (const chunk of chunks) {
+          const { data: jobs, error } = await supabase
+            .from("ai_apply_jobs")
+            .select("id, status")
+            .in("id", chunk);
+
+          if (error) {
+            console.error("Error checking jobs chunk:", error);
+            return;
+          }
+
+          if (jobs) {
+            allJobs.push(...jobs);
+          }
+        }
+
+        const allDone = allJobs.length > 0 && allJobs.every(j => j.status === "completed" || j.status === "failed");
         if (allDone) {
           setIsGenerating(false);
           refreshTracking();
@@ -282,6 +331,8 @@ export function GenerateTabEnhanced({
             description: `Generated ${outputCounts.completed} images` 
           });
         }
+      } catch (error) {
+        console.error("Error in checkJobs:", error);
       }
     };
 
@@ -296,31 +347,47 @@ export function GenerateTabEnhanced({
 
     let isProcessing = false;
     const maxConcurrent = 3;
-    const activeRequests = new Set<string>();
 
     const processPendingOutputs = async () => {
       if (isProcessing) return;
       isProcessing = true;
 
       try {
-        // Check for pending outputs across all jobs
-        const { data: pendingOutputs } = await supabase
-          .from("ai_apply_outputs")
-          .select("id, job_id, look_id, view")
-          .in("job_id", currentBatchJobIds)
-          .eq("status", "pending")
-          .limit(maxConcurrent * 2); // Fetch a few extra for the queue
+        // Use chunked queries to find pending outputs
+        const chunks = chunkArray(currentBatchJobIds, CHUNK_SIZE);
+        const allPendingOutputs: any[] = [];
 
-        if (!pendingOutputs || pendingOutputs.length === 0) {
+        for (const chunk of chunks) {
+          const { data: pendingOutputs, error } = await supabase
+            .from("ai_apply_outputs")
+            .select("id, job_id, look_id, view")
+            .in("job_id", chunk)
+            .eq("status", "pending")
+            .limit(10); // Limit per chunk
+
+          if (error) {
+            console.error("Error fetching pending outputs chunk:", error);
+            continue;
+          }
+
+          if (pendingOutputs) {
+            allPendingOutputs.push(...pendingOutputs);
+          }
+          
+          // Stop early if we have enough
+          if (allPendingOutputs.length >= maxConcurrent * 2) break;
+        }
+
+        if (allPendingOutputs.length === 0) {
           isProcessing = false;
           return;
         }
 
         // Group by look_id + view to avoid duplicate requests
         const lookViewPairs = new Map<string, { lookId: string; view: string; jobId: string }>();
-        for (const output of pendingOutputs) {
+        for (const output of allPendingOutputs) {
           const key = `${output.look_id}-${output.view}`;
-          if (!lookViewPairs.has(key) && !activeRequests.has(key)) {
+          if (!lookViewPairs.has(key) && !activeRequestsRef.current.has(key)) {
             lookViewPairs.set(key, {
               lookId: output.look_id!,
               view: output.view,
@@ -329,13 +396,16 @@ export function GenerateTabEnhanced({
           }
         }
 
-        // Limit concurrent requests
-        const pairsToProcess = Array.from(lookViewPairs.values()).slice(0, maxConcurrent - activeRequests.size);
+        // Limit concurrent requests using the ref
+        const availableSlots = maxConcurrent - activeRequestsRef.current.size;
+        const pairsToProcess = Array.from(lookViewPairs.values()).slice(0, availableSlots);
 
         // Invoke edge function for each pending look/view pair
         for (const pair of pairsToProcess) {
           const requestKey = `${pair.lookId}-${pair.view}`;
-          activeRequests.add(requestKey);
+          activeRequestsRef.current.add(requestKey);
+
+          console.log(`[Processing Loop] Invoking generate-ai-apply for ${pair.lookId}/${pair.view}`);
 
           supabase.functions.invoke("generate-ai-apply", {
             body: {
@@ -346,13 +416,19 @@ export function GenerateTabEnhanced({
               views: [pair.view],
               model: selectedModel,
             },
+          }).then((result) => {
+            if (result.error) {
+              console.error(`[Processing Loop] Edge function error for ${pair.lookId}/${pair.view}:`, result.error);
+            }
           }).finally(() => {
-            activeRequests.delete(requestKey);
+            activeRequestsRef.current.delete(requestKey);
           });
         }
 
         // Track last activity
-        setLastActivitySeconds(0);
+        if (pairsToProcess.length > 0) {
+          setLastActivitySeconds(0);
+        }
       } catch (error) {
         console.error("Error processing pending outputs:", error);
       } finally {
@@ -814,6 +890,24 @@ export function GenerateTabEnhanced({
             requiredOptions={attemptsPerView}
             isGenerating={isGenerating}
           />
+        )}
+
+        {/* Error alert */}
+        {fetchError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription className="flex items-center justify-between">
+              <span>{fetchError}</span>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setFetchError(null)}
+                className="ml-4"
+              >
+                Dismiss
+              </Button>
+            </AlertDescription>
+          </Alert>
         )}
 
         {/* Progress panel */}
