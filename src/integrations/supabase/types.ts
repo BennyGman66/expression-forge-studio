@@ -2975,6 +2975,7 @@ export type Database = {
           pose_id: string | null
           pose_url: string | null
           result_url: string | null
+          run_id: string | null
           selected_at: string | null
           shot_type: string | null
           slot: string | null
@@ -2991,6 +2992,7 @@ export type Database = {
           pose_id?: string | null
           pose_url?: string | null
           result_url?: string | null
+          run_id?: string | null
           selected_at?: string | null
           shot_type?: string | null
           slot?: string | null
@@ -3007,6 +3009,7 @@ export type Database = {
           pose_id?: string | null
           pose_url?: string | null
           result_url?: string | null
+          run_id?: string | null
           selected_at?: string | null
           shot_type?: string | null
           slot?: string | null
@@ -3032,6 +3035,86 @@ export type Database = {
             columns: ["pose_id"]
             isOneToOne: false
             referencedRelation: "clay_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repose_outputs_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "repose_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      repose_runs: {
+        Row: {
+          batch_id: string | null
+          brand_id: string | null
+          completed_at: string | null
+          config_snapshot: Json | null
+          created_at: string
+          error_message: string | null
+          heartbeat_at: string | null
+          id: string
+          look_id: string | null
+          output_count: number | null
+          run_index: number
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          batch_id?: string | null
+          brand_id?: string | null
+          completed_at?: string | null
+          config_snapshot?: Json | null
+          created_at?: string
+          error_message?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          look_id?: string | null
+          output_count?: number | null
+          run_index?: number
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          batch_id?: string | null
+          brand_id?: string | null
+          completed_at?: string | null
+          config_snapshot?: Json | null
+          created_at?: string
+          error_message?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          look_id?: string | null
+          output_count?: number | null
+          run_index?: number
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "repose_runs_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "repose_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repose_runs_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "repose_runs_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "talent_looks"
             referencedColumns: ["id"]
           },
         ]

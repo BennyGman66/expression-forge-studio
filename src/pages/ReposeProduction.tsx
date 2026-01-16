@@ -3,22 +3,25 @@ import { HubHeader } from "@/components/layout/HubHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProjectSelectPanel } from "@/components/repose-production/ProjectSelectPanel";
 import { BatchSetupPanel } from "@/components/repose-production/BatchSetupPanel";
-import { GeneratePanel } from "@/components/repose-production/GeneratePanel";
 import { ReviewCurationPanel } from "@/components/repose-production/ReviewCurationPanel";
 import { ExportPanel } from "@/components/repose-production/ExportPanel";
 import { useReposeBatch, useReposeOutputs } from "@/hooks/useReposeBatches";
-import { FolderOpen, Settings, Sparkles, ClipboardList, Download } from "lucide-react";
+import { FolderOpen, Settings, ClipboardList, Download } from "lucide-react";
 
-const VALID_TABS = ["select", "setup", "generate", "review", "export"];
+// Generate tab is now merged into Setup
+const VALID_TABS = ["select", "setup", "review", "export"];
 
 export default function ReposeProduction() {
   const { batchId } = useParams<{ batchId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get("tab");
   
+  // Redirect old 'generate' tab to 'setup'
+  const normalizedTab = tabFromUrl === 'generate' ? 'setup' : tabFromUrl;
+  
   // If we have a batchId, default to setup tab, otherwise select
   const defaultTab = batchId ? "setup" : "select";
-  const activeTab = VALID_TABS.includes(tabFromUrl || "") ? tabFromUrl! : defaultTab;
+  const activeTab = VALID_TABS.includes(normalizedTab || "") ? normalizedTab! : defaultTab;
 
   const { data: batch } = useReposeBatch(batchId);
   const { data: outputs } = useReposeOutputs(batchId);
@@ -29,7 +32,6 @@ export default function ReposeProduction() {
 
   // Determine if tabs should be disabled based on batch state
   const hasBatch = !!batch || !!batchId;
-  const canGenerate = hasBatch && batch?.brand_id;
   // Enable Review/Export if there are any completed outputs
   const hasCompletedOutputs = (outputs?.filter(o => o.status === 'complete').length || 0) > 0;
 
@@ -54,11 +56,7 @@ export default function ReposeProduction() {
               </TabsTrigger>
               <TabsTrigger value="setup" className="gap-2" disabled={!hasBatch}>
                 <Settings className="w-4 h-4" />
-                Batch Setup
-              </TabsTrigger>
-              <TabsTrigger value="generate" className="gap-2" disabled={!canGenerate}>
-                <Sparkles className="w-4 h-4" />
-                Generate
+                Setup + Generate
               </TabsTrigger>
               <TabsTrigger value="review" className="gap-2" disabled={!hasCompletedOutputs}>
                 <ClipboardList className="w-4 h-4" />
@@ -80,10 +78,6 @@ export default function ReposeProduction() {
 
             <TabsContent value="setup">
               <BatchSetupPanel batchId={batchId} />
-            </TabsContent>
-
-            <TabsContent value="generate">
-              <GeneratePanel batchId={batchId} />
             </TabsContent>
 
             <TabsContent value="review">
