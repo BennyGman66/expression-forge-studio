@@ -47,11 +47,43 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
   const [clayPoseCounts, setClayPoseCounts] = useState<ClayPoseCount[]>([]);
   const [loadingCounts, setLoadingCounts] = useState(false);
 
-  // Get unique look IDs from batch items
+  // Look up look_id via source_output_id for items with missing look_id
+  const { data: outputLookMap } = useQuery({
+    queryKey: ["batch-output-look-map", batchItems?.map(i => i.source_output_id).filter(Boolean)],
+    queryFn: async () => {
+      const outputIds = batchItems?.map(i => i.source_output_id).filter(Boolean) as string[];
+      if (outputIds.length === 0) return {};
+      
+      const { data } = await supabase
+        .from("job_outputs")
+        .select("id, job:unified_jobs(look_id)")
+        .in("id", outputIds);
+      
+      // Build a map: source_output_id -> look_id
+      const map: Record<string, string> = {};
+      data?.forEach((output: any) => {
+        if (output.job?.look_id) {
+          map[output.id] = output.job.look_id;
+        }
+      });
+      return map;
+    },
+    enabled: !!batchItems && batchItems.some(i => !i.look_id && i.source_output_id),
+  });
+
+  // Get unique look IDs from batch items (including fallback from output lookup)
   const lookIds = useMemo(() => {
     if (!batchItems?.length) return [];
-    return [...new Set(batchItems.map(i => i.look_id).filter(Boolean))] as string[];
-  }, [batchItems]);
+    const ids = new Set<string>();
+    batchItems.forEach(i => {
+      if (i.look_id) {
+        ids.add(i.look_id);
+      } else if (outputLookMap?.[i.source_output_id || '']) {
+        ids.add(outputLookMap[i.source_output_id || '']);
+      }
+    });
+    return [...ids];
+  }, [batchItems, outputLookMap]);
 
   // Fetch look details (names and product types) for items in batch
   const { data: lookDetails } = useQuery({
@@ -74,9 +106,10 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     const grouped = new Map<string, LookGroup>();
     
     batchItems.forEach(item => {
-      const lookId = item.look_id || 'unknown';
+      // Use look_id from item, or fall back to the output lookup
+      const lookId = item.look_id || outputLookMap?.[item.source_output_id || ''] || 'unknown';
+      
       if (!grouped.has(lookId)) {
-        // Find the look name from lookDetails
         const lookDetail = lookDetails?.find(l => l.id === lookId);
         grouped.set(lookId, {
           lookId,
@@ -92,7 +125,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     });
     
     return Array.from(grouped.values());
-  }, [batchItems, lookDetails]);
+  }, [batchItems, lookDetails, outputLookMap]);
 
   // Load clay pose counts per brand
   useEffect(() => {
