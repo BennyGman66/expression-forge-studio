@@ -9,7 +9,7 @@ export const VIEW_LABELS: Record<string, string> = {
   // Legacy aliases for backwards compatibility
   full_front: 'Front',
   cropped_front: 'Front',
-  side: 'Detail',
+  side: 'Side',
 };
 
 export interface LookSourceImage {
