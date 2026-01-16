@@ -251,13 +251,10 @@ export default function PublicJobWorkspace() {
     },
   });
 
-  // Resubmit mutation for NEEDS_CHANGES jobs
+  // Resubmit mutation for NEEDS_CHANGES jobs - carries forward approved assets
   const resubmitJob = useMutation({
     mutationFn: async () => {
       if (!latestSubmission?.id) throw new Error('No submission to resubmit');
-      
-      // Upload replacement files and create new submission assets
-      const newAssets: { submission_id: string; file_url: string; label: string; sort_index: number; freelancer_identity_id: string }[] = [];
       
       // Create a new submission with incremented version number
       const { data: newSubmission, error: subError } = await supabase
@@ -273,40 +270,72 @@ export default function PublicJobWorkspace() {
       
       if (subError) throw subError;
       
-      // Upload replacement files
-      for (const [assetId, { file }] of replacements.entries()) {
-        const safeName = sanitizeFileName(file.name);
-        const fileName = `public/${job?.id}/${Date.now()}-resubmit-${safeName}`;
-        const { error: uploadError } = await supabase.storage
-          .from('images')
-          .upload(fileName, file);
+      // Fetch all current assets from previous submission (not already superseded)
+      const { data: previousAssets, error: fetchError } = await supabase
+        .from('submission_assets')
+        .select('*')
+        .eq('submission_id', latestSubmission.id)
+        .is('superseded_by', null);
+      
+      if (fetchError) throw fetchError;
+      
+      const newAssets: Array<{
+        submission_id: string;
+        file_url: string;
+        label: string;
+        sort_index: number;
+        freelancer_identity_id: string;
+        review_status?: string;
+        reviewed_by_user_id?: string;
+        reviewed_at?: string;
+      }> = [];
+      
+      // Process each previous asset
+      for (const asset of previousAssets || []) {
+        const hasReplacement = replacements.has(asset.id);
         
-        if (uploadError) throw uploadError;
-        
-        const { data: { publicUrl } } = supabase.storage
-          .from('images')
-          .getPublicUrl(fileName);
-        
-        // Find original asset to get label
-        const { data: originalAsset } = await supabase
-          .from('submission_assets')
-          .select('label, sort_index')
-          .eq('id', assetId)
-          .single();
-        
-        newAssets.push({
-          submission_id: newSubmission.id,
-          file_url: publicUrl,
-          label: originalAsset?.label || file.name,
-          sort_index: originalAsset?.sort_index || 0,
-          freelancer_identity_id: identity?.id!,
-        });
+        if (asset.review_status === 'APPROVED' && !hasReplacement) {
+          // Carry forward approved assets to new submission (preserve approval status)
+          newAssets.push({
+            submission_id: newSubmission.id,
+            file_url: asset.file_url!,
+            label: asset.label || '',
+            sort_index: asset.sort_index,
+            freelancer_identity_id: identity?.id!,
+            review_status: 'APPROVED',
+            reviewed_by_user_id: asset.reviewed_by_user_id || undefined,
+            reviewed_at: asset.reviewed_at || undefined,
+          });
+        } else if (hasReplacement) {
+          // Upload replacement file
+          const { file } = replacements.get(asset.id)!;
+          const safeName = sanitizeFileName(file.name);
+          const fileName = `public/${job?.id}/${Date.now()}-resubmit-${safeName}`;
+          const { error: uploadError } = await supabase.storage
+            .from('images')
+            .upload(fileName, file);
+          
+          if (uploadError) throw uploadError;
+          
+          const { data: { publicUrl } } = supabase.storage
+            .from('images')
+            .getPublicUrl(fileName);
+          
+          newAssets.push({
+            submission_id: newSubmission.id,
+            file_url: publicUrl,
+            label: asset.label || file.name,
+            sort_index: asset.sort_index,
+            freelancer_identity_id: identity?.id!,
+          });
+        }
+        // Assets with CHANGES_REQUESTED but no replacement are excluded (need to be replaced)
         
         // Mark old asset as superseded
         await supabase
           .from('submission_assets')
           .update({ superseded_by: newSubmission.id })
-          .eq('id', assetId);
+          .eq('id', asset.id);
       }
       
       // Insert new assets

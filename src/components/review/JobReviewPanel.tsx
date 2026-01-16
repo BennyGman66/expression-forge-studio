@@ -39,11 +39,14 @@ import { useJob, useJobOutputs } from '@/hooks/useJobs';
 import { useAuth } from '@/contexts/AuthContext';
 import { SubmissionAsset, AnnotationRect, SubmissionStatus, ImageAnnotation, AssetReviewStatus } from '@/types/review';
 import { supabase } from '@/integrations/supabase/client';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   X,
   Check,
   AlertTriangle,
+  Upload,
+  Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -63,6 +66,7 @@ interface JobReviewPanelProps {
 export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const { isInternal, user } = useAuth();
   const imageViewerRef = useRef<ImageViewerHandle>(null);
+  const queryClient = useQueryClient();
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<SubmissionAsset | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -74,6 +78,8 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const [showApproveDialog, setShowApproveDialog] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [uploadingAdmin, setUploadingAdmin] = useState(false);
+  const adminFileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: job, isLoading: jobLoading } = useJob(jobId);
   const { data: submissions = [], refetch: refetchSubmissions } = useJobSubmissions(jobId);
@@ -354,6 +360,55 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     }
   };
 
+  // Admin upload handler
+  const handleAdminUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !selectedSubmission) return;
+    
+    setUploadingAdmin(true);
+    try {
+      for (const file of Array.from(files)) {
+        // Sanitize filename
+        const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const fileName = `admin-uploads/${jobId}/${Date.now()}-${safeName}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('images')
+          .upload(fileName, file);
+        
+        if (uploadError) throw uploadError;
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('images')
+          .getPublicUrl(fileName);
+        
+        // Create submission asset
+        const { error: assetError } = await supabase
+          .from('submission_assets')
+          .insert({
+            submission_id: selectedSubmission.id,
+            file_url: publicUrl,
+            label: `Admin: ${file.name}`,
+            sort_index: assets.length,
+          });
+        
+        if (assetError) throw assetError;
+      }
+      
+      toast.success(`${files.length} asset(s) added`);
+      queryClient.invalidateQueries({ queryKey: ['submission-assets', selectedSubmission.id] });
+    } catch (err: any) {
+      console.error('Admin upload error:', err);
+      toast.error(err.message || 'Upload failed');
+    } finally {
+      setUploadingAdmin(false);
+      // Reset input
+      if (adminFileInputRef.current) {
+        adminFileInputRef.current.value = '';
+      }
+    }
+  };
+
   const isLoading = jobLoading || isBackfilling;
   const noSubmissions = !isLoading && submissions.length === 0 && jobOutputs.length === 0;
   
@@ -476,6 +531,40 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                 <span className="text-xs text-muted-foreground">
                   No further action needed
                 </span>
+              </>
+            )}
+            
+            {/* Admin Upload Button */}
+            {isInternal && !isViewingSuperseded && (
+              <>
+                <div className="h-4 w-px bg-border" />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={uploadingAdmin}
+                      onClick={() => adminFileInputRef.current?.click()}
+                    >
+                      {uploadingAdmin ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                      Add Asset
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Upload assets on behalf of freelancer</TooltipContent>
+                </Tooltip>
+                <input
+                  ref={adminFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleAdminUpload}
+                />
               </>
             )}
             
