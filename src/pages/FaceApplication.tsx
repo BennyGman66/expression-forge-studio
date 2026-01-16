@@ -6,8 +6,6 @@ import { LooksUploadTab } from "@/components/face-application/LooksUploadTab";
 import { HeadCropTab } from "@/components/face-application/HeadCropTab";
 import { FaceMatchTab } from "@/components/face-application/FaceMatchTab";
 import { GenerateTabEnhanced } from "@/components/face-application/generate";
-import { ReviewTab } from "@/components/face-application/ReviewTab";
-import { AIApplyTab } from "@/components/face-application/AIApplyTab";
 import { SendToJobBoardTab } from "@/components/face-application/SendToJobBoardTab";
 import { FaceAppProjectsGrid } from "@/components/face-application/FaceAppProjectsGrid";
 import { useFaceApplicationProjects } from "@/hooks/useFaceApplicationProjects";
@@ -17,14 +15,12 @@ import { WorkflowFilterBar } from "@/components/face-application/WorkflowFilterB
 import { TabBadge } from "@/components/face-application/TabBadge";
 import { TAB_NAMES, TAB_LABELS, type TabName } from "@/types/workflow-state";
 
-// Tab configuration
+// Tab configuration - streamlined workflow
 const TABS: { value: TabName; label: string }[] = [
   { value: 'upload', label: 'Looks Upload' },
   { value: 'crop', label: 'Head Crop' },
   { value: 'match', label: 'Face Match' },
   { value: 'generate', label: 'Generate' },
-  { value: 'review', label: 'Review' },
-  { value: 'ai_apply', label: 'AI Apply' },
   { value: 'handoff', label: 'Send to Job Board' },
 ];
 
@@ -231,21 +227,8 @@ function FaceApplicationWorkspace({
               lookId={selectedLookId}
               talentId={selectedTalentId}
               selectedLookIds={selectedLookIds}
-              onContinue={() => setActiveTab("review")}
+              onContinue={() => setActiveTab("handoff")}
             />
-          </TabsContent>
-
-          <TabsContent value="review" className="mt-0">
-            <ReviewTab
-              projectId={projectId}
-              lookId={selectedLookId}
-              talentId={selectedTalentId}
-              selectedLookIds={selectedLookIds}
-            />
-          </TabsContent>
-
-          <TabsContent value="ai_apply" className="mt-0">
-            <AIApplyTab projectId={projectId} selectedLookIds={selectedLookIds} />
           </TabsContent>
 
           <TabsContent value="handoff" className="mt-0">

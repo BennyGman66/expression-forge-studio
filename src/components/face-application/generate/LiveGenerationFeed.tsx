@@ -21,12 +21,14 @@ interface LiveOutput {
   updated_at?: string | null;
   lookName?: string;
   isNew?: boolean;
+  is_selected?: boolean | null;
 }
 
 interface LiveGenerationFeedProps {
   projectId: string;
   isGenerating: boolean;
   onCleanupStalled?: (stalledIds: string[]) => void;
+  onSelectionChange?: (selectedIds: Set<string>) => void;
 }
 
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
@@ -34,15 +36,38 @@ const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 export function LiveGenerationFeed({ 
   projectId, 
   isGenerating,
-  onCleanupStalled 
+  onCleanupStalled,
+  onSelectionChange
 }: LiveGenerationFeedProps) {
   const [outputs, setOutputs] = useState<LiveOutput[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [stalledCount, setStalledCount] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const [showAll, setShowAll] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const { toast } = useToast();
+
+  // Toggle selection for an output
+  const handleToggleSelect = async (outputId: string) => {
+    const isCurrentlySelected = selectedIds.has(outputId);
+    const newSelected = new Set(selectedIds);
+    
+    if (isCurrentlySelected) {
+      newSelected.delete(outputId);
+    } else {
+      newSelected.add(outputId);
+    }
+    
+    setSelectedIds(newSelected);
+    onSelectionChange?.(newSelected);
+    
+    // Persist to database
+    await supabase
+      .from('ai_apply_outputs')
+      .update({ is_selected: !isCurrentlySelected })
+      .eq('id', outputId);
+  };
 
   // Fetch recent outputs for this project
   useEffect(() => {
@@ -74,7 +99,8 @@ export function LiveGenerationFeed({
           status,
           look_id,
           job_id,
-          created_at
+          created_at,
+          is_selected
         `)
         .in("job_id", jobIds)
         .gte("created_at", since)
@@ -97,6 +123,12 @@ export function LiveGenerationFeed({
         }));
 
         setOutputs(enriched);
+        
+        // Sync selection state from DB
+        const dbSelected = new Set(
+          enriched.filter(o => o.is_selected).map(o => o.id)
+        );
+        setSelectedIds(dbSelected);
 
         // Count stalled
         const now = Date.now();
@@ -286,6 +318,12 @@ export function LiveGenerationFeed({
               Clear
             </Button>
 
+            {selectedIds.size > 0 && (
+              <Badge variant="default" className="gap-1 bg-primary">
+                <Check className="w-3 h-3" />
+                {selectedIds.size} selected
+              </Badge>
+            )}
             <Badge variant="outline" className="gap-1">
               <Check className="w-3 h-3 text-green-500" />
               {completedCount}
@@ -332,7 +370,9 @@ export function LiveGenerationFeed({
           {displayOutputs.map((output) => (
             <OutputThumbnail 
               key={output.id} 
-              output={output} 
+              output={output}
+              isSelected={selectedIds.has(output.id)}
+              onToggleSelect={handleToggleSelect}
             />
           ))}
         </div>
@@ -353,7 +393,13 @@ export function LiveGenerationFeed({
   );
 }
 
-function OutputThumbnail({ output }: { output: LiveOutput }) {
+interface OutputThumbnailProps {
+  output: LiveOutput;
+  isSelected: boolean;
+  onToggleSelect: (id: string) => void;
+}
+
+function OutputThumbnail({ output, isSelected, onToggleSelect }: OutputThumbnailProps) {
   const isCompleted = output.status === "completed";
   const isGenerating = output.status === "generating";
   const isFailed = output.status === "failed";
@@ -363,12 +409,23 @@ function OutputThumbnail({ output }: { output: LiveOutput }) {
   const isStalled = isGenerating && output.created_at && 
     Date.now() - new Date(output.created_at).getTime() > STALL_THRESHOLD_MS;
 
+  const canSelect = isCompleted && output.stored_url;
+
+  const handleClick = () => {
+    if (canSelect) {
+      onToggleSelect(output.id);
+    }
+  };
+
   return (
     <div 
+      onClick={handleClick}
       className={cn(
         "relative group w-16 h-16 rounded-lg overflow-hidden border transition-all duration-300",
+        canSelect && "cursor-pointer hover:scale-105",
         output.isNew && "animate-in zoom-in-90 fade-in duration-500",
-        isCompleted && "border-green-500/50",
+        isSelected && "ring-2 ring-primary ring-offset-1 border-primary",
+        !isSelected && isCompleted && "border-green-500/50",
         isGenerating && !isStalled && "border-blue-500/50",
         isStalled && "border-amber-500",
         isFailed && "border-red-500/50",
@@ -404,10 +461,18 @@ function OutputThumbnail({ output }: { output: LiveOutput }) {
         </div>
       )}
 
+      {/* Selection checkmark overlay */}
+      {isSelected && (
+        <div className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+          <Check className="w-3 h-3 text-primary-foreground" />
+        </div>
+      )}
+
       {/* Status badge */}
       <div className={cn(
         "absolute inset-x-0 bottom-0 py-0.5 text-[9px] text-center font-medium truncate",
-        isCompleted && "bg-green-500/80 text-white",
+        isSelected && "bg-primary text-primary-foreground",
+        !isSelected && isCompleted && "bg-green-500/80 text-white",
         isGenerating && !isStalled && "bg-blue-500/80 text-white",
         isStalled && "bg-amber-500/80 text-white",
         isFailed && "bg-red-500/80 text-white",
@@ -417,10 +482,11 @@ function OutputThumbnail({ output }: { output: LiveOutput }) {
       </div>
 
       {/* Hover tooltip */}
-      <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[9px] p-1">
+      <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white text-[9px] p-1 pointer-events-none">
         <span className="truncate max-w-full">{output.lookName || 'Unknown'}</span>
         <span>#{(output.attempt_index ?? 0) + 1}</span>
         {isStalled && <span className="text-amber-300">Stalled</span>}
+        {canSelect && <span className="text-primary-foreground">{isSelected ? '✓ Selected' : 'Click to select'}</span>}
       </div>
     </div>
   );
