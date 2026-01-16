@@ -473,6 +473,43 @@ export function useResetJob() {
   });
 }
 
+// Hook for admin to upload outputs on behalf of a user
+export function useAddJobOutput() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ jobId, fileUrl, label }: { 
+      jobId: string; 
+      fileUrl: string; 
+      label?: string;
+    }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data, error } = await supabase
+        .from("job_outputs")
+        .insert({
+          job_id: jobId,
+          file_url: fileUrl,
+          label: label || null,
+          uploaded_by: user.id,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (_, { jobId }) => {
+      queryClient.invalidateQueries({ queryKey: ["job-outputs", jobId] });
+      toast.success("Output uploaded");
+    },
+    onError: (error) => {
+      toast.error(`Failed to add output: ${error.message}`);
+    },
+  });
+}
+
 // Hook for freelancer dashboard: fetches claimable open jobs + user's assigned jobs
 export function useFreelancerJobs(userId: string | undefined) {
   return useQuery({
