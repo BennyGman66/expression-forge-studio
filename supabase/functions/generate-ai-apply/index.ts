@@ -193,8 +193,14 @@ serve(async (req) => {
         .eq('id', jobId);
     }
 
+    // Normalize view names - always use 'front' not 'full_front' or 'cropped_front'
+    const normalizeView = (v: string): string => {
+      if (v === 'full_front' || v === 'cropped_front') return 'front';
+      return v;
+    };
+
     // Determine which views to process
-    const viewsToProcess = view ? [view] : ['front', 'back', 'detail'];
+    const viewsToProcess = view ? [normalizeView(view)] : ['front', 'back', 'detail'];
 
     // Get source images (simplified query - no FK join needed)
     const { data: sourceImages } = await supabase
@@ -349,6 +355,9 @@ serve(async (req) => {
       // Only create NEW outputs if we need more than what's already pending
       const newOutputsNeeded = Math.max(0, attemptsToCreate - pendingCount);
       
+      // Normalize view name before inserting
+      const normalizedViewName = normalizeView(currentView);
+      
       // Create output records with 'pending' status (not 'generating')
       for (let i = 0; i < newOutputsNeeded; i++) {
         const attemptIndex = startIndex + 1 + i;
@@ -356,7 +365,7 @@ serve(async (req) => {
         await supabase.from('ai_apply_outputs').insert({
           job_id: jobId,
           look_id: lookId,
-          view: currentView,
+          view: normalizedViewName,  // Always use normalized view name
           attempt_index: attemptIndex,
           head_image_id: null,
           head_image_url: talentPortraitUrl,  // Store talent portrait as reference
