@@ -443,11 +443,14 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
       
       // Sync new selection to Job Board if the look already has an active job
       if (newSelected && output.stored_url) {
+        // Get the most recent active job (handles multiple jobs for same look)
         const { data: existingJob } = await supabase
           .from('unified_jobs')
           .select('id')
           .eq('look_id', output.look_id)
           .in('status', ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'NEEDS_CHANGES'])
+          .order('created_at', { ascending: false })
+          .limit(1)
           .maybeSingle();
 
         if (existingJob) {
@@ -458,34 +461,60 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
             : viewUpper === 'BACK' ? 'HEAD_RENDER_BACK'
             : 'HEAD_RENDER_FRONT';
 
-          // Create artifact for the new head render
-          const { data: artifact } = await supabase
+          // Check if artifact already exists for this look+type
+          const { data: existingArtifact } = await supabase
             .from('unified_artifacts')
-            .insert({
-              project_id: projectId,
-              look_id: output.look_id,
-              type: artifactType,
-              file_url: output.stored_url,
-              source_table: 'ai_apply_outputs',
-              source_id: output.id,
-              metadata: { view: normalizedView, added_after_handoff: true },
-            })
-            .select()
-            .single();
+            .select('id')
+            .eq('look_id', output.look_id)
+            .eq('type', artifactType)
+            .limit(1)
+            .maybeSingle();
 
-          if (artifact) {
+          if (existingArtifact) {
+            // UPDATE existing artifact with new render
             await supabase
-              .from('job_inputs')
-              .insert({
-                job_id: existingJob.id,
-                artifact_id: artifact.id,
-                label: `Head render ${normalizedView} (updated)`,
-              });
-            console.log('[ReviewSelectTab] Synced selection to Job Board:', { 
+              .from('unified_artifacts')
+              .update({
+                file_url: output.stored_url,
+                source_id: output.id,
+                metadata: { view: normalizedView, updated_after_handoff: true },
+              })
+              .eq('id', existingArtifact.id);
+            console.log('[ReviewSelectTab] Updated existing artifact:', { 
               lookId: output.look_id, 
               view: normalizedView, 
-              artifactId: artifact.id 
+              artifactId: existingArtifact.id 
             });
+          } else {
+            // Create new artifact for the head render
+            const { data: artifact } = await supabase
+              .from('unified_artifacts')
+              .insert({
+                project_id: projectId,
+                look_id: output.look_id,
+                type: artifactType,
+                file_url: output.stored_url,
+                source_table: 'ai_apply_outputs',
+                source_id: output.id,
+                metadata: { view: normalizedView, added_after_handoff: true },
+              })
+              .select()
+              .single();
+
+            if (artifact) {
+              await supabase
+                .from('job_inputs')
+                .insert({
+                  job_id: existingJob.id,
+                  artifact_id: artifact.id,
+                  label: `Head render ${normalizedView}`,
+                });
+              console.log('[ReviewSelectTab] Created new artifact:', { 
+                lookId: output.look_id, 
+                view: normalizedView, 
+                artifactId: artifact.id 
+              });
+            }
           }
         }
       }
