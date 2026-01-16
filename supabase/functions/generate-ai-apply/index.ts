@@ -196,27 +196,32 @@ serve(async (req) => {
     // Determine which views to process
     const viewsToProcess = view ? [view] : ['full_front', 'cropped_front', 'back', 'detail'];
 
-    // Get source images with Digital Talent portrait via talent_looks join
-    // The digital_talent_id is stored on talent_looks, NOT on look_source_images
+    // Get source images (simplified query - no FK join needed)
     const { data: sourceImages } = await supabase
       .from('look_source_images')
-      .select(`
-        id, look_id, view, source_url, head_cropped_url, matched_face_url,
-        talent_look:talent_looks!look_id (
-          digital_talent_id,
-          digital_talent:digital_talents!digital_talent_id (
-            id, name, front_face_url
-          )
-        )
-      `)
+      .select('id, look_id, view, source_url, head_cropped_url, matched_face_url')
       .eq('look_id', lookId);
 
     console.log(`[AI Apply] Found ${sourceImages?.length || 0} source images for look`);
-    
+
+    // Get the Digital Talent's portrait via talent_looks (separate query)
+    const { data: talentLook } = await supabase
+      .from('talent_looks')
+      .select(`
+        digital_talent_id,
+        digital_talent:digital_talents!digital_talent_id (
+          id, name, front_face_url
+        )
+      `)
+      .eq('id', lookId)
+      .single();
+
+    const talentPortraitUrl = (talentLook?.digital_talent as any)?.front_face_url;
+    console.log(`[AI Apply] Talent portrait: ${talentPortraitUrl ? 'YES (' + talentPortraitUrl.substring(0, 50) + '...)' : 'NO'}`);
+
     // Log what we have for debugging
     for (const img of sourceImages || []) {
-      const talentPortrait = (img.talent_look as any)?.digital_talent?.front_face_url;
-      console.log(`[AI Apply] Source image ${img.view}: crop=${img.head_cropped_url ? 'YES' : 'NO'}, paired_face=${img.matched_face_url ? 'YES' : 'NO'}, talent_portrait=${talentPortrait ? 'YES' : 'NO'}`);
+      console.log(`[AI Apply] Source image ${img.view}: crop=${img.head_cropped_url ? 'YES' : 'NO'}, paired_face=${img.matched_face_url ? 'YES' : 'NO'}`);
     }
 
     // View name mapping: generation views -> database views
@@ -226,6 +231,20 @@ serve(async (req) => {
       'back': ['back'],
       'detail': ['detail', 'side'],
     };
+
+    // Check if we have talent portrait before processing any views
+    if (!talentPortraitUrl) {
+      console.log(`[AI Apply] SKIP ALL: No digital talent portrait - Digital Talent not linked to this look`);
+      await supabase
+        .from('ai_apply_jobs')
+        .update({ status: 'failed', updated_at: new Date().toISOString() })
+        .eq('id', jobId);
+      
+      return new Response(
+        JSON.stringify({ success: false, error: 'No digital talent portrait linked to this look' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      );
+    }
 
     // Process each view
     for (const currentView of viewsToProcess) {
@@ -252,10 +271,9 @@ serve(async (req) => {
       // CORRECT 3 INPUTS:
       // - Image 1: head_cropped_url (the crop we describe in the prompt)
       // - Image 2: matched_face_url (paired face from Face Match stage)
-      // - Image 3: digital_talents.front_face_url (talent's primary portrait)
+      // - Image 3: digital_talents.front_face_url (talent's primary portrait - fetched above)
       const cropImageUrl = bodyImage.head_cropped_url;                              // Image 1
       const pairedFaceUrl = bodyImage.matched_face_url;                             // Image 2
-      const talentPortraitUrl = (bodyImage.talent_look as any)?.digital_talent?.front_face_url;  // Image 3
 
       if (!cropImageUrl) {
         console.log(`[AI Apply] SKIP: No head_cropped_url for ${currentView} - Head Crop stage not completed`);
@@ -264,11 +282,6 @@ serve(async (req) => {
 
       if (!pairedFaceUrl) {
         console.log(`[AI Apply] SKIP: No matched_face_url for ${currentView} - Face Match stage not completed`);
-        continue;
-      }
-
-      if (!talentPortraitUrl) {
-        console.log(`[AI Apply] SKIP: No digital talent portrait for ${currentView} - Digital Talent not linked`);
         continue;
       }
 
