@@ -4,9 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { OptimizedImage } from '@/components/shared/OptimizedImage';
+
 interface ReviewSelectTabProps {
   projectId: string;
   onContinue?: () => void;
@@ -27,6 +30,7 @@ interface LookGroup {
   lookId: string;
   lookName: string;
   views: Record<string, OutputItem[]>;
+  selectedCount: number;
 }
 
 const VIEW_ORDER = ['full_front', 'cropped_front', 'front', 'back', 'side', 'detail'];
@@ -45,6 +49,8 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
   const [loading, setLoading] = useState(true);
   const [expandedLooks, setExpandedLooks] = useState<Set<string>>(new Set());
   const [selectingId, setSelectingId] = useState<string | null>(null);
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
+  const [expandedUnselectedViews, setExpandedUnselectedViews] = useState<Set<string>>(new Set());
 
   // Fetch outputs and look names
   useEffect(() => {
@@ -92,6 +98,13 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
       
       // Auto-expand all looks initially
       setExpandedLooks(new Set(lookIds as string[]));
+      
+      // Auto-enable "selected only" if there are selections
+      const hasSelections = outputData?.some(o => o.is_selected);
+      if (hasSelections) {
+        setShowSelectedOnly(true);
+      }
+      
       setLoading(false);
     }
 
@@ -142,6 +155,7 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
           lookId: output.look_id,
           lookName: looks[output.look_id] || output.look_id.slice(0, 8),
           views: {},
+          selectedCount: 0,
         };
         lookMap.set(output.look_id, group);
         groups.push(group);
@@ -153,12 +167,24 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
       group.views[output.view].push(output);
     }
 
-    // Sort views within each group
+    // Sort views within each group and calculate selected count
     for (const group of groups) {
+      let selectedCount = 0;
       for (const view of Object.keys(group.views)) {
-        group.views[view].sort((a, b) => a.attempt_index - b.attempt_index);
+        // Sort with selected first, then by attempt index
+        group.views[view].sort((a, b) => {
+          if (a.is_selected !== b.is_selected) return b.is_selected ? 1 : -1;
+          return a.attempt_index - b.attempt_index;
+        });
+        if (group.views[view].some(o => o.is_selected)) {
+          selectedCount++;
+        }
       }
+      group.selectedCount = selectedCount;
     }
+
+    // Sort groups by selected count (more selections first)
+    groups.sort((a, b) => b.selectedCount - a.selectedCount);
 
     return groups;
   }, [outputs, looks]);
@@ -230,6 +256,19 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     });
   };
 
+  const toggleViewExpanded = (lookId: string, view: string) => {
+    const key = `${lookId}:${view}`;
+    setExpandedUnselectedViews(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -251,11 +290,18 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     );
   }
 
+  // Filter groups for "selected only" mode
+  const displayGroups = showSelectedOnly 
+    ? groupedByLook.filter(g => g.selectedCount > 0)
+    : groupedByLook;
+
+  const hasNoSelectionsInSelectedMode = showSelectedOnly && stats.selectedViews === 0;
+
   return (
     <div className="space-y-4">
       {/* Header with stats */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
           <h2 className="text-lg font-semibold">Review & Select</h2>
           <Badge variant="outline" className="text-sm">
             {stats.selectedViews} / {stats.totalViews} views selected
@@ -265,138 +311,222 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
           </Badge>
         </div>
         
-        {onContinue && stats.selectedViews > 0 && (
-          <Button onClick={onContinue} className="gap-2">
-            Continue to Handoff
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        )}
+        <div className="flex items-center gap-4">
+          {/* Show selected only toggle */}
+          <div className="flex items-center gap-2">
+            <Switch
+              id="show-selected"
+              checked={showSelectedOnly}
+              onCheckedChange={setShowSelectedOnly}
+            />
+            <Label htmlFor="show-selected" className="text-sm flex items-center gap-1.5 cursor-pointer">
+              {showSelectedOnly ? (
+                <><Eye className="h-4 w-4" /> Selected only</>
+              ) : (
+                <><EyeOff className="h-4 w-4 text-muted-foreground" /> All outputs</>
+              )}
+            </Label>
+          </div>
+
+          {onContinue && stats.selectedViews > 0 && (
+            <Button onClick={onContinue} className="gap-2">
+              Continue to Handoff
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Instructions */}
-      <p className="text-sm text-muted-foreground">
-        Click on an image to select it as the best output for that view. Only one selection per view.
-      </p>
+      {/* Selected summary */}
+      {stats.selectedViews > 0 && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+          <Star className="h-4 w-4 text-primary fill-primary" />
+          <span>
+            <strong className="text-foreground">{stats.selectedViews}</strong> selections across{' '}
+            <strong className="text-foreground">{groupedByLook.filter(g => g.selectedCount > 0).length}</strong> looks
+          </span>
+        </div>
+      )}
+
+      {/* Instructions or empty state */}
+      {hasNoSelectionsInSelectedMode ? (
+        <Card className="border-dashed">
+          <CardContent className="py-8 text-center">
+            <p className="text-muted-foreground">No selections saved yet.</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Go back to <strong>Generate</strong> and click a completed thumbnail to select it,<br />
+              or switch to "All outputs" to browse and select from here.
+            </p>
+            <Button 
+              variant="outline" 
+              className="mt-4"
+              onClick={() => setShowSelectedOnly(false)}
+            >
+              Show All Outputs
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {showSelectedOnly 
+            ? "Showing only selected outputs. Toggle off to see all attempts."
+            : "Click on an image to select it as the best output for that view. Only one selection per view."}
+        </p>
+      )}
 
       {/* Look groups */}
-      <ScrollArea className="h-[calc(100vh-280px)]">
-        <div className="space-y-4 pr-4">
-          {groupedByLook.map((group) => {
-            const isExpanded = expandedLooks.has(group.lookId);
-            const viewCount = Object.keys(group.views).length;
-            const selectedCount = Object.values(group.views).filter(
-              outputs => outputs.some(o => o.is_selected)
-            ).length;
+      {!hasNoSelectionsInSelectedMode && (
+        <ScrollArea className="h-[calc(100vh-320px)]">
+          <div className="space-y-4 pr-4">
+            {displayGroups.map((group) => {
+              const isExpanded = expandedLooks.has(group.lookId);
+              const viewCount = Object.keys(group.views).length;
+              const selectedCount = group.selectedCount;
 
-            return (
-              <Card key={group.lookId}>
-                <CardHeader 
-                  className="py-3 cursor-pointer hover:bg-muted/50 transition-colors"
-                  onClick={() => toggleLookExpanded(group.lookId)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      {isExpanded ? (
-                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      )}
-                      <CardTitle className="text-base font-medium">
-                        {group.lookName}
-                      </CardTitle>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge 
-                        variant={selectedCount === viewCount ? "default" : "outline"}
-                        className={cn(
-                          "text-xs",
-                          selectedCount === viewCount && "bg-primary"
-                        )}
-                      >
-                        {selectedCount === viewCount ? (
-                          <><Check className="h-3 w-3 mr-1" /> Complete</>
+              // In selected-only mode, filter to only show views with selections
+              const viewsToShow = showSelectedOnly
+                ? VIEW_ORDER.filter(v => group.views[v]?.some(o => o.is_selected))
+                : VIEW_ORDER.filter(v => group.views[v]);
+
+              return (
+                <Card key={group.lookId}>
+                  <CardHeader 
+                    className="py-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => toggleLookExpanded(group.lookId)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
                         ) : (
-                          `${selectedCount}/${viewCount} selected`
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
                         )}
-                      </Badge>
+                        <CardTitle className="text-base font-medium">
+                          {group.lookName}
+                        </CardTitle>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge 
+                          variant={selectedCount === viewCount ? "default" : "outline"}
+                          className={cn(
+                            "text-xs",
+                            selectedCount === viewCount && "bg-primary"
+                          )}
+                        >
+                          {selectedCount === viewCount ? (
+                            <><Check className="h-3 w-3 mr-1" /> Complete</>
+                          ) : (
+                            `${selectedCount}/${viewCount} selected`
+                          )}
+                        </Badge>
+                      </div>
                     </div>
-                  </div>
-                </CardHeader>
+                  </CardHeader>
 
-                {isExpanded && (
-                  <CardContent className="pt-0 space-y-6">
-                    {VIEW_ORDER.filter(v => group.views[v]).map((view) => {
-                      const viewOutputs = group.views[view];
-                      const selectedOutput = viewOutputs.find(o => o.is_selected);
+                  {isExpanded && (
+                    <CardContent className="pt-0 space-y-6">
+                      {viewsToShow.map((view) => {
+                        const viewOutputs = group.views[view];
+                        const selectedOutput = viewOutputs.find(o => o.is_selected);
+                        const viewKey = `${group.lookId}:${view}`;
+                        const isViewExpanded = expandedUnselectedViews.has(viewKey);
 
-                      return (
-                        <div key={view} className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">
-                              {VIEW_LABELS[view] || view}
-                            </span>
-                            {selectedOutput && (
-                              <Badge variant="secondary" className="text-xs gap-1">
-                                <Star className="h-3 w-3 fill-primary text-primary" />
-                                Selected
-                              </Badge>
-                            )}
-                          </div>
+                        // In selected-only mode, show only the selected output (or option to expand)
+                        const outputsToShow = showSelectedOnly && selectedOutput && !isViewExpanded
+                          ? [selectedOutput]
+                          : viewOutputs;
 
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                            {viewOutputs.map((output, idx) => (
-                              <button
-                                key={output.id}
-                                onClick={() => handleSelect(output)}
-                                disabled={selectingId === output.id}
-                                className={cn(
-                                  "relative aspect-[3/4] rounded-lg overflow-hidden border-2 transition-all hover:scale-[1.02]",
-                                  output.is_selected
-                                    ? "border-primary ring-2 ring-primary ring-offset-2"
-                                    : "border-border hover:border-primary/50"
+                        return (
+                          <div key={view} className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium">
+                                  {VIEW_LABELS[view] || view}
+                                </span>
+                                {selectedOutput && (
+                                  <Badge variant="secondary" className="text-xs gap-1">
+                                    <Star className="h-3 w-3 fill-primary text-primary" />
+                                    Selected
+                                  </Badge>
                                 )}
-                              >
-                                <OptimizedImage
-                                  src={output.stored_url}
-                                  alt={`${view} attempt ${idx + 1}`}
-                                  tier="preview"
-                                  className="object-cover"
-                                  containerClassName="w-full h-full"
-                                />
-                                
-                                {/* Attempt number */}
-                                <div className="absolute top-1 left-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
-                                  #{idx + 1}
-                                </div>
+                              </div>
+                              
+                              {/* Show "view all" option in selected-only mode */}
+                              {showSelectedOnly && selectedOutput && viewOutputs.length > 1 && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-xs h-6 px-2"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleViewExpanded(group.lookId, view);
+                                  }}
+                                >
+                                  {isViewExpanded ? 'Show selected only' : `View all ${viewOutputs.length} attempts`}
+                                </Button>
+                              )}
+                            </div>
 
-                                {/* Selection indicator */}
-                                {output.is_selected && (
-                                  <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
-                                    <div className="bg-primary text-primary-foreground rounded-full p-2">
-                                      <Check className="h-5 w-5" />
+                            <div className={cn(
+                              "grid gap-3",
+                              showSelectedOnly && selectedOutput && !isViewExpanded
+                                ? "grid-cols-1 max-w-xs"
+                                : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+                            )}>
+                              {outputsToShow.map((output, idx) => (
+                                <button
+                                  key={output.id}
+                                  onClick={() => handleSelect(output)}
+                                  disabled={selectingId === output.id}
+                                  className={cn(
+                                    "relative aspect-[3/4] rounded-lg overflow-hidden border-2 transition-all hover:scale-[1.02]",
+                                    output.is_selected
+                                      ? "border-primary ring-2 ring-primary ring-offset-2"
+                                      : "border-border hover:border-primary/50"
+                                  )}
+                                >
+                                  <OptimizedImage
+                                    src={output.stored_url}
+                                    alt={`${view} attempt ${idx + 1}`}
+                                    tier="preview"
+                                    className="object-cover"
+                                    containerClassName="w-full h-full"
+                                  />
+                                  
+                                  {/* Attempt number */}
+                                  <div className="absolute top-1 left-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
+                                    #{output.attempt_index + 1}
+                                  </div>
+
+                                  {/* Selection indicator */}
+                                  {output.is_selected && (
+                                    <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                                      <div className="bg-primary text-primary-foreground rounded-full p-2">
+                                        <Check className="h-5 w-5" />
+                                      </div>
                                     </div>
-                                  </div>
-                                )}
+                                  )}
 
-                                {/* Loading state */}
-                                {selectingId === output.id && (
-                                  <div className="absolute inset-0 bg-background/50 flex items-center justify-center">
-                                    <Loader2 className="h-5 w-5 animate-spin" />
-                                  </div>
-                                )}
-                              </button>
-                            ))}
+                                  {/* Loading state */}
+                                  {selectingId === output.id && (
+                                    <div className="absolute inset-0 bg-background/50 flex items-center justify-center">
+                                      <Loader2 className="h-5 w-5 animate-spin" />
+                                    </div>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </CardContent>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-      </ScrollArea>
+                        );
+                      })}
+                    </CardContent>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      )}
     </div>
   );
 }
