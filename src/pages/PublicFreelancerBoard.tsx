@@ -112,10 +112,10 @@ export default function PublicFreelancerBoard() {
 
   const getJobTitle = (job: UnifiedJob) => {
     if (job.title) {
-      // Shorten long titles like "XM0XM07279ZGY - jas - Face Replace" to "jas - Face Replace"
+      // Show product code + job type (e.g., "XM0XM07279ZGY - Face Replace")
       const parts = job.title.split(' - ');
       if (parts.length >= 3) {
-        return `${parts[1]} - ${parts[2]}`;
+        return `${parts[0]} - ${parts[parts.length - 1]}`;
       }
       return job.title;
     }
