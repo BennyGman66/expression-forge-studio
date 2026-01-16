@@ -69,6 +69,16 @@ export function LiveGenerationFeed({
       .eq('id', outputId);
   };
 
+  // Chunk helper to avoid Supabase .in() URL limit
+  const CHUNK_SIZE = 30;
+  const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
+  };
+
   // Fetch recent outputs for this project
   useEffect(() => {
     if (!projectId) return;
@@ -89,35 +99,57 @@ export function LiveGenerationFeed({
 
       const jobIds = jobs.map(j => j.id);
 
-      const { data } = await supabase
-        .from("ai_apply_outputs")
-        .select(`
-          id,
-          stored_url,
-          view,
-          attempt_index,
-          status,
-          look_id,
-          job_id,
-          created_at,
-          is_selected
-        `)
-        .in("job_id", jobIds)
-        .gte("created_at", since)
-        .order("created_at", { ascending: false })
-        .limit(100);
+      // Chunk the job IDs to avoid URL size limits
+      const jobIdChunks = chunkArray(jobIds, CHUNK_SIZE);
+      const allOutputs: LiveOutput[] = [];
 
-      if (data) {
-        // Fetch look names
-        const lookIds = [...new Set(data.map(d => d.look_id).filter(Boolean))] as string[];
-        const { data: looks } = await supabase
-          .from("talent_looks")
-          .select("id, name")
-          .in("id", lookIds);
+      for (const chunk of jobIdChunks) {
+        const { data } = await supabase
+          .from("ai_apply_outputs")
+          .select(`
+            id,
+            stored_url,
+            view,
+            attempt_index,
+            status,
+            look_id,
+            job_id,
+            created_at,
+            is_selected
+          `)
+          .in("job_id", chunk)
+          .gte("created_at", since)
+          .order("created_at", { ascending: false })
+          .limit(100);
 
-        const lookMap = new Map(looks?.map(l => [l.id, l.name]) || []);
+        if (data) {
+          allOutputs.push(...data);
+        }
+      }
 
-        const enriched = data.map(o => ({
+      if (allOutputs.length > 0) {
+        // Sort all outputs by created_at descending and limit to 100
+        allOutputs.sort((a, b) => 
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        );
+        const limitedOutputs = allOutputs.slice(0, 100);
+
+        // Fetch look names (also chunked)
+        const lookIds = [...new Set(limitedOutputs.map(d => d.look_id).filter(Boolean))] as string[];
+        const lookIdChunks = chunkArray(lookIds, CHUNK_SIZE);
+        const allLooks: { id: string; name: string }[] = [];
+
+        for (const chunk of lookIdChunks) {
+          const { data: looks } = await supabase
+            .from("talent_looks")
+            .select("id, name")
+            .in("id", chunk);
+          if (looks) allLooks.push(...looks);
+        }
+
+        const lookMap = new Map(allLooks.map(l => [l.id, l.name]));
+
+        const enriched = limitedOutputs.map(o => ({
           ...o,
           lookName: o.look_id ? lookMap.get(o.look_id) : undefined,
         }));
@@ -138,6 +170,8 @@ export function LiveGenerationFeed({
           now - new Date(o.created_at).getTime() > STALL_THRESHOLD_MS
         );
         setStalledCount(stalled.length);
+      } else {
+        setOutputs([]);
       }
     };
 
@@ -239,14 +273,17 @@ export function LiveGenerationFeed({
 
       if (jobs && jobs.length > 0) {
         const jobIds = jobs.map(j => j.id);
+        const jobIdChunks = chunkArray(jobIds, CHUNK_SIZE);
         
-        // Delete all outputs for these jobs
-        const { error } = await supabase
-          .from('ai_apply_outputs')
-          .delete()
-          .in('job_id', jobIds);
+        // Delete all outputs for these jobs (chunked)
+        for (const chunk of jobIdChunks) {
+          const { error } = await supabase
+            .from('ai_apply_outputs')
+            .delete()
+            .in('job_id', chunk);
 
-        if (error) throw error;
+          if (error) throw error;
+        }
       }
 
       setOutputs([]);
