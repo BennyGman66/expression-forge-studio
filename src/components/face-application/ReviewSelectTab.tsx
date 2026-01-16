@@ -6,11 +6,15 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff, RefreshCw, AlertCircle, Plus } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Check, Star, ChevronDown, ChevronRight, ArrowRight, Loader2, Eye, EyeOff, RefreshCw, AlertCircle, Plus, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { OptimizedImage } from '@/components/shared/OptimizedImage';
 import { QuickFillDialog } from './review/QuickFillDialog';
 import { LookSourceImage } from '@/types/face-application';
+import { useSendToJobBoard } from '@/hooks/useSendToJobBoard';
+import { LookHandoffStatus, REQUIRED_VIEWS, DEFAULT_BRIEF, RequiredView, ViewHandoffStatus } from '@/types/job-handoff';
+import { useToast } from '@/hooks/use-toast';
 
 interface ReviewSelectTabProps {
   projectId: string;
@@ -87,7 +91,20 @@ function normalizeView(view: string): string {
   return view;
 }
 
+// Map view names to handoff view names
+function mapViewToHandoffView(view: string): RequiredView | null {
+  const lower = view.toLowerCase();
+  if (lower === 'full_front' || lower === 'front') return 'full_front';
+  if (lower === 'cropped_front') return 'cropped_front';
+  if (lower === 'back') return 'back';
+  if (lower === 'side' || lower === 'detail') return 'detail';
+  return null;
+}
+
 export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps) {
+  const { toast } = useToast();
+  const { sendToJobBoard, isSending } = useSendToJobBoard();
+  
   const [outputs, setOutputs] = useState<OutputItem[]>([]);
   const [looks, setLooks] = useState<Record<string, string>>({});
   const [sourceImages, setSourceImages] = useState<SourceImageInfo[]>([]);
@@ -99,6 +116,11 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
   const [expandedUnselectedViews, setExpandedUnselectedViews] = useState<Set<string>>(new Set());
   const [quickFillTarget, setQuickFillTarget] = useState<QuickFillTarget | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  
+  // Job Board sending state
+  const [sentLookIds, setSentLookIds] = useState<Set<string>>(new Set());
+  const [projectName, setProjectName] = useState<string>('');
+  const [lookTalentMap, setLookTalentMap] = useState<Record<string, string | null>>({});
 
   // Fetch outputs, look names, and source images with chunked queries
   useEffect(() => {
@@ -209,9 +231,10 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
 
         setOutputs(allOutputs);
         setLooks(lookMap);
+        setLookTalentMap(lookTalentMap);
         
-        // Auto-expand all looks initially
-        setExpandedLooks(new Set(lookIds));
+        // Start with looks COLLAPSED by default for fast send workflow
+        setExpandedLooks(new Set());
         
         // Auto-enable "selected only" if there are selections
         const hasSelections = allOutputs.some(o => o.is_selected);
@@ -229,6 +252,35 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     }
 
     fetchData();
+  }, [projectId, refreshKey]);
+
+  // Fetch project name and already-sent looks
+  useEffect(() => {
+    async function fetchProjectAndSentLooks() {
+      // Get project name
+      const { data: projectData } = await supabase
+        .from('face_application_projects')
+        .select('name')
+        .eq('id', projectId)
+        .single();
+      
+      if (projectData) {
+        setProjectName(projectData.name);
+      }
+      
+      // Get looks that already have jobs sent
+      const { data: sentJobs } = await supabase
+        .from('unified_jobs')
+        .select('look_id')
+        .eq('project_id', projectId)
+        .not('look_id', 'is', null);
+      
+      if (sentJobs) {
+        setSentLookIds(new Set(sentJobs.map(j => j.look_id).filter(Boolean) as string[]));
+      }
+    }
+    
+    fetchProjectAndSentLooks();
   }, [projectId, refreshKey]);
 
   // Subscribe to realtime updates
@@ -433,6 +485,80 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     refetch();
   }, [refetch]);
 
+  // Build a LookHandoffStatus from a LookGroup for sending to Job Board
+  const buildLookHandoffStatus = useCallback((group: LookGroup): LookHandoffStatus => {
+    const views: Record<RequiredView, ViewHandoffStatus> = {} as Record<RequiredView, ViewHandoffStatus>;
+    
+    for (const reqView of REQUIRED_VIEWS) {
+      // Map our view names to required views
+      const matchingViews = Object.keys(group.views).filter(v => {
+        const mapped = mapViewToHandoffView(v);
+        return mapped === reqView;
+      });
+      
+      const viewOutputs = matchingViews.flatMap(v => group.views[v] || []);
+      const selectedOutput = viewOutputs.find(o => o.is_selected);
+      const sourceImage = sourceImages.find(s => 
+        s.look_id === group.lookId && mapViewToHandoffView(s.view) === reqView
+      );
+      
+      views[reqView] = {
+        view: reqView,
+        hasSelection: !!selectedOutput,
+        selectedUrl: selectedOutput?.stored_url || null,
+        sourceUrl: sourceImage?.source_url || null,
+        outputId: selectedOutput?.id || null,
+        sourceImageId: sourceImage?.id || null,
+      };
+    }
+    
+    // Calculate ready status - needs at least front or back with selection
+    const hasFrontOrBack = views.full_front?.hasSelection || views.back?.hasSelection;
+    const readyCount = REQUIRED_VIEWS.filter(v => views[v]?.hasSelection).length;
+    
+    return {
+      id: group.lookId,
+      name: group.lookName,
+      views,
+      status: hasFrontOrBack ? 'ready' : 'incomplete',
+      readyCount,
+      isIncluded: true,
+      hasSentJob: sentLookIds.has(group.lookId),
+    };
+  }, [sourceImages, sentLookIds]);
+
+  // Send a single look to the Job Board
+  const handleSendSingleLook = useCallback(async (lookId: string) => {
+    const group = groupedByLook.find(g => g.lookId === lookId);
+    if (!group) return;
+    
+    const lookHandoff = buildLookHandoffStatus(group);
+    
+    if (lookHandoff.status !== 'ready') {
+      toast({
+        title: 'Cannot Send',
+        description: 'Look needs at least a front or back view with selection.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    const result = await sendToJobBoard({
+      projectId,
+      jobGroupName: projectName || 'Face Application',
+      brief: DEFAULT_BRIEF,
+      looks: [lookHandoff],
+    });
+    
+    if (result.success) {
+      setSentLookIds(prev => new Set([...prev, lookId]));
+      toast({
+        title: 'Sent!',
+        description: `${group.lookName} sent to Job Board`,
+      });
+    }
+  }, [groupedByLook, buildLookHandoffStatus, sendToJobBoard, projectId, projectName, toast]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -470,10 +596,20 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
     );
   }
 
-  // Filter groups for "selected only" mode
-  const displayGroups = showSelectedOnly 
-    ? groupedByLook.filter(g => g.selectedCount > 0)
-    : groupedByLook;
+  // Filter groups for "selected only" mode and exclude sent looks
+  const displayGroups = useMemo(() => {
+    let groups = groupedByLook;
+    
+    // Filter to show only groups with selections if in selected-only mode
+    if (showSelectedOnly) {
+      groups = groups.filter(g => g.selectedCount > 0);
+    }
+    
+    // Filter out looks that have already been sent to the Job Board
+    groups = groups.filter(g => !sentLookIds.has(g.lookId));
+    
+    return groups;
+  }, [groupedByLook, showSelectedOnly, sentLookIds]);
 
   const hasNoSelectionsInSelectedMode = showSelectedOnly && stats.selectedViews === 0;
 
@@ -489,6 +625,12 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
           <Badge variant="secondary" className="text-sm">
             {stats.looksCount} looks
           </Badge>
+          {sentLookIds.size > 0 && (
+            <Badge variant="default" className="text-sm bg-blue-600">
+              <Send className="h-3 w-3 mr-1" />
+              {sentLookIds.size} sent
+            </Badge>
+          )}
         </div>
         
         <div className="flex items-center gap-4">
@@ -634,6 +776,27 @@ export function ReviewSelectTab({ projectId, onContinue }: ReviewSelectTabProps)
                             `${selectedCount}/${viewCount} selected`
                           )}
                         </Badge>
+                        
+                        {/* Send to Job Board button - visible when at least 1 selection */}
+                        {selectedCount > 0 && (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            className="gap-1.5 h-7 text-xs"
+                            disabled={isSending}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSendSingleLook(group.lookId);
+                            }}
+                          >
+                            {isSending ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Send className="h-3 w-3" />
+                            )}
+                            Send
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </CardHeader>
