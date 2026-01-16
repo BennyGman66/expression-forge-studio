@@ -205,6 +205,11 @@ export default function FreelancerJobDetail() {
     setIsDragOver(false);
     
     const files = Array.from(e.dataTransfer.files);
+    console.log('[Upload] Dropped files:', files.length, files.map(f => ({ name: f.name, type: f.type, size: f.size })));
+    if (files.length === 0) {
+      toast.error('No files detected. Try using the Upload button instead.');
+      return;
+    }
     addFilesToPending(files);
   }, []);
 
