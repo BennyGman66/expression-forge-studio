@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { Download, Upload, Send, Clock, CheckCircle, Play, FileImage, AlertTriangle, X, FileText, User, ArrowLeft, Eye, RotateCcw } from 'lucide-react';
 import { format } from 'date-fns';
 import { FreelancerNamePrompt } from '@/components/freelancer/FreelancerNamePrompt';
+import { FreelancerNeedsChangesView } from '@/components/freelancer/FreelancerNeedsChangesView';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { JOB_TYPE_CONFIG } from '@/lib/jobTypes';
 
@@ -65,6 +66,7 @@ export default function PublicJobWorkspace() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [identitySaving, setIdentitySaving] = useState(false);
   const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
+  const [replacements, setReplacements] = useState<Map<string, { file: File; preview: string }>>(new Map());
 
   // Group inputs by view for Foundation Face Replace jobs
   const groupedInputs = useMemo(() => {
@@ -244,6 +246,94 @@ export default function PublicJobWorkspace() {
       queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
       queryClient.invalidateQueries({ queryKey: ['public-latest-submission', jobId] });
       toast.success('Job submitted for review!');
+    },
+  });
+
+  // Resubmit mutation for NEEDS_CHANGES jobs
+  const resubmitJob = useMutation({
+    mutationFn: async () => {
+      if (!latestSubmission?.id) throw new Error('No submission to resubmit');
+      
+      // Upload replacement files and create new submission assets
+      const newAssets: { submission_id: string; file_url: string; label: string; sort_index: number; freelancer_identity_id: string }[] = [];
+      
+      // Create a new submission with incremented version number
+      const { data: newSubmission, error: subError } = await supabase
+        .from('job_submissions')
+        .insert({
+          job_id: job?.id!,
+          freelancer_identity_id: identity?.id,
+          status: 'SUBMITTED' as const,
+          version_number: (latestSubmission.version_number || 1) + 1,
+        })
+        .select()
+        .single();
+      
+      if (subError) throw subError;
+      
+      // Upload replacement files
+      for (const [assetId, { file }] of replacements.entries()) {
+        const fileName = `public/${job?.id}/${Date.now()}-resubmit-${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from('images')
+          .upload(fileName, file);
+        
+        if (uploadError) throw uploadError;
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from('images')
+          .getPublicUrl(fileName);
+        
+        // Find original asset to get label
+        const { data: originalAsset } = await supabase
+          .from('submission_assets')
+          .select('label, sort_index')
+          .eq('id', assetId)
+          .single();
+        
+        newAssets.push({
+          submission_id: newSubmission.id,
+          file_url: publicUrl,
+          label: originalAsset?.label || file.name,
+          sort_index: originalAsset?.sort_index || 0,
+          freelancer_identity_id: identity?.id!,
+        });
+        
+        // Mark old asset as superseded
+        await supabase
+          .from('submission_assets')
+          .update({ superseded_by: newSubmission.id })
+          .eq('id', assetId);
+      }
+      
+      // Insert new assets
+      if (newAssets.length > 0) {
+        const { error: assetError } = await supabase
+          .from('submission_assets')
+          .insert(newAssets);
+        
+        if (assetError) throw assetError;
+      }
+      
+      // Update job status back to SUBMITTED
+      const { error: statusError } = await supabase
+        .from('unified_jobs')
+        .update({ status: 'SUBMITTED' })
+        .eq('id', job?.id);
+      
+      if (statusError) throw statusError;
+      
+      return newSubmission;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['public-job-by-id', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['public-latest-submission', jobId] });
+      setReplacements(new Map());
+      toast.success('Changes resubmitted for review!');
+    },
+    onError: (error: any) => {
+      console.error('Resubmit error:', error);
+      toast.error(error.message || 'Failed to resubmit');
     },
   });
 
@@ -558,17 +648,35 @@ export default function PublicJobWorkspace() {
 
       {/* Status Banners */}
       {job.status === 'NEEDS_CHANGES' && !isPreviewMode && (
-        <div className="bg-orange-500/20 border-b border-orange-500/30 px-6 py-3">
-          <div className="container mx-auto flex items-center gap-3">
-            <AlertTriangle className="h-5 w-5 text-orange-400" />
-            <div>
-              <p className="font-medium text-orange-200">Changes Requested</p>
-              <p className="text-sm text-orange-300/80">
-                Review the feedback below and update your submission.
-              </p>
+        <>
+          <div className="bg-orange-500/20 border-b border-orange-500/30 px-6 py-3">
+            <div className="container mx-auto flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-orange-400" />
+              <div>
+                <p className="font-medium text-orange-200">Changes Requested</p>
+                <p className="text-sm text-orange-300/80">
+                  Review the feedback below and update your submission.
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+          
+          {/* Feedback Viewer for NEEDS_CHANGES */}
+          {latestSubmission && (
+            <div className="container mx-auto px-6 py-6">
+              <FreelancerNeedsChangesView
+                submissionId={latestSubmission.id}
+                jobId={jobId!}
+                versionNumber={latestSubmission.version_number || 1}
+                instructions={job.instructions}
+                inputs={inputs as any}
+                onReplacementsChange={setReplacements}
+                onResubmit={() => resubmitJob.mutate()}
+                isResubmitting={resubmitJob.isPending}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {job.status === 'SUBMITTED' && !isPreviewMode && (

@@ -463,10 +463,27 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                 </Button>
               </>
             )}
-            {/* Current asset label */}
-            <span className="text-sm text-muted-foreground">
-              {selectedAsset?.label || 'Asset'}
-            </span>
+            
+            {/* Show locked state for approved assets */}
+            {isInternal && selectedAsset?.review_status === 'APPROVED' && (
+              <>
+                <div className="h-4 w-px bg-border" />
+                <Badge className="bg-green-500/20 text-green-400 border-green-500/30 gap-1">
+                  <Check className="h-3 w-3" />
+                  Approved
+                </Badge>
+                <span className="text-xs text-muted-foreground">
+                  No further action needed
+                </span>
+              </>
+            )}
+            
+            {/* Current asset label - only show if not already in actions */}
+            {(!isInternal || !selectedAsset) && (
+              <span className="text-sm text-muted-foreground">
+                {selectedAsset?.label || 'Asset'}
+              </span>
+            )}
           </div>
         </div>
 
