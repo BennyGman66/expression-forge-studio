@@ -19,6 +19,8 @@ import { useCreateReposeBatch, useReposeBatchByProjectId } from "@/hooks/useRepo
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { ProductionProject } from "@/types/production-projects";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface ProjectSelectPanelProps {
   onBatchCreated?: (batchId: string) => void;
@@ -65,15 +67,9 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
     setSelectedLookIds(new Set());
   };
 
-  // Create batch from selected looks
+  // Create batch from selected looks (or append to existing batch)
   const handleCreateBatch = async () => {
     if (!selectedProjectId || selectedLookIds.size === 0) return;
-
-    // If batch already exists for this project, navigate to it
-    if (existingBatch) {
-      navigate(`/repose-production/batch/${existingBatch.id}?tab=setup`);
-      return;
-    }
 
     // Collect all outputs from selected looks, including look_id
     const outputs: Array<{ look_id: string; view: string; source_output_id: string; source_url: string }> = [];
@@ -92,6 +88,42 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
     });
 
     if (outputs.length === 0) {
+      return;
+    }
+
+    // If batch already exists for this project, append new looks to it
+    if (existingBatch) {
+      // Get existing look IDs already in batch
+      const { data: existingItems } = await supabase
+        .from('repose_batch_items')
+        .select('look_id')
+        .eq('batch_id', existingBatch.id);
+      
+      const existingLookIds = new Set(existingItems?.map(i => i.look_id).filter(Boolean));
+      
+      // Filter to outputs from looks not already in batch
+      const newOutputs = outputs.filter(o => !existingLookIds.has(o.look_id));
+      
+      if (newOutputs.length > 0) {
+        const batchItems = newOutputs.map(output => ({
+          batch_id: existingBatch.id,
+          look_id: output.look_id,
+          view: output.view,
+          source_output_id: output.source_output_id,
+          source_url: output.source_url,
+        }));
+        
+        const { error } = await supabase.from('repose_batch_items').insert(batchItems);
+        if (error) {
+          toast.error(`Failed to add looks: ${error.message}`);
+          return;
+        }
+        
+        const newLookCount = new Set(newOutputs.map(o => o.look_id)).size;
+        toast.success(`Added ${newLookCount} look${newLookCount > 1 ? 's' : ''} to existing batch`);
+      }
+      
+      navigate(`/repose-production/batch/${existingBatch.id}?tab=setup`);
       return;
     }
 
