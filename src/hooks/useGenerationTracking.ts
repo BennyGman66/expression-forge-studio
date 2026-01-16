@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { VIEW_LABELS } from "@/types/face-application";
 
@@ -53,6 +53,10 @@ export function useGenerationTracking({
   const [isLoading, setIsLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<number>(Date.now());
   const [hasInitialLoad, setHasInitialLoad] = useState(false);
+  
+  // Use ref to track active generation without causing effect reruns
+  const hasActiveGenerationRef = useRef(false);
+  const isFetchingRef = useRef(false);
 
   // Fetch all looks with their source images and output counts
   const fetchData = useCallback(async () => {
@@ -61,6 +65,10 @@ export function useGenerationTracking({
       setIsLoading(false);
       return;
     }
+    
+    // Prevent concurrent fetches
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
 
     // Only show loading spinner on initial load, not refreshes
     if (!hasInitialLoad) {
@@ -189,8 +197,9 @@ export function useGenerationTracking({
     } finally {
       setIsLoading(false);
       setHasInitialLoad(true);
+      isFetchingRef.current = false;
     }
-  }, [projectId, selectedLookIds, requiredOptions, lastRunTimestamp]);
+  }, [projectId, selectedLookIds, requiredOptions, lastRunTimestamp, hasInitialLoad]);
 
   // Initial fetch
   useEffect(() => {
@@ -225,30 +234,35 @@ export function useGenerationTracking({
     };
   }, [projectId]);
 
+  // Update ref when looks change (doesn't cause effect reruns)
+  useEffect(() => {
+    hasActiveGenerationRef.current = looks.some(l => 
+      l.views.some(v => v.runningCount > 0 || v.pendingCount > 0)
+    );
+  }, [looks]);
+
   // Polling fallback - refresh every 5 seconds when there are generating outputs
+  // Uses ref instead of looks in dependencies to prevent loop
   useEffect(() => {
     if (!projectId) return;
     
-    // Check if there's active generation
-    const hasActiveGeneration = looks.some(l => 
-      l.views.some(v => v.runningCount > 0 || v.pendingCount > 0)
-    );
-    
-    if (!hasActiveGeneration) return;
-    
-    console.log('[Generation Tracking] Active generation detected, starting polling');
     const interval = setInterval(() => {
-      setLastRefresh(Date.now());
+      if (hasActiveGenerationRef.current) {
+        console.log('[Generation Tracking] Active generation detected, polling...');
+        setLastRefresh(Date.now());
+      }
     }, 5000);
     
     return () => clearInterval(interval);
-  }, [projectId, looks]);
+  }, [projectId]); // Only depend on projectId, not looks
 
-  // Refresh when lastRefresh changes (debounced)
+  // Refresh when lastRefresh changes (debounced with guard)
   useEffect(() => {
+    if (isFetchingRef.current) return;
+    
     const timer = setTimeout(() => {
       fetchData();
-    }, 300);
+    }, 500);
     return () => clearTimeout(timer);
   }, [lastRefresh, fetchData]);
 
