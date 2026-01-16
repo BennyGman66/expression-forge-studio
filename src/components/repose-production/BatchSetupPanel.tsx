@@ -5,12 +5,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, AlertCircle, Shirt, Layers } from "lucide-react";
 import { useReposeBatch, useReposeBatchItems, useUpdateReposeBatchConfig } from "@/hooks/useReposeBatches";
-import { useBrands } from "@/hooks/useBrands";
+import { useUpdateLookProductType } from "@/hooks/useProductionProjects";
 import { supabase } from "@/integrations/supabase/client";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import type { ReposeConfig } from "@/types/repose";
-import { CropTarget, CROP_TARGET_LABELS, ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS } from "@/types/shot-types";
+import { ALL_OUTPUT_SHOT_TYPES, OUTPUT_SHOT_LABELS } from "@/types/shot-types";
 
 interface BatchSetupPanelProps {
   batchId: string | undefined;
@@ -26,18 +27,72 @@ interface ClayPoseCount {
   BACK_FULL: number;
 }
 
+interface LookGroup {
+  lookId: string;
+  lookName: string;
+  productType: 'top' | 'trousers' | null;
+  views: Array<{ view: string; sourceUrl: string }>;
+}
+
 export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
   const [, setSearchParams] = useSearchParams();
   
   const { data: batch, isLoading: batchLoading } = useReposeBatch(batchId);
   const { data: batchItems, isLoading: itemsLoading } = useReposeBatchItems(batchId);
   const updateConfig = useUpdateReposeBatchConfig();
+  const updateLookProductType = useUpdateLookProductType();
 
   const [selectedBrandId, setSelectedBrandId] = useState<string>("");
   const [posesPerShotType, setPosesPerShotType] = useState(2);
-  const [cropTarget, setCropTarget] = useState<CropTarget>('top');
   const [clayPoseCounts, setClayPoseCounts] = useState<ClayPoseCount[]>([]);
   const [loadingCounts, setLoadingCounts] = useState(false);
+
+  // Get unique look IDs from batch items
+  const lookIds = useMemo(() => {
+    if (!batchItems?.length) return [];
+    return [...new Set(batchItems.map(i => i.look_id).filter(Boolean))] as string[];
+  }, [batchItems]);
+
+  // Fetch look details (names and product types) for items in batch
+  const { data: lookDetails } = useQuery({
+    queryKey: ["batch-look-details", lookIds],
+    queryFn: async () => {
+      if (lookIds.length === 0) return [];
+      const { data } = await supabase
+        .from("talent_looks")
+        .select("id, name, product_type")
+        .in("id", lookIds);
+      return data || [];
+    },
+    enabled: lookIds.length > 0,
+  });
+
+  // Group batch items by look
+  const lookGroups = useMemo((): LookGroup[] => {
+    if (!batchItems?.length) return [];
+    
+    const grouped = new Map<string, LookGroup>();
+    
+    batchItems.forEach(item => {
+      const lookId = item.look_id || 'unknown';
+      if (!grouped.has(lookId)) {
+        // Find the look name from lookDetails
+        const lookDetail = lookDetails?.find(l => l.id === lookId);
+        grouped.set(lookId, {
+          lookId,
+          lookName: lookDetail?.name || 'Unknown Look',
+          productType: (lookDetail?.product_type as 'top' | 'trousers' | null) || null,
+          views: [],
+        });
+      }
+      grouped.get(lookId)!.views.push({
+        view: item.view,
+        sourceUrl: item.source_url,
+      });
+    });
+    
+    return Array.from(grouped.values());
+  }, [batchItems, lookDetails]);
 
   // Load clay pose counts per brand
   useEffect(() => {
@@ -107,18 +162,34 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
       if (batch.brand_id) setSelectedBrandId(batch.brand_id);
       const config = batch.config_json as ReposeConfig;
       if (config?.posesPerShotType) setPosesPerShotType(config.posesPerShotType);
-      if (config?.cropTarget) setCropTarget(config.cropTarget);
     }
   }, [batch]);
 
   const selectedBrandCounts = clayPoseCounts.find(c => c.brandId === selectedBrandId);
 
-  // Calculate estimated outputs
+  // Calculate estimated outputs based on unique looks (not individual images)
   const estimatedOutputs = useMemo(() => {
-    if (!batchItems?.length || !selectedBrandCounts) return 0;
-    // Simplified: items × poses per type × 4 output types (roughly)
-    return batchItems.length * posesPerShotType * 4;
-  }, [batchItems, selectedBrandCounts, posesPerShotType]);
+    if (!lookGroups.length || !selectedBrandCounts) return 0;
+    // looks × 4 output types × poses per type
+    return lookGroups.length * 4 * posesPerShotType;
+  }, [lookGroups, selectedBrandCounts, posesPerShotType]);
+
+  // Check if all looks have product type set
+  const allLooksHaveProductType = lookGroups.every(l => l.productType !== null);
+  const looksWithoutProductType = lookGroups.filter(l => l.productType === null).length;
+
+  const handleProductTypeChange = (lookId: string, productType: 'top' | 'trousers') => {
+    updateLookProductType.mutate({ lookId, productType });
+  };
+
+  // Bulk set all looks to same product type
+  const handleBulkSetProductType = (productType: 'top' | 'trousers') => {
+    lookGroups.forEach(look => {
+      if (look.lookId !== 'unknown') {
+        updateLookProductType.mutate({ lookId: look.lookId, productType });
+      }
+    });
+  };
 
   const handleSaveAndProceed = () => {
     if (!batchId) return;
@@ -126,7 +197,6 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     const config: ReposeConfig = {
       posesPerShotType,
       attemptsPerPose: 1,
-      cropTarget,
     };
 
     updateConfig.mutate(
@@ -158,36 +228,13 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
 
   return (
     <div className="space-y-6 max-w-4xl">
-      {/* Simple Setup Card */}
+      {/* Setup Card - Pose Library & Renders */}
       <Card>
         <CardHeader>
           <CardTitle>Setup</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Product Type */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Product Type</label>
-              <div className="flex gap-2">
-                <Button
-                  variant={cropTarget === 'top' ? 'default' : 'outline'}
-                  onClick={() => setCropTarget('top')}
-                  className="flex-1 gap-2"
-                >
-                  <Shirt className="w-4 h-4" />
-                  Top
-                </Button>
-                <Button
-                  variant={cropTarget === 'trousers' ? 'default' : 'outline'}
-                  onClick={() => setCropTarget('trousers')}
-                  className="flex-1 gap-2"
-                >
-                  <Layers className="w-4 h-4" />
-                  Trousers
-                </Button>
-              </div>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Pose Library */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Pose Library</label>
@@ -229,7 +276,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
             </div>
           </div>
 
-          {/* Brand pose breakdown - shown when brand selected */}
+          {/* Brand pose breakdown */}
           {selectedBrandCounts && (
             <div className="mt-4 p-3 bg-secondary/30 rounded-lg">
               <div className="flex items-center gap-4 text-sm">
@@ -245,29 +292,100 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
         </CardContent>
       </Card>
 
-      {/* Look Thumbnails */}
+      {/* Looks with Per-Look Product Type */}
       <Card>
         <CardHeader>
-          <CardTitle>Looks in Batch ({batchItems?.length || 0})</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Looks in Batch ({lookGroups.length})</CardTitle>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Set all to:</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleBulkSetProductType('top')}
+                className="gap-1"
+              >
+                <Shirt className="w-3 h-3" />
+                Tops
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleBulkSetProductType('trousers')}
+                className="gap-1"
+              >
+                <Layers className="w-3 h-3" />
+                Trousers
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          {batchItems && batchItems.length > 0 ? (
-            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
-              {batchItems.map((item) => (
+          {lookGroups.length > 0 ? (
+            <div className="space-y-3">
+              {lookGroups.map((look) => (
                 <div 
-                  key={item.id} 
-                  className="aspect-[3/4] bg-muted rounded-md overflow-hidden border"
+                  key={look.lookId}
+                  className="flex items-center gap-4 p-3 border rounded-lg bg-card"
                 >
-                  <img 
-                    src={item.source_url} 
-                    alt="Look thumbnail"
-                    className="w-full h-full object-cover"
-                  />
+                  {/* Look Name */}
+                  <div className="w-48 flex-shrink-0">
+                    <p className="font-medium truncate">{look.lookName}</p>
+                    <p className="text-xs text-muted-foreground">{look.views.length} views</p>
+                  </div>
+
+                  {/* View Thumbnails */}
+                  <div className="flex gap-2 flex-1">
+                    {look.views.map((v, i) => (
+                      <div 
+                        key={i} 
+                        className="w-12 h-16 bg-muted rounded overflow-hidden border flex-shrink-0"
+                        title={v.view}
+                      >
+                        <img 
+                          src={v.sourceUrl} 
+                          alt={v.view}
+                          className="w-full h-full object-cover" 
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Product Type Toggle */}
+                  <div className="flex gap-2 flex-shrink-0">
+                    <Button
+                      size="sm"
+                      variant={look.productType === 'top' ? 'default' : 'outline'}
+                      onClick={() => handleProductTypeChange(look.lookId, 'top')}
+                      className="gap-1"
+                      disabled={look.lookId === 'unknown'}
+                    >
+                      <Shirt className="w-3 h-3" />
+                      Top
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={look.productType === 'trousers' ? 'default' : 'outline'}
+                      onClick={() => handleProductTypeChange(look.lookId, 'trousers')}
+                      className="gap-1"
+                      disabled={look.lookId === 'unknown'}
+                    >
+                      <Layers className="w-3 h-3" />
+                      Trousers
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
             <p className="text-muted-foreground text-sm">No looks in this batch yet.</p>
+          )}
+
+          {looksWithoutProductType > 0 && (
+            <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-700 dark:text-amber-400 text-sm">
+              <AlertCircle className="w-4 h-4 inline-block mr-2" />
+              {looksWithoutProductType} look{looksWithoutProductType > 1 ? 's' : ''} need{looksWithoutProductType === 1 ? 's' : ''} a product type (Top/Trousers) assigned.
+            </div>
           )}
         </CardContent>
       </Card>
@@ -280,7 +398,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
         </div>
         <Button 
           onClick={handleSaveAndProceed}
-          disabled={!selectedBrandId || updateConfig.isPending}
+          disabled={!selectedBrandId || !allLooksHaveProductType || updateConfig.isPending}
           size="lg"
           className="gap-2"
         >

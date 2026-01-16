@@ -75,13 +75,14 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
       return;
     }
 
-    // Collect all outputs from selected looks
-    const outputs: Array<{ view: string; source_output_id: string; source_url: string }> = [];
+    // Collect all outputs from selected looks, including look_id
+    const outputs: Array<{ look_id: string; view: string; source_output_id: string; source_url: string }> = [];
     
     approvedLooks?.filter(l => selectedLookIds.has(l.id)).forEach(look => {
       (look.job_outputs || []).forEach((output: any) => {
         if (output.file_url) {
           outputs.push({
+            look_id: look.id,
             view: output.label || 'unknown',
             source_output_id: output.id,
             source_url: output.file_url,
