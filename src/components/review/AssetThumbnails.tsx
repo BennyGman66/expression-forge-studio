@@ -139,8 +139,8 @@ export function AssetThumbnails({
                     )}
                   </div>
 
-                  {/* Status indicator */}
-                  {getStatusIndicator(asset.review_status)}
+                  {/* Status indicator - hide when delete button is shown */}
+                  {!(canDelete && !isApproved && onDeleteAsset) && getStatusIndicator(asset.review_status)}
 
                   {/* Approved lock overlay */}
                   {isApproved && (
@@ -251,7 +251,7 @@ export function AssetThumbnails({
                   </Badge>
                 )}
                 
-                {/* Delete button - shown on hover for non-approved assets */}
+                {/* Delete button - always visible in top left for non-approved assets */}
                 {canDelete && !isApproved && onDeleteAsset && (
                   <AlertDialog open={deleteConfirmId === displayedAsset.id} onOpenChange={(open) => {
                     if (!open) setDeleteConfirmId(null);
@@ -260,7 +260,7 @@ export function AssetThumbnails({
                       <Button
                         variant="destructive"
                         size="icon"
-                        className="absolute bottom-7 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="absolute top-1 left-1 h-6 w-6 z-10 shadow-lg"
                         onClick={(e) => {
                           e.stopPropagation();
                           setDeleteConfirmId(displayedAsset.id);
