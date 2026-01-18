@@ -35,6 +35,7 @@ import {
   useCreateThread,
   useCreateSubmission,
   useJobAssetsWithHistory,
+  useDeleteAsset,
   AssetSlot,
 } from '@/hooks/useReviewSystem';
 import { useJob, useJobOutputs } from '@/hooks/useJobs';
@@ -107,6 +108,8 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const addComment = useAddComment();
   const createThread = useCreateThread();
   const createSubmission = useCreateSubmission();
+  const deleteAsset = useDeleteAsset();
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
 
   // Build global list of all annotations across all assets for sequential navigation
   const allAnnotations = useMemo(() => {
@@ -327,6 +330,37 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
       setShowApproveDialog(false);
     } catch (error) {
       toast.error('Failed to approve asset');
+    }
+  };
+
+  // Delete asset handler
+  const handleDeleteAsset = async (asset: SubmissionAsset) => {
+    if (!asset) return;
+    
+    setDeletingAssetId(asset.id);
+    try {
+      await deleteAsset.mutateAsync({
+        assetId: asset.id,
+        jobId,
+        deleteStorageFile: true,
+      });
+      
+      toast.success(`${asset.label || 'Asset'} deleted`);
+      
+      // If we deleted the currently selected asset, select another
+      if (selectedAsset?.id === asset.id) {
+        const remaining = assets.filter(a => a.id !== asset.id);
+        if (remaining.length > 0) {
+          setSelectedAsset(remaining[0]);
+        } else {
+          setSelectedAsset(null);
+        }
+      }
+    } catch (error: any) {
+      console.error('Delete asset error:', error);
+      toast.error(error.message || 'Failed to delete asset');
+    } finally {
+      setDeletingAssetId(null);
     }
   };
 
@@ -805,6 +839,9 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                   setViewingVersionId(null);
                 }
               }}
+              onDeleteAsset={handleDeleteAsset}
+              isDeletingAssetId={deletingAssetId}
+              canDelete={isInternal}
             />
           </div>
 
