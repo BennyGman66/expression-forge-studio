@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { ALL_OUTPUT_SHOT_TYPES, OutputShotType } from "@/types/shot-types";
 import type { ReposeOutput } from "@/types/repose";
 import type { LookWithOutputs } from "@/hooks/useReposeSelection";
 import { ShotTypeBlock } from "./ShotTypeBlock";
 import { cn } from "@/lib/utils";
+import { Check } from "lucide-react";
 
 interface InfiniteLookSectionProps {
   look: LookWithOutputs;
@@ -44,69 +46,91 @@ export function InfiniteLookSection({
     return viewOutputs.some(o => o.status === 'complete');
   });
 
+  const isComplete = look.selectionStats.isAllComplete;
+
   return (
     <div 
       ref={containerRef}
-      className="p-6 border-b border-border"
+      className="p-4"
     >
-      {/* Look Header */}
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-3">
-            {/* Source Preview */}
-            {look.sourceUrl && (
-              <div className="w-12 h-12 rounded-lg overflow-hidden bg-secondary flex-shrink-0">
-                <img 
-                  src={look.sourceUrl} 
-                  alt="Source" 
-                  className="w-full h-full object-cover"
-                />
+      <Card className={cn(
+        "overflow-hidden transition-colors",
+        isComplete && "ring-2 ring-primary/30"
+      )}>
+        {/* Look Header - Clear separation */}
+        <CardHeader className="pb-3 bg-secondary/30 border-b">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {/* Source Preview Thumbnail */}
+              {look.sourceUrl && (
+                <div className="w-14 h-14 rounded-lg overflow-hidden bg-muted flex-shrink-0 border border-border">
+                  <img 
+                    src={look.sourceUrl} 
+                    alt="Source" 
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                </div>
+              )}
+              
+              {/* Look Info */}
+              <div>
+                <h2 className="text-lg font-serif font-semibold tracking-tight">
+                  {look.lookCode}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Select your top 3 favorites for each shot type
+                </p>
               </div>
-            )}
-            <h2 className="text-lg font-serif">{look.lookCode}</h2>
+            </div>
+            
+            {/* Status Badge */}
+            <Badge 
+              variant={isComplete ? "default" : "outline"}
+              className={cn(
+                "gap-1.5 px-3 py-1",
+                isComplete && "bg-primary"
+              )}
+            >
+              {isComplete && <Check className="w-3 h-3" />}
+              {look.selectionStats.completedViews} / {look.selectionStats.totalViews} complete
+            </Badge>
           </div>
-          
-          <Badge 
-            variant={look.selectionStats.isAllComplete ? "default" : "outline"}
-            className={cn(
-              look.selectionStats.isAllComplete && "bg-primary"
-            )}
-          >
-            {look.selectionStats.completedViews} / {look.selectionStats.totalViews} views complete
-          </Badge>
-        </div>
-        
-        <p className="text-sm text-muted-foreground ml-15">
-          Select top 3 favorites for each view. Click to view larger.
-        </p>
-      </div>
+        </CardHeader>
 
-      {/* Shot Type Blocks */}
-      <div className="space-y-4">
-        {activeShots.map((shotType) => {
-          const viewOutputs = look.outputsByView[shotType] || [];
-          const stats = look.selectionStats.byView[shotType];
-          
-          if (!stats) return null;
+        {/* Shot Type Blocks - Main Content */}
+        <CardContent className="p-4 space-y-3">
+          {activeShots.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No completed outputs yet
+            </p>
+          ) : (
+            activeShots.map((shotType) => {
+              const viewOutputs = look.outputsByView[shotType] || [];
+              const stats = look.selectionStats.byView[shotType];
+              
+              if (!stats) return null;
 
-          return (
-            <ShotTypeBlock
-              key={shotType}
-              shotType={shotType}
-              outputs={viewOutputs}
-              stats={stats}
-              batchId={batchId}
-              batchItemId={look.batchItemId}
-              lookId={look.lookId}
-              onSelectOutput={onSelectOutput}
-              onOpenLightbox={onOpenLightbox}
-              getNextAvailableRank={() => getNextAvailableRank(shotType)}
-              isViewFull={isViewFull(shotType)}
-              onRefresh={onRefresh}
-            />
-          );
-        })}
-      </div>
+              return (
+                <ShotTypeBlock
+                  key={shotType}
+                  shotType={shotType}
+                  outputs={viewOutputs}
+                  stats={stats}
+                  batchId={batchId}
+                  batchItemId={look.batchItemId}
+                  lookId={look.lookId}
+                  onSelectOutput={onSelectOutput}
+                  onOpenLightbox={onOpenLightbox}
+                  getNextAvailableRank={() => getNextAvailableRank(shotType)}
+                  isViewFull={isViewFull(shotType)}
+                  onRefresh={onRefresh}
+                />
+              );
+            })
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
