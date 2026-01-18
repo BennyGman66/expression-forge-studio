@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
@@ -6,18 +6,25 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   MessageSquare,
   Send,
   Lock,
   Target,
   Pencil,
+  Image,
+  X,
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { ReviewThread, ReviewComment, ImageAnnotation } from '@/types/review';
+import { ReviewThread, ReviewComment, ImageAnnotation, ThreadScope } from '@/types/review';
 import { useAddComment, useCreateThread } from '@/hooks/useReviewSystem';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+
+type CommentMode = 'annotate' | 'comment';
 
 interface ThreadPanelProps {
   submissionId: string;
@@ -53,8 +60,13 @@ export function ThreadPanel({
   const { user } = useAuth();
   const [newComment, setNewComment] = useState('');
   const [isInternalOnly, setIsInternalOnly] = useState(false);
+  const [commentMode, setCommentMode] = useState<CommentMode>('annotate');
+  const [pendingAttachment, setPendingAttachment] = useState<File | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addComment = useAddComment();
   const createThread = useCreateThread();
@@ -106,16 +118,137 @@ export function ThreadPanel({
     t => t.annotation_id === selectedAnnotationId
   );
 
+  // Find or get asset-scoped thread for general comments
+  const assetThread = useMemo(() => {
+    if (!selectedAssetId) return null;
+    return threads.find(t => t.scope === 'ASSET' && t.asset_id === selectedAssetId);
+  }, [threads, selectedAssetId]);
+
+  // Handle pasting images from clipboard
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          setPendingAttachment(file);
+          const url = URL.createObjectURL(file);
+          setAttachmentPreview(url);
+        }
+        break;
+      }
+    }
+  }, []);
+
+  // Handle file input change
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      setPendingAttachment(file);
+      const url = URL.createObjectURL(file);
+      setAttachmentPreview(url);
+    }
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Clear attachment
+  const clearAttachment = useCallback(() => {
+    if (attachmentPreview) {
+      URL.revokeObjectURL(attachmentPreview);
+    }
+    setPendingAttachment(null);
+    setAttachmentPreview(null);
+  }, [attachmentPreview]);
+
+  // Upload attachment to storage
+  const uploadAttachment = async (file: File): Promise<string | null> => {
+    const fileExt = file.name.split('.').pop() || 'png';
+    const fileName = `${crypto.randomUUID()}.${fileExt}`;
+    const filePath = `${submissionId}/${fileName}`;
+
+    const { error } = await supabase.storage
+      .from('comment-attachments')
+      .upload(filePath, file, { 
+        contentType: file.type,
+        upsert: false 
+      });
+
+    if (error) {
+      console.error('Upload error:', error);
+      throw error;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('comment-attachments')
+      .getPublicUrl(filePath);
+
+    return publicUrl;
+  };
+
   const handleSendComment = async () => {
-    if (!newComment.trim() || !selectedAnnotationThread) return;
+    const hasContent = newComment.trim() || pendingAttachment;
+    if (!hasContent) return;
 
-    await addComment.mutateAsync({
-      threadId: selectedAnnotationThread.id,
-      body: newComment.trim(),
-      visibility: isInternal && isInternalOnly ? 'INTERNAL_ONLY' : 'SHARED',
-    });
+    setIsUploading(true);
+    try {
+      let attachmentUrl: string | null = null;
+      
+      // Upload attachment if exists
+      if (pendingAttachment) {
+        attachmentUrl = await uploadAttachment(pendingAttachment);
+      }
 
-    setNewComment('');
+      let threadId: string | null = null;
+
+      // Determine which thread to use based on mode
+      if (commentMode === 'annotate' && selectedAnnotationThread) {
+        // Use annotation thread
+        threadId = selectedAnnotationThread.id;
+      } else if (commentMode === 'comment' && selectedAssetId) {
+        // Use or create asset-scoped thread for general comments
+        if (assetThread) {
+          threadId = assetThread.id;
+        } else {
+          // Create new asset-scoped thread
+          const newThread = await createThread.mutateAsync({
+            submissionId,
+            scope: 'ASSET' as ThreadScope,
+            assetId: selectedAssetId,
+          });
+          threadId = newThread.id;
+        }
+      } else if (selectedAnnotationThread) {
+        // Fallback to annotation thread if available
+        threadId = selectedAnnotationThread.id;
+      }
+
+      if (!threadId) {
+        toast.error('No thread available. Draw an annotation or select Comment mode.');
+        return;
+      }
+
+      await addComment.mutateAsync({
+        threadId,
+        body: newComment.trim() || (pendingAttachment ? '(image attached)' : ''),
+        visibility: isInternal && isInternalOnly ? 'INTERNAL_ONLY' : 'SHARED',
+        attachmentUrl,
+      });
+
+      setNewComment('');
+      clearAttachment();
+      toast.success('Comment sent');
+    } catch (error) {
+      console.error('Failed to send comment:', error);
+      toast.error('Failed to send comment');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   // Scroll to bottom when comments change
@@ -134,12 +267,46 @@ export function ThreadPanel({
     }
   }, [pendingAnnotationId]);
 
+  // Sync drawing mode with comment mode
+  useEffect(() => {
+    if (isDrawing && commentMode !== 'annotate') {
+      setCommentMode('annotate');
+    }
+  }, [isDrawing, commentMode]);
+
   const handleCommentClick = (annotationId: string | null) => {
     if (annotationId) {
       onSelectAnnotation(annotationId);
       // Just highlight the annotation, don't move the canvas
     }
   };
+
+  const handleModeChange = (value: string) => {
+    if (value === 'annotate' || value === 'comment') {
+      setCommentMode(value);
+      // If switching to annotate mode, optionally enable drawing
+      if (value === 'annotate' && onToggleDrawing && !isDrawing) {
+        // Don't auto-enable drawing, let user click the draw button
+      }
+      // If switching to comment mode, disable drawing
+      if (value === 'comment' && isDrawing && onToggleDrawing) {
+        onToggleDrawing();
+      }
+    }
+  };
+
+  // Clean up object URL on unmount
+  useEffect(() => {
+    return () => {
+      if (attachmentPreview) {
+        URL.revokeObjectURL(attachmentPreview);
+      }
+    };
+  }, [attachmentPreview]);
+
+  const canSend = commentMode === 'annotate' 
+    ? (!!selectedAnnotationId && (!!newComment.trim() || !!pendingAttachment))
+    : (!!selectedAssetId && (!!newComment.trim() || !!pendingAttachment));
 
   return (
     <div className="flex flex-col h-full border-l border-border bg-card">
@@ -209,6 +376,21 @@ export function ThreadPanel({
                   <p className="text-sm mt-1.5 pl-8 text-foreground/90">
                     {comment.body}
                   </p>
+                  
+                  {/* Attachment image */}
+                  {comment.attachment_url && (
+                    <div className="mt-2 pl-8">
+                      <img 
+                        src={comment.attachment_url} 
+                        alt="Attached reference"
+                        className="max-w-[200px] max-h-[150px] rounded border border-border cursor-pointer hover:opacity-90 transition-opacity object-contain bg-muted/30"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          window.open(comment.attachment_url!, '_blank');
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -224,39 +406,82 @@ export function ThreadPanel({
 
       {/* Compose Area - Always visible for internal users */}
       <div className="p-3 border-t border-border space-y-2">
-        {/* Internal-only toggle */}
+        {/* Mode toggle + Internal-only toggle */}
         {isInternal && (
-          <div className="flex items-center gap-2">
-            <Switch
-              id="internal-only"
-              checked={isInternalOnly}
-              onCheckedChange={setIsInternalOnly}
-              className="scale-75"
-            />
-            <Label htmlFor="internal-only" className="text-xs text-muted-foreground flex items-center gap-1">
-              <Lock className="h-3 w-3" />
-              Internal only
-            </Label>
+          <div className="flex items-center justify-between gap-2">
+            {/* Comment mode toggle */}
+            <ToggleGroup 
+              type="single" 
+              value={commentMode} 
+              onValueChange={handleModeChange}
+              size="sm"
+              className="h-7"
+            >
+              <ToggleGroupItem value="annotate" className="text-xs h-7 px-2 gap-1">
+                <Pencil className="h-3 w-3" />
+                Annotate
+              </ToggleGroupItem>
+              <ToggleGroupItem value="comment" className="text-xs h-7 px-2 gap-1">
+                <MessageSquare className="h-3 w-3" />
+                Comment
+              </ToggleGroupItem>
+            </ToggleGroup>
+            
+            {/* Internal-only toggle */}
+            <div className="flex items-center gap-2">
+              <Switch
+                id="internal-only"
+                checked={isInternalOnly}
+                onCheckedChange={setIsInternalOnly}
+                className="scale-75"
+              />
+              <Label htmlFor="internal-only" className="text-xs text-muted-foreground flex items-center gap-1">
+                <Lock className="h-3 w-3" />
+                Internal
+              </Label>
+            </div>
           </div>
         )}
         
-        {/* Comment input with inline draw icon */}
+        {/* Comment input with inline controls */}
         {(isInternal || selectedAnnotationId || showGeneralCommentInput) && (
           <>
+            {/* Attachment preview */}
+            {attachmentPreview && (
+              <div className="relative inline-block">
+                <img 
+                  src={attachmentPreview} 
+                  alt="Pending attachment" 
+                  className="max-w-[120px] max-h-[80px] rounded border border-border object-contain bg-muted/30"
+                />
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  className="absolute -top-2 -right-2 h-5 w-5 rounded-full"
+                  onClick={clearAttachment}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+            
             <div className="flex gap-2 items-end">
               <Textarea
                 ref={textareaRef}
                 placeholder={
-                  isDrawing 
-                    ? "Draw on image, then describe..." 
-                    : pendingAnnotationId === selectedAnnotationId 
-                      ? "Describe the issue..." 
-                      : selectedAnnotationId 
-                        ? "Reply..." 
-                        : "Click draw to annotate..."
+                  commentMode === 'annotate'
+                    ? isDrawing 
+                      ? "Draw on image, then describe..." 
+                      : pendingAnnotationId === selectedAnnotationId 
+                        ? "Describe the issue..." 
+                        : selectedAnnotationId 
+                          ? "Reply..." 
+                          : "Click draw to annotate..."
+                    : "Add a general comment..."
                 }
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
+                onPaste={handlePaste}
                 className={cn(
                   "min-h-[60px] text-sm resize-none flex-1",
                   pendingAnnotationId === selectedAnnotationId && "ring-2 ring-primary/50"
@@ -268,8 +493,26 @@ export function ThreadPanel({
                 }}
               />
               <div className="flex flex-col gap-1">
-                {/* Draw icon - inline next to textarea */}
-                {isInternal && onToggleDrawing && (
+                {/* Attach image button */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="shrink-0 h-8 w-8"
+                  title="Attach image (or paste)"
+                >
+                  <Image className="h-4 w-4" />
+                </Button>
+                
+                {/* Draw icon - only in annotate mode */}
+                {isInternal && commentMode === 'annotate' && onToggleDrawing && (
                   <Button
                     variant={isDrawing ? 'default' : 'ghost'}
                     size="icon"
@@ -286,7 +529,7 @@ export function ThreadPanel({
                 <Button
                   size="icon"
                   onClick={handleSendComment}
-                  disabled={!newComment.trim() || addComment.isPending || !selectedAnnotationId}
+                  disabled={!canSend || addComment.isPending || isUploading}
                   className="shrink-0 h-8 w-8"
                 >
                   <Send className="h-4 w-4" />
@@ -294,17 +537,20 @@ export function ThreadPanel({
               </div>
             </div>
             <p className="text-[10px] text-muted-foreground">
-              {isDrawing 
-                ? 'Click & drag on image to draw' 
-                : selectedAnnotationId 
-                  ? '⌘+Enter to send' 
-                  : 'Press D to draw'}
+              {commentMode === 'annotate' 
+                ? isDrawing 
+                  ? 'Click & drag on image to draw' 
+                  : selectedAnnotationId 
+                    ? '⌘+Enter to send • Paste images with ⌘+V' 
+                    : 'Press D to draw'
+                : '⌘+Enter to send • Paste images with ⌘+V'
+              }
             </p>
           </>
         )}
         
         {/* Hint when no annotation selected - adjusted for internal vs external */}
-        {!selectedAnnotationId && !isDrawing && allComments.length > 0 && !showGeneralCommentInput && (
+        {!selectedAnnotationId && !isDrawing && allComments.length > 0 && !showGeneralCommentInput && commentMode === 'annotate' && (
           <p className="text-xs text-muted-foreground text-center py-2">
             Click a comment to view its annotation
           </p>
@@ -317,6 +563,8 @@ export function ThreadPanel({
           </p>
         )}
       </div>
+      
+      {/* Hidden file input for attachment */}
     </div>
   );
 }

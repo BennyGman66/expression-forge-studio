@@ -480,10 +480,12 @@ export function useAddComment() {
       threadId,
       body,
       visibility = 'SHARED',
+      attachmentUrl,
     }: {
       threadId: string;
       body: string;
       visibility?: CommentVisibility;
+      attachmentUrl?: string | null;
     }) => {
       const { data: { user } } = await supabase.auth.getUser();
       
@@ -494,6 +496,7 @@ export function useAddComment() {
           author_user_id: user?.id,
           body,
           visibility,
+          attachment_url: attachmentUrl,
         })
         .select(`
           *,
