@@ -146,7 +146,7 @@ export function CurationLightbox({
           </div>
 
           {/* Main Image Area */}
-          <div className="flex-1 flex items-center justify-center relative px-16 min-h-0">
+          <div className="flex-1 flex items-center justify-center relative px-16 min-h-0 overflow-hidden">
             {/* Previous Button */}
             <Button
               variant="ghost"
@@ -157,12 +157,14 @@ export function CurationLightbox({
               <ChevronLeft className="w-10 h-10" />
             </Button>
 
-            {/* Image */}
-            <img
-              src={currentImage.url}
-              alt={`Output ${currentIndex + 1}`}
-              className="max-h-full max-w-full object-contain"
-            />
+            {/* Image with explicit container */}
+            <div className="h-full w-full flex items-center justify-center">
+              <img
+                src={currentImage.url}
+                alt={`Output ${currentIndex + 1}`}
+                className="max-h-full max-w-full object-contain"
+              />
+            </div>
 
             {/* Next Button */}
             <Button
@@ -202,7 +204,7 @@ export function CurationLightbox({
           </div>
 
           {/* Filmstrip Navigation */}
-          <div className="flex-shrink-0 bg-black/50 border-t border-white/10">
+          <div className="flex-shrink-0 h-24 bg-black/50 border-t border-white/10">
             <ScrollArea className="w-full" ref={filmstripRef}>
               <div className="flex gap-2 p-3 justify-center min-w-max">
                 {images.map((img, idx) => {
