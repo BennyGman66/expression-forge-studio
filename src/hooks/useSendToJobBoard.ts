@@ -126,13 +126,20 @@ export function useSendToJobBoard() {
           console.error('Error fetching source images:', sourceError);
         }
 
-        // 4. Attach source images (ALWAYS attach front and back if they exist)
+        // 4. Attach source images (front, back, and detail)
         if (sourceImages) {
+          const viewLabelMap: Record<string, string> = {
+            'full_front': 'Full front',
+            'back': 'Full back',
+            'detail': 'Detail',
+            'side': 'Side',
+          };
+
           for (const sourceImage of sourceImages) {
             const normalizedView = normalizeViewForArtifact(sourceImage.view);
             
-            // Only attach front and back source images (as per spec)
-            if (normalizedView !== 'full_front' && normalizedView !== 'back') {
+            // Attach front, back, and detail source images
+            if (normalizedView !== 'full_front' && normalizedView !== 'back' && normalizedView !== 'detail') {
               continue;
             }
 
@@ -156,7 +163,7 @@ export function useSendToJobBoard() {
             if (sourceArtifactError) {
               console.error('Error creating source artifact:', sourceArtifactError);
             } else {
-              const viewLabel = normalizedView === 'full_front' ? 'Full front' : 'Full back';
+              const viewLabel = viewLabelMap[normalizedView] || normalizedView;
               await supabase
                 .from('job_inputs')
                 .insert({
