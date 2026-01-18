@@ -199,6 +199,87 @@ export function useSubmissionAssets(submissionId: string | null) {
   });
 }
 
+// Asset slot with current version and history
+export interface AssetSlot {
+  slotKey: string;
+  current: SubmissionAsset;
+  history: SubmissionAsset[];
+}
+
+// Asset-centric: Get all assets for a job grouped by slot with version history
+export function useJobAssetsWithHistory(jobId: string | null) {
+  return useQuery({
+    queryKey: ['job-assets-with-history', jobId],
+    queryFn: async () => {
+      if (!jobId) return [];
+      
+      // Get all submissions for this job
+      const { data: submissions, error: subError } = await supabase
+        .from('job_submissions')
+        .select('id')
+        .eq('job_id', jobId);
+      
+      if (subError) throw subError;
+      if (!submissions?.length) return [];
+      
+      // Get ALL assets (including superseded) for these submissions
+      const { data: allAssets, error: assetsError } = await supabase
+        .from('submission_assets')
+        .select('*, review_status, reviewed_by_user_id, reviewed_at, superseded_by, revision_number')
+        .in('submission_id', submissions.map(s => s.id))
+        .order('sort_index')
+        .order('revision_number', { ascending: false });
+      
+      if (assetsError) throw assetsError;
+      if (!allAssets?.length) return [];
+      
+      // Group by label/sort_index to identify asset "slots"
+      // Current version = superseded_by is null
+      // Historical versions = superseded_by is not null (ordered by revision descending)
+      const slotMap = new Map<string, { current: SubmissionAsset | null; history: SubmissionAsset[] }>();
+      
+      for (const asset of allAssets) {
+        // Use label as slot key, fallback to sort_index
+        const slotKey = asset.label || `slot-${asset.sort_index}`;
+        
+        if (!slotMap.has(slotKey)) {
+          slotMap.set(slotKey, { current: null, history: [] });
+        }
+        
+        const slot = slotMap.get(slotKey)!;
+        
+        if (asset.superseded_by === null) {
+          // This is the current version
+          slot.current = asset as SubmissionAsset;
+        } else {
+          // This is a historical version
+          slot.history.push(asset as SubmissionAsset);
+        }
+      }
+      
+      // Convert to array, filter out slots without a current version
+      const result: AssetSlot[] = [];
+      for (const [slotKey, slot] of slotMap.entries()) {
+        if (slot.current) {
+          // Sort history by revision_number descending
+          slot.history.sort((a, b) => (b.revision_number || 1) - (a.revision_number || 1));
+          result.push({
+            slotKey,
+            current: slot.current,
+            history: slot.history,
+          });
+        }
+      }
+      
+      // Sort by sort_index of current asset
+      result.sort((a, b) => a.current.sort_index - b.current.sort_index);
+      
+      return result;
+    },
+    enabled: !!jobId,
+  });
+}
+
 // ============ PER-ASSET REVIEW ============
 
 export function useUpdateAssetStatus() {
