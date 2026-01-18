@@ -71,17 +71,44 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
   const handleCreateBatch = async () => {
     if (!selectedProjectId || selectedLookIds.size === 0) return;
 
-    // Collect all outputs from selected looks, including look_id
+    // Get look_source_images for selected looks (these have clean, sanitized URLs)
+    const selectedLookIdsArray = Array.from(selectedLookIds);
+    const { data: sourceImages } = await supabase
+      .from('look_source_images')
+      .select('look_id, view, source_url')
+      .in('look_id', selectedLookIdsArray);
+    
+    // Create a map: look_id -> view -> source_url
+    const sourceImageMap = new Map<string, Map<string, string>>();
+    sourceImages?.forEach(img => {
+      if (!sourceImageMap.has(img.look_id)) {
+        sourceImageMap.set(img.look_id, new Map());
+      }
+      sourceImageMap.get(img.look_id)!.set(img.view.toLowerCase(), img.source_url);
+    });
+
+    // Collect all outputs from selected looks, preferring look_source_images URLs
     const outputs: Array<{ look_id: string; view: string; source_output_id: string; source_url: string }> = [];
     
     approvedLooks?.filter(l => selectedLookIds.has(l.id)).forEach(look => {
       (look.job_outputs || []).forEach((output: any) => {
         if (output.file_url) {
+          // Parse view type from label (e.g., "Front View - filename.png" -> "front")
+          const labelLower = (output.label || '').toLowerCase();
+          let viewType = 'unknown';
+          if (labelLower.includes('front')) viewType = 'front';
+          else if (labelLower.includes('back')) viewType = 'back';
+          else if (labelLower.includes('side')) viewType = 'side';
+          else if (labelLower.includes('detail')) viewType = 'detail';
+          
+          // Prefer clean URL from look_source_images, fallback to job_outputs.file_url
+          const cleanUrl = sourceImageMap.get(look.id)?.get(viewType);
+          
           outputs.push({
             look_id: look.id,
             view: output.label || 'unknown',
             source_output_id: output.id,
-            source_url: output.file_url,
+            source_url: cleanUrl || output.file_url,
           });
         }
       });
