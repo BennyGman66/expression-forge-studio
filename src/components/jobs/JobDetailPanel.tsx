@@ -263,6 +263,9 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
         }).filter(Boolean)
       );
       
+      console.log('[RepairInputs] Source images found:', sourceImages.map(s => s.view));
+      console.log('[RepairInputs] Existing body views:', Array.from(existingViews));
+      
       let addedCount = 0;
       
       for (const img of sourceImages) {
@@ -286,8 +289,11 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
           label = 'Original Full front';
         }
         
+        console.log(`[RepairInputs] Processing: ${img.view} → normalized view: ${view}`);
+        
         // Skip if this view already exists
         if (existingViews.has(view)) {
+          console.log(`[RepairInputs] Skipping ${img.view} - view "${view}" already exists`);
           continue;
         }
         
@@ -304,14 +310,26 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
           .select()
           .single();
         
-        if (!error && artifact) {
-          await supabase.from('job_inputs').insert({
+        if (error) {
+          console.error(`[RepairInputs] Failed to create artifact for ${img.view}:`, error);
+          continue;
+        }
+        
+        if (artifact) {
+          const { error: inputError } = await supabase.from('job_inputs').insert({
             job_id: jobId,
             artifact_id: artifact.id,
             label,
           });
+          
+          if (inputError) {
+            console.error(`[RepairInputs] Failed to create job_input for ${img.view}:`, inputError);
+            continue;
+          }
+          
           addedCount++;
           existingViews.add(view); // Prevent duplicates within same run
+          console.log(`[RepairInputs] Added missing input: ${label} (${view})`);
         }
       }
       
@@ -320,6 +338,7 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
         // The query will auto-refetch
       } else {
         toast.info('No missing inputs found');
+        console.log('[RepairInputs] No inputs added - check logs above for skip/error reasons');
       }
     } catch (err) {
       console.error('Failed to repair inputs:', err);
