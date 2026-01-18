@@ -422,9 +422,9 @@ async function processRun(
           return false;
         });
 
-        // For FRONT_CROPPED, filter by product_type to use correct crop poses
+        // For FRONT_CROPPED and DETAIL, filter by product_type to use correct poses
         // Top → clay poses for upper-body crops, Trousers → clay poses for lower-body crops
-        if (shotType === "FRONT_CROPPED") {
+        if (shotType === "FRONT_CROPPED" || shotType === "DETAIL") {
           const desiredPoseType = productType === "trousers" ? "trousers" : "top";
           const matchingPoses = relevantPoses.filter((p: any) => {
             const poseProductType = (p.product_type || "").toLowerCase();
@@ -435,10 +435,10 @@ async function processRun(
           });
 
           if (matchingPoses.length > 0) {
-            console.log(`[process-repose-queue] Using ${matchingPoses.length} ${desiredPoseType} poses for FRONT_CROPPED`);
+            console.log(`[process-repose-queue] Using ${matchingPoses.length} ${desiredPoseType} poses for ${shotType}`);
             relevantPoses = matchingPoses;
           } else {
-            console.log(`[process-repose-queue] No ${desiredPoseType} poses found, using all ${relevantPoses.length} FRONT_CROPPED poses`);
+            console.log(`[process-repose-queue] No ${desiredPoseType} poses found, using all ${relevantPoses.length} ${shotType} poses`);
           }
         }
 
