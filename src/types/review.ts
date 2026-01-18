@@ -74,6 +74,7 @@ export interface ReviewComment {
   visibility: CommentVisibility;
   read_by: string[];
   created_at: string;
+  attachment_url?: string | null;
   // Joined
   author?: {
     id: string;

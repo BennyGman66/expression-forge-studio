@@ -3121,6 +3121,7 @@ export type Database = {
       }
       review_comments: {
         Row: {
+          attachment_url: string | null
           author_user_id: string | null
           body: string
           created_at: string
@@ -3131,6 +3132,7 @@ export type Database = {
           visibility: Database["public"]["Enums"]["comment_visibility"]
         }
         Insert: {
+          attachment_url?: string | null
           author_user_id?: string | null
           body: string
           created_at?: string
@@ -3141,6 +3143,7 @@ export type Database = {
           visibility?: Database["public"]["Enums"]["comment_visibility"]
         }
         Update: {
+          attachment_url?: string | null
           author_user_id?: string | null
           body?: string
           created_at?: string
