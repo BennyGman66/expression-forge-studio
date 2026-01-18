@@ -282,7 +282,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     }
   };
 
-  // Per-asset: Approve current asset
+  // Per-asset: Approve current asset with auto-advance to next pending
   const handleApproveAsset = async () => {
     if (!latestSubmission || !job || !selectedAsset) return;
 
@@ -307,6 +307,21 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
         toast.success('All assets approved! Job complete.');
       } else {
         toast.success(`${selectedAsset.label || 'Asset'} approved`);
+        
+        // Auto-advance to next pending asset
+        const currentIndex = assets.findIndex(a => a.id === selectedAsset.id);
+        if (currentIndex !== -1) {
+          // Find next pending asset (not approved, not changes_requested)
+          const nextPending = assets.find((a, idx) => 
+            idx > currentIndex && !a.review_status
+          ) || assets.find(a => !a.review_status); // Wrap around to start
+          
+          if (nextPending) {
+            setSelectedAsset(nextPending);
+            setSelectedAnnotationId(null);
+            setViewingVersionId(null); // Reset to current version
+          }
+        }
       }
       
       setShowApproveDialog(false);
