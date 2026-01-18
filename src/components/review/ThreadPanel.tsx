@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { ReviewThread, ReviewComment, ImageAnnotation, ThreadScope } from '@/types/review';
+import type { ReviewThread, ReviewComment, ImageAnnotation, ThreadScope } from '@/types/review';
 import { useAddComment, useCreateThread } from '@/hooks/useReviewSystem';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
