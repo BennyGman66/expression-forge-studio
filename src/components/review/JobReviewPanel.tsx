@@ -393,7 +393,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
           .from('images')
           .getPublicUrl(fileName);
         
-        // Create submission asset
+        // Create submission asset (copy freelancer_identity_id from job)
         const { error: assetError } = await supabase
           .from('submission_assets')
           .insert({
@@ -401,6 +401,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
             file_url: publicUrl,
             label: `Admin: ${file.name}`,
             sort_index: assets.length,
+            freelancer_identity_id: job?.freelancer_identity_id || null,
           });
         
         if (assetError) throw assetError;
@@ -429,26 +430,28 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     
     setIsBackfilling(true);
     try {
-      // 1. Create job_submission
+      // 1. Create job_submission (copy freelancer_identity_id from job)
       const { data: submission, error: subError } = await supabase
         .from('job_submissions')
         .insert({
           job_id: jobId,
           status: 'SUBMITTED',
           version_number: 1,
-          summary_note: 'Admin created from uploaded outputs'
+          summary_note: 'Admin created from uploaded outputs',
+          freelancer_identity_id: job?.freelancer_identity_id || null,
         })
         .select()
         .single();
       
       if (subError) throw subError;
       
-      // 2. Create submission_assets from job_outputs
+      // 2. Create submission_assets from job_outputs (copy freelancer_identity_id)
       const assetInserts = jobOutputs.map((output, index) => ({
         submission_id: submission.id,
         file_url: output.file_url,
         label: output.label || `Output ${index + 1}`,
         sort_index: index,
+        freelancer_identity_id: job?.freelancer_identity_id || null,
       }));
       
       const { error: assetsError } = await supabase
