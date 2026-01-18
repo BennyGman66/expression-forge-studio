@@ -272,7 +272,7 @@ export function ShotTypeBlock({
               No outputs for this view yet
             </p>
           ) : (
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-2">
               {/* Completed outputs */}
               {completedOutputs.map((output) => (
                 <OutputTile
@@ -284,21 +284,21 @@ export function ShotTypeBlock({
                 />
               ))}
               
-              {/* Pending outputs - placeholder tiles */}
+              {/* Pending outputs - placeholder tiles - matching smaller size */}
               {pendingOutputs.map((output) => (
                 <div
                   key={output.id}
-                  className="w-40 h-40 rounded-lg border-2 border-dashed border-muted flex flex-col items-center justify-center gap-2 bg-muted/20"
+                  className="w-36 h-36 rounded-lg border-2 border-dashed border-muted flex flex-col items-center justify-center gap-2 bg-muted/20"
                 >
                   {output.status === 'running' ? (
                     <>
-                      <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">Rendering...</span>
+                      <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                      <span className="text-[10px] text-muted-foreground">Rendering...</span>
                     </>
                   ) : (
                     <>
-                      <Circle className="w-6 h-6 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">Queued</span>
+                      <Circle className="w-5 h-5 text-muted-foreground" />
+                      <span className="text-[10px] text-muted-foreground">Queued</span>
                     </>
                   )}
                 </div>
@@ -308,7 +308,7 @@ export function ShotTypeBlock({
               {failedOutputs.map((output) => (
                 <div
                   key={output.id}
-                  className="w-40 h-40 rounded-lg border-2 border-dashed border-destructive/30 flex flex-col items-center justify-center gap-2 bg-destructive/5"
+                  className="w-36 h-36 rounded-lg border-2 border-dashed border-destructive/30 flex flex-col items-center justify-center gap-2 bg-destructive/5"
                 >
                   <span className="text-xs text-destructive">Failed</span>
                 </div>

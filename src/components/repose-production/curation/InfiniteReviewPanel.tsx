@@ -215,19 +215,19 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
         </CardContent>
       </Card>
 
-      {/* Main Layout */}
-      <div className="flex h-[calc(100%-5rem)] border rounded-lg overflow-hidden">
-        {/* Sidebar with shot type dots */}
+      {/* Main Layout - Clear separation between sidebar and content */}
+      <div className="flex h-[calc(100%-5rem)] border rounded-lg overflow-hidden bg-muted/30">
+        {/* Left Sidebar - Fixed width, doesn't overlap */}
         <InfiniteSidebar
           looks={groupedByLook}
           onSelectLook={scrollToLook}
           overallStats={overallStats}
         />
 
-        {/* Infinite Scroll Content */}
+        {/* Right Content Panel - Scrollable with proper padding */}
         <div 
           ref={parentRef}
-          className="flex-1 overflow-auto bg-background"
+          className="flex-1 overflow-auto bg-background border-l border-border"
         >
           <div
             style={{
