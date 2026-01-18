@@ -425,7 +425,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
           job_id: jobId,
           status: 'SUBMITTED',
           version_number: 1,
-          notes: 'Admin created from uploaded outputs'
+          summary_note: 'Admin created from uploaded outputs'
         })
         .select()
         .single();
