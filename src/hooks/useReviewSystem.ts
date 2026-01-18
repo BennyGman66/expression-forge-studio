@@ -716,10 +716,14 @@ export function useDeleteAsset() {
       return { assetId, jobId };
     },
     onSuccess: (_, { jobId }) => {
+      // Invalidate all related queries to ensure UI refreshes
       queryClient.invalidateQueries({ queryKey: ['job-assets-with-history', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['job-assets-with-history'] }); // Also invalidate without jobId filter
+      queryClient.invalidateQueries({ queryKey: ['submission-assets'] });
       queryClient.invalidateQueries({ queryKey: ['job-submissions'] });
       queryClient.invalidateQueries({ queryKey: ['asset-annotations'] });
       queryClient.invalidateQueries({ queryKey: ['review-threads'] });
+      queryClient.invalidateQueries({ queryKey: ['latest-submission'] });
     },
   });
 }
