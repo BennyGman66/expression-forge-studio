@@ -72,37 +72,89 @@ export function useReposeBatches() {
   });
 }
 
-// Fetch batch items for a batch
+// Extended batch item with look code
+export interface ReposeBatchItemWithLook extends ReposeBatchItem {
+  look_code?: string | null;
+}
+
+// Fetch batch items for a batch with look codes
 export function useReposeBatchItems(batchId: string | undefined) {
   return useQuery({
     queryKey: ["repose-batch-items", batchId],
     queryFn: async () => {
       if (!batchId) return [];
-      const { data, error } = await supabase
+      
+      // Fetch batch items
+      const { data: items, error } = await supabase
         .from("repose_batch_items")
         .select("*")
         .eq("batch_id", batchId)
         .order("created_at", { ascending: true });
       if (error) throw error;
-      return data as ReposeBatchItem[];
+      if (!items || items.length === 0) return [];
+      
+      // Get unique look IDs and fetch their codes
+      const lookIds = [...new Set(items.map(i => i.look_id).filter(Boolean))] as string[];
+      
+      let lookCodeMap = new Map<string, string>();
+      if (lookIds.length > 0) {
+        const { data: looks } = await supabase
+          .from("talent_looks")
+          .select("id, look_code")
+          .in("id", lookIds);
+        
+        if (looks) {
+          for (const look of looks) {
+            if (look.look_code) {
+              lookCodeMap.set(look.id, look.look_code);
+            }
+          }
+        }
+      }
+      
+      // Merge look codes into batch items
+      return items.map(item => ({
+        ...item,
+        look_code: item.look_id ? lookCodeMap.get(item.look_id) || null : null,
+      })) as ReposeBatchItemWithLook[];
     },
     enabled: !!batchId,
   });
 }
 
-// Fetch repose outputs for a batch
+// Fetch repose outputs for a batch (handles >1000 rows)
 export function useReposeOutputs(batchId: string | undefined) {
   return useQuery({
     queryKey: ["repose-outputs", batchId],
     queryFn: async () => {
       if (!batchId) return [];
-      const { data, error } = await supabase
-        .from("repose_outputs")
-        .select("*")
-        .eq("batch_id", batchId)
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      return data as ReposeOutput[];
+      
+      // Supabase has a default limit of 1000 rows, so we need to paginate
+      const PAGE_SIZE = 1000;
+      let allOutputs: ReposeOutput[] = [];
+      let offset = 0;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from("repose_outputs")
+          .select("*")
+          .eq("batch_id", batchId)
+          .order("created_at", { ascending: true })
+          .range(offset, offset + PAGE_SIZE - 1);
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allOutputs = allOutputs.concat(data as ReposeOutput[]);
+          offset += PAGE_SIZE;
+          hasMore = data.length === PAGE_SIZE;
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      return allOutputs;
     },
     enabled: !!batchId,
   });
