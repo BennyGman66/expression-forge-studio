@@ -12,8 +12,11 @@ const corsHeaders = {
 // Time limit for each worker invocation (50 seconds - Deno kills at ~60-90s)
 const MAX_PROCESSING_TIME_MS = 50 * 1000;
 
-// Concurrency for parallel processing
-const CONCURRENCY = 3;
+// Concurrency for parallel processing (runs level)
+const RUN_CONCURRENCY = 3;
+
+// Concurrency for output generation within a run
+const OUTPUT_CONCURRENCY = 10;
 
 // Heartbeat logging interval
 const LOG_INTERVAL_MS = 10 * 1000;
@@ -209,7 +212,7 @@ async function processQueueBackground(
         .eq("batch_id", batchId)
         .eq("status", "queued")
         .order("created_at", { ascending: true })
-        .limit(CONCURRENCY);
+        .limit(RUN_CONCURRENCY);
 
       if (!queuedRuns?.length) {
         console.log(`[process-repose-queue] No more queued runs, finishing`);
@@ -486,45 +489,65 @@ async function processRun(
       throw insertError;
     }
 
-    // Generate each output
+    // Generate outputs in parallel batches
     let successCount = 0;
     let failCount = 0;
+    const outputs = createdOutputs || [];
 
-    for (const output of createdOutputs || []) {
-      try {
-        console.log(`[process-repose-queue] Generating output ${output.id}`);
-        
-        const { error } = await supabase.functions.invoke("generate-repose-single", {
-          body: { outputId: output.id, model },
-        });
+    console.log(`[process-repose-queue] Processing ${outputs.length} outputs with concurrency ${OUTPUT_CONCURRENCY}`);
 
-        if (error) {
-          console.error(`[process-repose-queue] Generation failed for ${output.id}:`, error);
-          await supabase
-            .from("repose_outputs")
-            .update({ status: "failed" })
-            .eq("id", output.id);
-          failCount++;
-        } else {
+    // Process in batches of OUTPUT_CONCURRENCY
+    for (let i = 0; i < outputs.length; i += OUTPUT_CONCURRENCY) {
+      const batch = outputs.slice(i, i + OUTPUT_CONCURRENCY);
+      
+      console.log(`[process-repose-queue] Batch ${Math.floor(i / OUTPUT_CONCURRENCY) + 1}: processing ${batch.length} outputs in parallel`);
+      
+      const results = await Promise.allSettled(
+        batch.map(async (output: { id: string }) => {
+          try {
+            const { error } = await supabase.functions.invoke("generate-repose-single", {
+              body: { outputId: output.id, model },
+            });
+            
+            if (error) {
+              console.error(`[process-repose-queue] Generation failed for ${output.id}:`, error);
+              await supabase
+                .from("repose_outputs")
+                .update({ status: "failed" })
+                .eq("id", output.id);
+              return { success: false };
+            }
+            return { success: true };
+          } catch (err) {
+            console.error(`[process-repose-queue] Error generating ${output.id}:`, err);
+            await supabase
+              .from("repose_outputs")
+              .update({ status: "failed" })
+              .eq("id", output.id);
+            return { success: false };
+          }
+        })
+      );
+
+      // Count results
+      for (const result of results) {
+        if (result.status === "fulfilled" && result.value.success) {
           successCount++;
+        } else {
+          failCount++;
         }
-      } catch (err) {
-        console.error(`[process-repose-queue] Error generating ${output.id}:`, err);
-        await supabase
-          .from("repose_outputs")
-          .update({ status: "failed" })
-          .eq("id", output.id);
-        failCount++;
       }
 
-      // Update heartbeat
+      // Update heartbeat after each batch
       await supabase
         .from("repose_runs")
         .update({ heartbeat_at: new Date().toISOString() })
         .eq("id", runId);
 
-      // Small delay for rate limiting
-      await new Promise((r) => setTimeout(r, 300));
+      // Small delay between batches to avoid overwhelming the API
+      if (i + OUTPUT_CONCURRENCY < outputs.length) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
     }
 
     console.log(`[process-repose-queue] Run ${runId} complete: ${successCount} success, ${failCount} failed`);
