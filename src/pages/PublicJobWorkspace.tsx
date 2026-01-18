@@ -73,7 +73,8 @@ export default function PublicJobWorkspace() {
       let isHead = false;
       
       if (label.includes('front')) view = 'Front';
-      else if (label.includes('side')) view = 'Side';
+      else if (label.includes('detail')) view = 'Detail';
+      else if (label.includes('side')) view = 'Detail'; // Legacy fallback
       else if (label.includes('back')) view = 'Back';
       
       if (label.includes('head') || label.includes('render')) isHead = true;
@@ -91,7 +92,7 @@ export default function PublicJobWorkspace() {
     });
     
     return Object.values(groups).sort((a, b) => {
-      const order = { Front: 0, Side: 1, Back: 2 };
+      const order = { Front: 0, Detail: 1, Back: 2 };
       return (order[a.view as keyof typeof order] || 0) - (order[b.view as keyof typeof order] || 0);
     });
   }, [inputs, job?.type]);
