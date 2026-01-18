@@ -703,9 +703,9 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
                 </Select>
               </div>
 
-              {/* Renders per Look */}
+              {/* Renders per Shot Type */}
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">Renders per Look</label>
+                <label className="text-sm font-medium">Renders per Shot Type</label>
                 <Select 
                   value={rendersPerLook.toString()} 
                   onValueChange={(v) => setRendersPerLook(parseInt(v))}
