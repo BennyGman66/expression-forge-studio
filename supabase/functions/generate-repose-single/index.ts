@@ -31,11 +31,27 @@ function fixBrokenStorageUrl(url: string | null | undefined): string {
   return basePath + fixedFilename;
 }
 
+/**
+ * Wraps a promise with a timeout. Rejects if the promise doesn't resolve in time.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(errorMsg)), ms)
+    ),
+  ]);
+}
+
+const AI_TIMEOUT_MS = 55000; // 55 second timeout for AI calls
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const startTime = Date.now();
 
   try {
     const { outputId, model } = await req.json();
@@ -47,7 +63,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[generate-repose-single] Processing output: ${outputId}, model: ${selectedModel}`);
+    console.log(`[generate-repose-single] Starting output ${outputId}, model: ${selectedModel}`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -118,29 +134,37 @@ Do not stylise or reinterpret the image.
 
 The final image should look like the original photo, naturally repositioned and cropped identically to the reference image.`;
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: selectedModel,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'text', text: 'INPUT PHOTO (subject to repose):' },
-              { type: 'image_url', image_url: { url: sourceUrl } },
-              { type: 'text', text: 'GREYSCALE REFERENCE (pose, camera, and framing template):' },
-              { type: 'image_url', image_url: { url: poseUrl } },
-            ],
-          },
-        ],
-        modalities: ['image', 'text'],
+    // Call AI API with timeout protection
+    const response = await withTimeout(
+      fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${lovableApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: prompt },
+                { type: 'text', text: 'INPUT PHOTO (subject to repose):' },
+                { type: 'image_url', image_url: { url: sourceUrl } },
+                { type: 'text', text: 'GREYSCALE REFERENCE (pose, camera, and framing template):' },
+                { type: 'image_url', image_url: { url: poseUrl } },
+              ],
+            },
+          ],
+          modalities: ['image', 'text'],
+        }),
       }),
-    });
+      AI_TIMEOUT_MS,
+      `AI generation timed out after ${AI_TIMEOUT_MS / 1000}s`
+    );
+    
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    console.log(`[generate-repose-single] AI response received in ${elapsed}s`);
 
     if (!response.ok) {
       const errorText = await response.text();

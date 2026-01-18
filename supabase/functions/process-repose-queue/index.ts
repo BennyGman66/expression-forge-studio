@@ -15,10 +15,18 @@ const MAX_PROCESSING_TIME_MS = 50 * 1000;
 // Concurrency for parallel processing
 const CONCURRENCY = 3;
 
+// Heartbeat logging interval
+const LOG_INTERVAL_MS = 10 * 1000;
+
+// Stale run threshold (2 minutes without heartbeat)
+const STALE_RUN_THRESHOLD_MS = 2 * 60 * 1000;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const startTime = Date.now();
 
   try {
     const { batchId, pipelineJobId, model, resumeContext } = await req.json();
@@ -60,20 +68,41 @@ Deno.serve(async (req) => {
       .update({ status: "RUNNING" })
       .eq("id", batchId);
 
-    // Reset any stuck running runs to queued
-    const { error: resetError } = await supabase
+    // Reset stale running runs (no heartbeat for > 2 minutes)
+    const staleThreshold = new Date(Date.now() - STALE_RUN_THRESHOLD_MS).toISOString();
+    const { data: staleRuns } = await supabase
+      .from("repose_runs")
+      .update({ status: "queued", started_at: null, heartbeat_at: null })
+      .eq("batch_id", batchId)
+      .eq("status", "running")
+      .lt("heartbeat_at", staleThreshold)
+      .select("id");
+
+    if (staleRuns?.length) {
+      console.log(`[process-repose-queue] Reset ${staleRuns.length} stale running runs (no heartbeat > 2min)`);
+    }
+
+    // Also reset runs without any heartbeat (crashed before first heartbeat)
+    const { data: noHeartbeatRuns } = await supabase
       .from("repose_runs")
       .update({ status: "queued", started_at: null })
       .eq("batch_id", batchId)
-      .eq("status", "running");
+      .eq("status", "running")
+      .is("heartbeat_at", null)
+      .select("id");
 
-    if (resetError) {
-      console.warn(`[process-repose-queue] Failed to reset running runs:`, resetError);
+    if (noHeartbeatRuns?.length) {
+      console.log(`[process-repose-queue] Reset ${noHeartbeatRuns.length} runs without heartbeat`);
     }
+
+    // Track processed runs for continuation
+    const processedRunIds: Set<string> = resumeContext?.processedRunIds
+      ? new Set(resumeContext.processedRunIds)
+      : new Set();
 
     // Start background processing
     EdgeRuntime.waitUntil(
-      processQueueBackground(supabase, batchId, pipelineJobId, model || "google/gemini-3-pro-image-preview", resumeContext)
+      processQueueBackground(supabase, batchId, pipelineJobId, model || "google/gemini-3-pro-image-preview", processedRunIds, startTime)
     );
 
     return new Response(
@@ -97,79 +126,93 @@ Deno.serve(async (req) => {
 async function processQueueBackground(
   supabase: any,
   batchId: string,
-  pipelineJobId: string,
+  pipelineJobId: string | null,
   model: string,
-  resumeContext?: { processedRunIds?: string[] }
+  processedRunIds: Set<string>,
+  startTime: number
 ) {
-  const startTime = Date.now();
-  const processedRunIds = new Set<string>(resumeContext?.processedRunIds || []);
+  let lastLogTime = Date.now();
 
-  // Helper to check if approaching timeout
-  const isNearTimeout = () => (Date.now() - startTime) > MAX_PROCESSING_TIME_MS;
+  // Helper to log stats
+  async function logHeartbeat() {
+    const { data: stats } = await supabase
+      .from("repose_runs")
+      .select("status")
+      .eq("batch_id", batchId);
 
-  // Helper for self-continuation
-  const continueLater = async () => {
-    console.log(`[process-repose-queue] Approaching timeout, scheduling continuation...`);
+    const running = stats?.filter((r: any) => r.status === "running").length || 0;
+    const queued = stats?.filter((r: any) => r.status === "queued").length || 0;
+    const complete = stats?.filter((r: any) => r.status === "complete").length || 0;
+    const failed = stats?.filter((r: any) => r.status === "failed").length || 0;
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+    console.log(`[process-repose-queue] Heartbeat: ${complete} complete, ${running} running, ${queued} queued, ${failed} failed, elapsed ${elapsed}s`);
+    lastLogTime = Date.now();
+  }
+
+  // Helper to continue processing in a new worker
+  async function continueLater() {
+    console.log(`[process-repose-queue] Approaching timeout, continuing in new worker...`);
     
-    await supabase
-      .from("pipeline_jobs")
-      .update({
-        progress_message: "Continuing in new worker...",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", pipelineJobId);
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    await supabase.functions.invoke("process-repose-queue", {
-      body: {
+    await fetch(`${supabaseUrl}/functions/v1/process-repose-queue`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${supabaseKey}`,
+      },
+      body: JSON.stringify({
         batchId,
         pipelineJobId,
         model,
-        resumeContext: { processedRunIds: Array.from(processedRunIds) },
-      },
+        resumeContext: {
+          processedRunIds: Array.from(processedRunIds),
+        },
+      }),
     });
-    
-    console.log("[process-repose-queue] Continuation scheduled");
-  };
+  }
 
   try {
-    console.log(`[process-repose-queue] Background processing started for batch ${batchId}`);
-
     // Main processing loop
     while (true) {
-      // Check if job was canceled
-      const { data: jobCheck } = await supabase
-        .from("pipeline_jobs")
-        .select("status")
-        .eq("id", pipelineJobId)
-        .single();
-
-      if (jobCheck?.status === "CANCELED" || jobCheck?.status === "PAUSED") {
-        console.log(`[process-repose-queue] Job ${pipelineJobId} was ${jobCheck.status}, stopping`);
-        break;
-      }
-
-      // Check if near timeout
-      if (isNearTimeout()) {
+      // Check if we're approaching timeout
+      if (Date.now() - startTime > MAX_PROCESSING_TIME_MS) {
         await continueLater();
-        return; // Exit this worker
+        return;
       }
 
-      // Get next batch of queued runs
-      const { data: queuedRuns, error: queryError } = await supabase
+      // Log heartbeat periodically
+      if (Date.now() - lastLogTime > LOG_INTERVAL_MS) {
+        await logHeartbeat();
+      }
+
+      // Check if job was cancelled or paused
+      if (pipelineJobId) {
+        const { data: job } = await supabase
+          .from("pipeline_jobs")
+          .select("status")
+          .eq("id", pipelineJobId)
+          .single();
+
+        if (job?.status === "CANCELLED" || job?.status === "PAUSED") {
+          console.log(`[process-repose-queue] Job ${job.status}, stopping`);
+          return;
+        }
+      }
+
+      // Fetch next batch of queued runs
+      const { data: queuedRuns } = await supabase
         .from("repose_runs")
-        .select("*")
+        .select("id, look_id, brand_id, config_snapshot")
         .eq("batch_id", batchId)
         .eq("status", "queued")
         .order("created_at", { ascending: true })
         .limit(CONCURRENCY);
 
-      if (queryError) {
-        console.error("[process-repose-queue] Query error:", queryError);
-        break;
-      }
-
       if (!queuedRuns?.length) {
-        console.log("[process-repose-queue] No more queued runs");
+        console.log(`[process-repose-queue] No more queued runs, finishing`);
         break;
       }
 
@@ -180,66 +223,64 @@ async function processQueueBackground(
         queuedRuns.map((run: any) => processRun(supabase, run, batchId, model, pipelineJobId, processedRunIds))
       );
 
-      // Update progress
+      // Update pipeline job progress
+      if (pipelineJobId) {
+        const { data: stats } = await supabase
+          .from("repose_runs")
+          .select("status")
+          .eq("batch_id", batchId);
+
+        const complete = stats?.filter((r: any) => r.status === "complete").length || 0;
+        const failed = stats?.filter((r: any) => r.status === "failed").length || 0;
+        const total = stats?.length || 0;
+
+        await supabase
+          .from("pipeline_jobs")
+          .update({ 
+            progress_done: complete, 
+            progress_failed: failed,
+            progress_total: total,
+          })
+          .eq("id", pipelineJobId);
+      }
+    }
+
+    // Final log
+    await logHeartbeat();
+
+    // Finalize job
+    if (pipelineJobId) {
       const { data: stats } = await supabase
         .from("repose_runs")
         .select("status")
         .eq("batch_id", batchId);
 
-      if (stats) {
-        const complete = stats.filter((r: any) => r.status === "complete").length;
-        const failed = stats.filter((r: any) => r.status === "failed").length;
-        const total = stats.length;
+      const failed = stats?.filter((r: any) => r.status === "failed").length || 0;
+      const finalStatus = failed > 0 ? "FAILED" : "COMPLETED";
 
-        await supabase
-          .from("pipeline_jobs")
-          .update({
-            progress_done: complete,
-            progress_failed: failed,
-            progress_total: total,
-            progress_message: `Processing ${complete + failed}/${total}`,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", pipelineJobId);
-      }
-
-      // Small delay between batches
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    // Check final status
-    const { data: finalStats } = await supabase
-      .from("repose_runs")
-      .select("status")
-      .eq("batch_id", batchId);
-
-    const complete = finalStats?.filter((r: any) => r.status === "complete").length || 0;
-    const failed = finalStats?.filter((r: any) => r.status === "failed").length || 0;
-    const queued = finalStats?.filter((r: any) => r.status === "queued").length || 0;
-
-    // Only mark as completed if no more queued
-    if (queued === 0) {
-      const finalStatus = failed > 0 && complete === 0 ? "FAILED" : "COMPLETED";
-      
       await supabase
         .from("pipeline_jobs")
-        .update({
-          status: finalStatus,
-          completed_at: new Date().toISOString(),
-          progress_message: failed > 0 ? `Completed with ${failed} failures` : "Completed successfully",
+        .update({ 
+          status: finalStatus, 
+          completed_at: new Date().toISOString() 
         })
         .eq("id", pipelineJobId);
 
-      await supabase
-        .from("repose_batches")
-        .update({ status: finalStatus === "COMPLETED" ? "COMPLETE" : "FAILED" })
-        .eq("id", batchId);
+      console.log(`[process-repose-queue] Job finished with status ${finalStatus}`);
     }
 
-    console.log(`[process-repose-queue] Finished: ${complete} complete, ${failed} failed, ${queued} queued`);
-  } catch (error) {
-    console.error("[process-repose-queue] Background processing error:", error);
-    await markJobFailed(supabase, pipelineJobId, error instanceof Error ? error.message : "Unknown error");
+    // Update batch status
+    await supabase
+      .from("repose_batches")
+      .update({ status: "COMPLETE" })
+      .eq("id", batchId);
+
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[process-repose-queue] Background error:", errorMessage);
+    if (pipelineJobId) {
+      await markJobFailed(supabase, pipelineJobId, errorMessage);
+    }
   }
 }
 
@@ -248,7 +289,7 @@ async function processRun(
   run: any,
   batchId: string,
   model: string,
-  pipelineJobId: string,
+  pipelineJobId: string | null,
   processedRunIds: Set<string>
 ) {
   const runId = run.id;
