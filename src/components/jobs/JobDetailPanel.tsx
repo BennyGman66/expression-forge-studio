@@ -29,6 +29,7 @@ import {
   useAddJobNote,
   useResetJob,
   useAddJobOutput,
+  useUnassignFreelancer,
 } from "@/hooks/useJobs";
 import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
@@ -47,6 +48,7 @@ import {
   RotateCcw,
   Plus,
   CheckCircle,
+  UserX,
 } from "lucide-react";
 import { format } from "date-fns";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -90,6 +92,7 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
   const createBatch = useCreateReposeBatch();
   const resetJob = useResetJob();
   const addOutput = useAddJobOutput();
+  const unassignFreelancer = useUnassignFreelancer();
 
   const handleAdminUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -304,16 +307,18 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
                 </div>
               </div>
 
-              {/* Admin Reset Button - Show when job is IN_PROGRESS or ASSIGNED */}
-              {(job.status === 'IN_PROGRESS' || job.status === 'ASSIGNED') && (
+              {/* Return to Open Pool - Show when job has assignee or freelancer and is in a workable status */}
+              {(job.status === 'IN_PROGRESS' || job.status === 'ASSIGNED' || 
+                job.status === 'NEEDS_CHANGES' || job.status === 'SUBMITTED') && 
+                (job.assigned_user_id || job.freelancer_identity_id) && (
                 <Button
                   variant="outline"
-                  onClick={handleResetToOpen}
-                  disabled={resetJob.isPending}
+                  onClick={() => unassignFreelancer.mutate(job.id)}
+                  disabled={unassignFreelancer.isPending}
                   className="w-full text-orange-400 border-orange-500/30 hover:bg-orange-500/10"
                 >
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  {resetJob.isPending ? 'Resetting...' : 'Reset to Open'}
+                  <UserX className="mr-2 h-4 w-4" />
+                  {unassignFreelancer.isPending ? 'Returning...' : 'Return to Open Pool'}
                 </Button>
               )}
 

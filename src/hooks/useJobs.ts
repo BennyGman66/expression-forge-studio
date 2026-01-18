@@ -243,7 +243,9 @@ export function useUnassignFreelancer() {
         .from("unified_jobs")
         .update({ 
           freelancer_identity_id: null,
-          status: 'OPEN'
+          assigned_user_id: null,
+          status: 'OPEN',
+          started_at: null
         })
         .eq("id", jobId)
         .select()
@@ -256,7 +258,8 @@ export function useUnassignFreelancer() {
       queryClient.invalidateQueries({ queryKey: ["unified-jobs"] });
       queryClient.invalidateQueries({ queryKey: ["unified-job", jobId] });
       queryClient.invalidateQueries({ queryKey: ["public-freelancer-jobs"] });
-      toast.success("Freelancer unassigned - job is now open");
+      queryClient.invalidateQueries({ queryKey: ["freelancer-jobs"] });
+      toast.success("Job returned to open pool");
     },
     onError: (error) => {
       toast.error(`Failed to unassign: ${error.message}`);
