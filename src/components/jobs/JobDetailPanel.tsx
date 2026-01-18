@@ -250,9 +250,14 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
         return;
       }
       
-      // Get existing job inputs to find what views are already attached
+      // Get existing job inputs - only check LOOK_ORIGINAL_* artifacts (body shots), not head renders
       const existingViews = new Set(
-        inputs?.map(i => {
+        inputs?.filter(i => {
+          const type = i.artifact?.type;
+          return type === 'LOOK_ORIGINAL_FRONT' || 
+                 type === 'LOOK_ORIGINAL_BACK' || 
+                 type === 'LOOK_ORIGINAL_SIDE';
+        }).map(i => {
           const meta = i.artifact?.metadata as { view?: string } | undefined;
           return meta?.view;
         }).filter(Boolean)
