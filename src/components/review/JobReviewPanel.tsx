@@ -750,17 +750,29 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
               </>
             )}
             
-            {/* Show locked state for approved assets */}
-            {isInternal && selectedAsset?.review_status === 'APPROVED' && (
+            {/* Show approved state with unapprove option */}
+            {isInternal && selectedAsset?.review_status === 'APPROVED' && !isViewingHistoricalVersion && (
               <>
                 <div className="h-4 w-px bg-border" />
                 <Badge className="bg-green-500/20 text-green-400 border-green-500/30 gap-1">
                   <Check className="h-3 w-3" />
                   Approved
                 </Badge>
-                <span className="text-xs text-muted-foreground">
-                  No further action needed
-                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowChangesDialog(true)}
+                      className="gap-1 text-orange-500 hover:text-orange-600 hover:border-orange-400"
+                      disabled={updateAssetStatus.isPending}
+                    >
+                      <AlertTriangle className="h-4 w-4" />
+                      Unapprove
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Request changes on this asset</TooltipContent>
+                </Tooltip>
               </>
             )}
             
