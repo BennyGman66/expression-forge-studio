@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { fixBrokenStorageUrl } from '@/lib/fileUtils';
-import { SubmissionAsset, AssetReviewStatus } from '@/types/review';
+import type { SubmissionAsset, AssetReviewStatus } from '@/types/review';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -10,7 +11,18 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { MessageSquare, Check, AlertTriangle, Clock, Lock, ChevronDown, History } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { MessageSquare, Check, AlertTriangle, Clock, Lock, ChevronDown, History, Trash2, Loader2 } from 'lucide-react';
 import { AssetSlot } from '@/hooks/useReviewSystem';
 
 interface AssetThumbnailsProps {
@@ -22,6 +34,10 @@ interface AssetThumbnailsProps {
   // For viewing historical versions temporarily
   viewingVersionId?: string | null;
   onViewVersion?: (asset: SubmissionAsset | null) => void;
+  // For deleting assets
+  onDeleteAsset?: (asset: SubmissionAsset) => void;
+  isDeletingAssetId?: string | null;
+  canDelete?: boolean;
 }
 
 function getStatusIndicator(status: AssetReviewStatus) {
@@ -55,8 +71,12 @@ export function AssetThumbnails({
   orientation = 'vertical',
   viewingVersionId,
   onViewVersion,
+  onDeleteAsset,
+  isDeletingAssetId,
+  canDelete = false,
 }: AssetThumbnailsProps) {
   const [openVersionPopover, setOpenVersionPopover] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   if (assetSlots.length === 0) {
     return (
@@ -89,11 +109,11 @@ export function AssetThumbnails({
         return (
           <Tooltip key={slot.slotKey}>
             <TooltipTrigger asChild>
-              <div className="relative">
+              <div className="relative group">
                 <button
                   onClick={() => onSelect(displayedAsset)}
                   className={cn(
-                    "relative group rounded-lg overflow-hidden border-2 transition-all shrink-0 w-full",
+                    "relative rounded-lg overflow-hidden border-2 transition-all shrink-0 w-full",
                     isSelected
                       ? "border-primary ring-2 ring-primary/30"
                       : "border-transparent hover:border-muted-foreground/30",
@@ -229,6 +249,52 @@ export function AssetThumbnails({
                     <MessageSquare className="h-2.5 w-2.5" />
                     {annotationCount}
                   </Badge>
+                )}
+                
+                {/* Delete button - shown on hover for non-approved assets */}
+                {canDelete && !isApproved && onDeleteAsset && (
+                  <AlertDialog open={deleteConfirmId === displayedAsset.id} onOpenChange={(open) => {
+                    if (!open) setDeleteConfirmId(null);
+                  }}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        className="absolute bottom-7 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteConfirmId(displayedAsset.id);
+                        }}
+                        disabled={isDeletingAssetId === displayedAsset.id}
+                      >
+                        {isDeletingAssetId === displayedAsset.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3 w-3" />
+                        )}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Asset?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently delete "{asset.label || `Asset ${idx + 1}`}" and all its annotations and comments. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          onClick={() => {
+                            onDeleteAsset(displayedAsset);
+                            setDeleteConfirmId(null);
+                          }}
+                        >
+                          Delete
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 )}
               </div>
             </TooltipTrigger>

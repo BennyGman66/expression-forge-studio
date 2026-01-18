@@ -614,6 +614,84 @@ export function useDeleteAnnotation() {
   });
 }
 
+// ============ ASSET DELETION ============
+
+export function useDeleteAsset() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: async ({ 
+      assetId, 
+      jobId,
+      deleteStorageFile = true 
+    }: { 
+      assetId: string; 
+      jobId: string;
+      deleteStorageFile?: boolean;
+    }) => {
+      // 1. Get the asset to find file_url and related data
+      const { data: asset, error: fetchError } = await supabase
+        .from('submission_assets')
+        .select('*, submission_id')
+        .eq('id', assetId)
+        .single();
+      
+      if (fetchError) throw fetchError;
+      
+      // 2. Delete annotations for this asset (which will cascade delete threads via ON DELETE CASCADE if set up)
+      const { error: annotationError } = await supabase
+        .from('image_annotations')
+        .delete()
+        .eq('asset_id', assetId);
+      
+      if (annotationError) console.warn('Error deleting annotations:', annotationError);
+      
+      // 3. Delete review threads for this asset
+      const { error: threadError } = await supabase
+        .from('review_threads')
+        .delete()
+        .eq('asset_id', assetId);
+      
+      if (threadError) console.warn('Error deleting threads:', threadError);
+      
+      // 4. Delete the submission asset record
+      const { error: assetError } = await supabase
+        .from('submission_assets')
+        .delete()
+        .eq('id', assetId);
+      
+      if (assetError) throw assetError;
+      
+      // 5. Optionally delete from storage
+      if (deleteStorageFile && asset.file_url) {
+        try {
+          // Extract the storage path from the URL
+          const url = new URL(asset.file_url);
+          const pathMatch = url.pathname.match(/\/storage\/v1\/object\/public\/images\/(.+)/);
+          if (pathMatch) {
+            const storagePath = decodeURIComponent(pathMatch[1]);
+            const { error: storageError } = await supabase.storage
+              .from('images')
+              .remove([storagePath]);
+            
+            if (storageError) console.warn('Error deleting from storage:', storageError);
+          }
+        } catch (e) {
+          console.warn('Could not delete storage file:', e);
+        }
+      }
+      
+      return { assetId, jobId };
+    },
+    onSuccess: (_, { jobId }) => {
+      queryClient.invalidateQueries({ queryKey: ['job-assets-with-history', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['job-submissions'] });
+      queryClient.invalidateQueries({ queryKey: ['asset-annotations'] });
+      queryClient.invalidateQueries({ queryKey: ['review-threads'] });
+    },
+  });
+}
+
 // ============ NOTIFICATIONS ============
 
 export function useNotifications() {
