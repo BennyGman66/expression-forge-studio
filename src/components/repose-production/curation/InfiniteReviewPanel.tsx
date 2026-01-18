@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AlertCircle, Check } from "lucide-react";
@@ -9,9 +8,10 @@ import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { CurationLightbox } from "./CurationLightbox";
 import { InfiniteLookSection } from "./InfiniteLookSection";
 import { InfiniteSidebar } from "./InfiniteSidebar";
-import { ALL_OUTPUT_SHOT_TYPES, OutputShotType, slotToShotType, OUTPUT_SHOT_LABELS } from "@/types/shot-types";
+import { ALL_OUTPUT_SHOT_TYPES, OutputShotType, slotToShotType } from "@/types/shot-types";
 import type { ReposeOutput } from "@/types/repose";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface InfiniteReviewPanelProps {
   batchId: string | undefined;
@@ -39,11 +39,11 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
     refetchOutputs,
   } = useReposeSelection(batchId);
 
-  const parentRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const lookRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [currentLightboxLookId, setCurrentLightboxLookId] = useState<string | null>(null);
-  const lookRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Calculate shot types complete
   const shotTypesStats = useMemo(() => {
@@ -63,22 +63,13 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
     return { total: totalShotTypes, complete: completeShotTypes };
   }, [groupedByLook]);
 
-  // Virtualizer for looks
-  const rowVirtualizer = useVirtualizer({
-    count: groupedByLook.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: useCallback(() => 600, []), // Estimate height per look section
-    overscan: 2,
-    getItemKey: useCallback((index: number) => groupedByLook[index]?.lookId || index, [groupedByLook]),
-  });
-
-  // Scroll to look
+  // Scroll to look - simple DOM scrolling
   const scrollToLook = useCallback((lookId: string) => {
-    const index = groupedByLook.findIndex(l => l.lookId === lookId);
-    if (index !== -1) {
-      rowVirtualizer.scrollToIndex(index, { align: 'start', behavior: 'smooth' });
+    const element = lookRefs.current.get(lookId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [groupedByLook, rowVirtualizer]);
+  }, []);
 
   // Build lightbox images for a specific look
   const getLightboxImages = useCallback((lookId: string): LightboxImage[] => {
@@ -225,52 +216,30 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
         />
 
         {/* Right Content Panel - Scrollable with proper padding */}
-        <div 
-          ref={parentRef}
-          className="flex-1 overflow-auto bg-background border-l border-border"
-        >
-          <div
-            style={{
-              height: `${rowVirtualizer.getTotalSize()}px`,
-              width: '100%',
-              position: 'relative',
-            }}
-          >
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const look = groupedByLook[virtualRow.index];
-              if (!look) return null;
-
-              return (
-                <div
-                  key={virtualRow.key}
-                  ref={(el) => {
-                    if (el) lookRefs.current.set(look.lookId, el);
-                  }}
-                  data-index={virtualRow.index}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                >
-                  <InfiniteLookSection
-                    look={look}
-                    batchId={batchId!}
-                    outputs={outputs}
-                    onSelectOutput={handleSelectOutput}
-                    onOpenLightbox={(outputId) => openLightbox(outputId, look.lookId)}
-                    getNextAvailableRank={(shotType) => getNextAvailableRank(look.batchItemId, shotType)}
-                    isViewFull={(shotType) => isViewFull(look.batchItemId, shotType)}
-                    onRefresh={refetchOutputs}
-                    measureElement={(el) => rowVirtualizer.measureElement(el)}
-                  />
-                </div>
-              );
-            })}
+        <ScrollArea className="flex-1 bg-background">
+          <div className="p-2 space-y-4">
+            {groupedByLook.map((look) => (
+              <div 
+                key={look.lookId}
+                ref={(el) => {
+                  if (el) lookRefs.current.set(look.lookId, el);
+                  else lookRefs.current.delete(look.lookId);
+                }}
+              >
+                <InfiniteLookSection
+                  look={look}
+                  batchId={batchId!}
+                  outputs={outputs}
+                  onSelectOutput={handleSelectOutput}
+                  onOpenLightbox={(outputId) => openLightbox(outputId, look.lookId)}
+                  getNextAvailableRank={(shotType) => getNextAvailableRank(look.batchItemId, shotType)}
+                  isViewFull={(shotType) => isViewFull(look.batchItemId, shotType)}
+                  onRefresh={refetchOutputs}
+                />
+              </div>
+            ))}
           </div>
-        </div>
+        </ScrollArea>
       </div>
 
       {/* Lightbox */}
