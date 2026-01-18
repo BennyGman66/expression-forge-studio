@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import {
   Sheet,
   SheetContent,
@@ -125,9 +126,55 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
     }
   };
 
-  const handleMarkAsSubmitted = () => {
-    if (jobId && outputs && outputs.length > 0) {
+  const handleMarkAsSubmitted = async () => {
+    if (!jobId || !outputs || outputs.length === 0) return;
+
+    try {
+      // Get the highest version number for this job
+      const { data: existingSubmissions } = await supabase
+        .from('job_submissions')
+        .select('version_number')
+        .eq('job_id', jobId)
+        .order('version_number', { ascending: false })
+        .limit(1);
+
+      const nextVersion = (existingSubmissions?.[0]?.version_number || 0) + 1;
+
+      // 1. Create a job_submission
+      const { data: submission, error: subError } = await supabase
+        .from('job_submissions')
+        .insert({
+          job_id: jobId,
+          status: 'SUBMITTED',
+          version_number: nextVersion,
+          notes: 'Admin uploaded on behalf of freelancer'
+        })
+        .select()
+        .single();
+
+      if (subError) throw subError;
+
+      // 2. Create submission_assets from job_outputs
+      const assetInserts = outputs.map((output, index) => ({
+        submission_id: submission.id,
+        file_url: output.file_url,
+        label: output.label || `Output ${index + 1}`,
+        sort_index: index,
+      }));
+
+      const { error: assetsError } = await supabase
+        .from('submission_assets')
+        .insert(assetInserts);
+
+      if (assetsError) throw assetsError;
+
+      // 3. Update job status
       updateStatus.mutate({ jobId, status: 'SUBMITTED' });
+
+      toast.success('Submission created and ready for review');
+    } catch (err) {
+      console.error('Error creating submission:', err);
+      toast.error('Failed to create submission');
     }
   };
 
