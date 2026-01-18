@@ -159,7 +159,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
       if (lookIds.length === 0) return [];
       const { data } = await supabase
         .from("talent_looks")
-        .select("id, name, product_type")
+        .select("id, name, look_code, product_type")
         .in("id", lookIds);
       return data || [];
     },
@@ -209,7 +209,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
         
         grouped.set(lookId, {
           lookId,
-          lookName: lookDetail?.name || 'Unknown Look',
+          lookName: lookDetail?.look_code || lookDetail?.name || `Look ${lookId.slice(0, 7)}`,
           productType: (lookDetail?.product_type as 'top' | 'trousers' | null) || null,
           views: [],
           isReady: true, // Will check below
