@@ -101,7 +101,7 @@ export function InfiniteLookSection({
           batch_id: batchId,
           look_id: look.lookId,
           brand_id: batch.brand_id, // Critical: include brand_id
-          run_index: Date.now() + i,
+          run_index: (Date.now() % 1000000000) + i, // Mod to fit in integer range
           status: "queued",
           config_snapshot: {
             ...(batch.config_json as any),
