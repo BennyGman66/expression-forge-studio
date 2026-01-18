@@ -355,7 +355,7 @@ async function processRun(
       let shotTypes: string[] = [];
 
       if (view.includes("front")) {
-        shotTypes = ["FRONT_FULL", "FRONT_CROPPED"];
+        shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
       } else if (view.includes("back")) {
         shotTypes = ["BACK_FULL"];
       } else if (view.includes("detail")) {
