@@ -154,54 +154,30 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       }
     }
 
-    // Layout: Images displayed at full proportion, fit within available space
+    // Layout: All images same size, uniform frames
     const headerHeight = 100;
     const footerHeight = 50;
-    const margin = 50;
-    const spacing = 40;
+    const margin = 60;
+    const spacing = 30;
     
     // Available area for images
     const availableHeight = height - headerHeight - footerHeight - (margin * 2);
-    const availableWidth = width - (margin * 2) - (spacing * 2); // Space for 3 images
-    const maxImageWidth = availableWidth / 3;
+    const availableWidth = width - (margin * 2) - (spacing * 2);
     
-    // Calculate each image's display size maintaining aspect ratio
-    const imageDimensions: Array<{ width: number; height: number }> = [];
-    let maxHeight = 0;
+    // Fixed frame size for all 3 images (uniform)
+    const frameWidth = Math.floor(availableWidth / 3);
+    const frameHeight = availableHeight;
     
-    for (const img of images) {
-      const aspectRatio = img.width / img.height;
-      let displayWidth: number;
-      let displayHeight: number;
-      
-      // First, fit to max width
-      displayWidth = maxImageWidth;
-      displayHeight = displayWidth / aspectRatio;
-      
-      // If too tall, scale down to fit height
-      if (displayHeight > availableHeight) {
-        displayHeight = availableHeight;
-        displayWidth = displayHeight * aspectRatio;
-      }
-      
-      imageDimensions.push({ width: displayWidth, height: displayHeight });
-      maxHeight = Math.max(maxHeight, displayHeight);
-    }
-    
-    // Calculate total width and starting X to center
-    const totalImagesWidth = imageDimensions.reduce((sum, d) => sum + d.width, 0) + (spacing * (imageDimensions.length - 1));
-    const startX = (width - totalImagesWidth) / 2;
-    const startY = headerHeight + margin + (availableHeight - maxHeight) / 2;
+    // Calculate starting position to center all 3 frames
+    const totalFrameWidth = (frameWidth * 3) + (spacing * 2);
+    const startX = (width - totalFrameWidth) / 2;
+    const startY = headerHeight + margin;
 
-    // Draw images with subtle shadow
-    let currentX = startX;
+    // Draw images with uniform frames
     for (let i = 0; i < images.length && i < 3; i++) {
       const img = images[i];
-      const dims = imageDimensions[i];
-      
-      // Center vertically within the row
-      const y = startY + (maxHeight - dims.height) / 2;
-      const x = currentX;
+      const frameX = startX + (i * (frameWidth + spacing));
+      const frameY = startY;
       
       // Shadow
       ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
@@ -209,21 +185,44 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 4;
       
-      // White border/frame
+      // White frame/background
       ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(x - 4, y - 4, dims.width + 8, dims.height + 8);
+      ctx.fillRect(frameX, frameY, frameWidth, frameHeight);
       
       // Reset shadow
       ctx.shadowColor = 'transparent';
       
-      // Draw image at full proportion (no clipping)
-      ctx.drawImage(img, x, y, dims.width, dims.height);
+      // Calculate image dimensions to fit within frame (contain mode)
+      const imgAspect = img.width / img.height;
+      const frameAspect = frameWidth / frameHeight;
+      
+      let drawWidth: number;
+      let drawHeight: number;
+      let drawX: number;
+      let drawY: number;
+      
+      if (imgAspect > frameAspect) {
+        // Image is wider than frame - fit to width
+        drawWidth = frameWidth;
+        drawHeight = frameWidth / imgAspect;
+        drawX = frameX;
+        drawY = frameY + (frameHeight - drawHeight) / 2;
+      } else {
+        // Image is taller than frame - fit to height
+        drawHeight = frameHeight;
+        drawWidth = frameHeight * imgAspect;
+        drawX = frameX + (frameWidth - drawWidth) / 2;
+        drawY = frameY;
+      }
+      
+      // Draw image (contain fit - no cropping)
+      ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
       
       // Rank badge
       ctx.fillStyle = '#8B5CF6';
       const badgeSize = 32;
-      const badgeX = x + 10;
-      const badgeY = y + 10;
+      const badgeX = frameX + 12;
+      const badgeY = frameY + 12;
       ctx.beginPath();
       ctx.arc(badgeX + badgeSize/2, badgeY + badgeSize/2, badgeSize/2, 0, Math.PI * 2);
       ctx.fill();
@@ -233,8 +232,6 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(`${i + 1}`, badgeX + badgeSize/2, badgeY + badgeSize/2 + 1);
-      
-      currentX += dims.width + spacing;
     }
 
     // Reset text alignment
