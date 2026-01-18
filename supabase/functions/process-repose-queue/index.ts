@@ -15,8 +15,12 @@ const MAX_PROCESSING_TIME_MS = 50 * 1000;
 // Concurrency for parallel processing (runs level)
 const RUN_CONCURRENCY = 3;
 
-// Concurrency for output generation within a run
-const OUTPUT_CONCURRENCY = 10;
+// Concurrency for output generation within a run - keep low to avoid 504 timeouts
+const OUTPUT_CONCURRENCY = 5;
+
+// Retry settings for failed generations
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 2000;
 
 // Heartbeat logging interval
 const LOG_INTERVAL_MS = 10 * 1000;
@@ -504,28 +508,49 @@ async function processRun(
       
       const results = await Promise.allSettled(
         batch.map(async (output: { id: string }) => {
-          try {
-            const { error } = await supabase.functions.invoke("generate-repose-single", {
-              body: { outputId: output.id, model },
-            });
-            
-            if (error) {
-              console.error(`[process-repose-queue] Generation failed for ${output.id}:`, error);
-              await supabase
-                .from("repose_outputs")
-                .update({ status: "failed" })
-                .eq("id", output.id);
-              return { success: false };
+          let lastError: Error | null = null;
+          
+          for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+              if (attempt > 0) {
+                console.log(`[process-repose-queue] Retry ${attempt} for output ${output.id}`);
+                await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+              }
+              
+              const { error } = await supabase.functions.invoke("generate-repose-single", {
+                body: { outputId: output.id, model },
+              });
+              
+              if (error) {
+                lastError = error;
+                console.error(`[process-repose-queue] Generation attempt ${attempt + 1} failed for ${output.id}:`, error.message || error);
+                
+                // If it's a 503/504, retry
+                if (error.message?.includes('503') || error.message?.includes('504') || error.message?.includes('Service Unavailable') || error.message?.includes('Gateway Timeout')) {
+                  continue;
+                }
+                // Other errors, don't retry
+                break;
+              }
+              return { success: true };
+            } catch (err) {
+              lastError = err as Error;
+              console.error(`[process-repose-queue] Error attempt ${attempt + 1} for ${output.id}:`, (err as Error).message);
+              
+              // Retry on network errors
+              if (attempt < MAX_RETRIES) {
+                continue;
+              }
             }
-            return { success: true };
-          } catch (err) {
-            console.error(`[process-repose-queue] Error generating ${output.id}:`, err);
-            await supabase
-              .from("repose_outputs")
-              .update({ status: "failed" })
-              .eq("id", output.id);
-            return { success: false };
           }
+          
+          // All retries exhausted
+          console.error(`[process-repose-queue] All retries failed for ${output.id}`);
+          await supabase
+            .from("repose_outputs")
+            .update({ status: "failed", error_message: lastError?.message || "Unknown error after retries" })
+            .eq("id", output.id);
+          return { success: false };
         })
       );
 
@@ -544,9 +569,9 @@ async function processRun(
         .update({ heartbeat_at: new Date().toISOString() })
         .eq("id", runId);
 
-      // Small delay between batches to avoid overwhelming the API
+      // Longer delay between batches to let edge functions recover
       if (i + OUTPUT_CONCURRENCY < outputs.length) {
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
 
