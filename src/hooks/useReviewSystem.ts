@@ -213,20 +213,23 @@ export function useJobAssetsWithHistory(jobId: string | null) {
     queryFn: async () => {
       if (!jobId) return [];
       
-      // Get all submissions for this job
-      const { data: submissions, error: subError } = await supabase
+      // Get the LATEST submission only for this job
+      const { data: latestSubmission, error: subError } = await supabase
         .from('job_submissions')
         .select('id')
-        .eq('job_id', jobId);
+        .eq('job_id', jobId)
+        .order('version_number', { ascending: false })
+        .limit(1)
+        .maybeSingle();
       
       if (subError) throw subError;
-      if (!submissions?.length) return [];
+      if (!latestSubmission) return [];
       
-      // Get ALL assets (including superseded) for these submissions
+      // Get ALL assets (including superseded) for the latest submission only
       const { data: allAssets, error: assetsError } = await supabase
         .from('submission_assets')
         .select('*, review_status, reviewed_by_user_id, reviewed_at, superseded_by, revision_number')
-        .in('submission_id', submissions.map(s => s.id))
+        .eq('submission_id', latestSubmission.id)
         .order('sort_index')
         .order('revision_number', { ascending: false });
       
