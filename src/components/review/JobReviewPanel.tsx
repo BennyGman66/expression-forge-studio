@@ -409,8 +409,97 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     }
   };
 
+  // Detect orphaned outputs (job_outputs exist but no submissions)
+  const hasOrphanedOutputs = submissions.length === 0 && jobOutputs.length > 0;
+
+  // Create submission from orphaned outputs
+  const handleCreateFromOutputs = async () => {
+    if (!jobId || jobOutputs.length === 0) return;
+    
+    setIsBackfilling(true);
+    try {
+      // 1. Create job_submission
+      const { data: submission, error: subError } = await supabase
+        .from('job_submissions')
+        .insert({
+          job_id: jobId,
+          status: 'SUBMITTED',
+          version_number: 1,
+          notes: 'Admin created from uploaded outputs'
+        })
+        .select()
+        .single();
+      
+      if (subError) throw subError;
+      
+      // 2. Create submission_assets from job_outputs
+      const assetInserts = jobOutputs.map((output, index) => ({
+        submission_id: submission.id,
+        file_url: output.file_url,
+        label: output.label || `Output ${index + 1}`,
+        sort_index: index,
+      }));
+      
+      const { error: assetsError } = await supabase
+        .from('submission_assets')
+        .insert(assetInserts);
+        
+      if (assetsError) throw assetsError;
+      
+      // 3. Update job status to SUBMITTED if not already
+      await supabase
+        .from('unified_jobs')
+        .update({ status: 'SUBMITTED' })
+        .eq('id', jobId);
+      
+      toast.success('Submission created - ready for review');
+      
+      // Refresh data
+      refetchSubmissions();
+      queryClient.invalidateQueries({ queryKey: ['job', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    } catch (err) {
+      console.error('Error creating submission:', err);
+      toast.error('Failed to create submission');
+    } finally {
+      setIsBackfilling(false);
+    }
+  };
+
   const isLoading = jobLoading || isBackfilling;
   const noSubmissions = !isLoading && submissions.length === 0 && jobOutputs.length === 0;
+  
+  // Show orphaned outputs prompt
+  if (!isLoading && hasOrphanedOutputs) {
+    return (
+      <div className="fixed inset-0 bg-background z-50 flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+            <Upload className="h-6 w-6 text-primary" />
+          </div>
+          <h2 className="text-lg font-medium mb-2">Outputs Ready for Review</h2>
+          <p className="text-muted-foreground mb-6">
+            {jobOutputs.length} file(s) have been uploaded. Create a submission to start reviewing and leave feedback.
+          </p>
+          <div className="flex gap-2 justify-center">
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateFromOutputs} disabled={isBackfilling}>
+              {isBackfilling ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Submission'
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   
   if (isLoading || noSubmissions) {
     return (
