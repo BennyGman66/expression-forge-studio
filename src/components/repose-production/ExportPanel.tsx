@@ -1,148 +1,292 @@
-import { useState, useMemo } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useMemo, useCallback } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Download, Send, AlertCircle, CheckCircle2, FolderTree, Package, FileText } from "lucide-react";
-import { useReposeBatch, useReposeBatchItems } from "@/hooks/useReposeBatches";
-import { useReposeSelection } from "@/hooks/useReposeSelection";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Download, CheckCircle2, Circle, AlertCircle, Lock } from "lucide-react";
+import { useReposeBatch } from "@/hooks/useReposeBatches";
+import { useReposeSelection, LookWithOutputs } from "@/hooks/useReposeSelection";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { toast } from "sonner";
-import { ALL_OUTPUT_SHOT_TYPES, OutputShotType, slotToShotType, OUTPUT_SHOT_LABELS } from "@/types/shot-types";
-import { SHOT_TYPE_FOLDER_NAMES, MAX_FAVORITES_PER_VIEW } from "@/types/repose";
-import type { ReposeOutput } from "@/types/repose";
+import { ALL_OUTPUT_SHOT_TYPES, OutputShotType, OUTPUT_SHOT_LABELS } from "@/types/shot-types";
+import { MAX_FAVORITES_PER_VIEW } from "@/types/repose";
+import { cn } from "@/lib/utils";
 import JSZip from "jszip";
-import { jsPDF } from "jspdf";
+import leapfrogLogo from "@/assets/leapfrog-logo.png";
 
 interface ExportPanelProps {
   batchId: string | undefined;
 }
 
-interface ExportItem {
-  lookCode: string;
-  shotType: OutputShotType;
-  rank: 1 | 2 | 3;
-  url: string;
-  filename: string;
-}
+// Map shot types to file suffixes
+const SHOT_TYPE_SUFFIXES: Record<OutputShotType, string> = {
+  FRONT_FULL: 'front',
+  FRONT_CROPPED: 'crop_front',
+  DETAIL: 'detail',
+  BACK_FULL: 'back',
+};
 
 export function ExportPanel({ batchId }: ExportPanelProps) {
   const { data: batch, isLoading: batchLoading } = useReposeBatch(batchId);
-  const { data: batchItems } = useReposeBatchItems(batchId);
-  const { outputs, groupedByLook, overallStats, getFavoritesForExport } = useReposeSelection(batchId);
+  const { outputs, groupedByLook, overallStats, isLoading } = useReposeSelection(batchId);
 
+  const [selectedLookIds, setSelectedLookIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportStatus, setExportStatus] = useState<string>("");
 
-  // Build export structure
-  const exportStructure = useMemo(() => {
-    const structure: Record<string, Record<OutputShotType, ExportItem[]>> = {};
-    
+  // Determine which looks are export-ready (all 4 views have 3/3 selections)
+  const { readyLooks, incompleteLooks } = useMemo(() => {
+    const ready: LookWithOutputs[] = [];
+    const incomplete: LookWithOutputs[] = [];
+
     for (const look of groupedByLook) {
-      const lookCode = look.lookCode.replace(/\s+/g, '_').toUpperCase();
-      structure[lookCode] = {} as Record<OutputShotType, ExportItem[]>;
-
+      // Check all 4 shot types have 3 selections
+      let allComplete = true;
       for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
-        const viewOutputs = look.outputsByView[shotType] || [];
-        const favorites = viewOutputs
-          .filter(o => o.is_favorite && o.result_url && o.favorite_rank)
-          .sort((a, b) => (a.favorite_rank || 0) - (b.favorite_rank || 0));
-
-        if (favorites.length > 0) {
-          structure[lookCode][shotType] = favorites.map((output) => {
-            const folderName = SHOT_TYPE_FOLDER_NAMES[shotType];
-            const rank = output.favorite_rank!;
-            const filename = `${lookCode}_${folderName}_0${rank}.png`;
-            
-            return {
-              lookCode,
-              shotType,
-              rank,
-              url: output.result_url!,
-              filename,
-            };
-          });
+        const stats = look.selectionStats.byView[shotType];
+        if (!stats || stats.selected < MAX_FAVORITES_PER_VIEW) {
+          allComplete = false;
+          break;
         }
+      }
+      if (allComplete) {
+        ready.push(look);
+      } else {
+        incomplete.push(look);
       }
     }
 
-    return structure;
+    return { readyLooks: ready, incompleteLooks: incomplete };
   }, [groupedByLook]);
 
-  // Calculate export stats
-  const exportStats = useMemo(() => {
-    let totalImages = 0;
-    let totalLooks = 0;
-    const lookCompleteness: Array<{ look: string; complete: number; total: number }> = [];
+  // Toggle look selection
+  const toggleLookSelection = useCallback((lookId: string) => {
+    setSelectedLookIds(prev => {
+      const next = new Set(prev);
+      if (next.has(lookId)) {
+        next.delete(lookId);
+      } else {
+        next.add(lookId);
+      }
+      return next;
+    });
+  }, []);
 
-    for (const [lookCode, views] of Object.entries(exportStructure)) {
-      const viewsWithSelections = Object.values(views).filter(items => items.length > 0);
-      const completedViews = viewsWithSelections.filter(items => items.length >= MAX_FAVORITES_PER_VIEW);
-      
-      totalLooks++;
-      totalImages += viewsWithSelections.reduce((sum, items) => sum + items.length, 0);
-      
-      lookCompleteness.push({
-        look: lookCode,
-        complete: completedViews.length,
-        total: viewsWithSelections.length,
+  // Select all ready looks
+  const selectAllReady = useCallback(() => {
+    setSelectedLookIds(new Set(readyLooks.map(l => l.lookId)));
+  }, [readyLooks]);
+
+  // Clear selection
+  const clearSelection = useCallback(() => {
+    setSelectedLookIds(new Set());
+  }, []);
+
+  // Get looks to export
+  const looksToExport = useMemo(() => {
+    if (selectedLookIds.size === 0) return [];
+    return readyLooks.filter(l => selectedLookIds.has(l.lookId));
+  }, [readyLooks, selectedLookIds]);
+
+  // Create branded PNG slide using canvas
+  const createSlide = useCallback(async (
+    lookCode: string,
+    shotType: OutputShotType,
+    imageUrls: string[]
+  ): Promise<Blob> => {
+    // Canvas dimensions (landscape 16:9)
+    const width = 1920;
+    const height = 1080;
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Background - soft neutral
+    ctx.fillStyle = '#FAF9F7';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Load and draw logo
+    try {
+      const logoImg = new Image();
+      logoImg.crossOrigin = 'anonymous';
+      await new Promise((resolve, reject) => {
+        logoImg.onload = resolve;
+        logoImg.onerror = reject;
+        logoImg.src = leapfrogLogo;
       });
+      // Logo in top-left, 80px height
+      const logoHeight = 80;
+      const logoWidth = (logoImg.width / logoImg.height) * logoHeight;
+      ctx.drawImage(logoImg, 40, 30, logoWidth, logoHeight);
+    } catch (e) {
+      console.warn('Failed to load logo:', e);
     }
 
-    return { totalImages, totalLooks, lookCompleteness };
-  }, [exportStructure]);
+    // Product code - top right
+    ctx.fillStyle = '#1A1A1A';
+    ctx.font = 'bold 36px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(lookCode, width - 40, 75);
 
-  // Handle ZIP export
-  const handleExportZip = async () => {
-    if (exportStats.totalImages === 0) {
-      toast.error("No selections to export");
+    // Shot type label - below product code
+    ctx.fillStyle = '#666666';
+    ctx.font = '24px Inter, sans-serif';
+    ctx.fillText(OUTPUT_SHOT_LABELS[shotType], width - 40, 110);
+
+    // Load images
+    const images: HTMLImageElement[] = [];
+    for (const url of imageUrls) {
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = url;
+        });
+        images.push(img);
+      } catch (e) {
+        console.warn('Failed to load image:', url, e);
+      }
+    }
+
+    // Calculate image layout - 3 images centered
+    const imageSize = 400;
+    const spacing = 60;
+    const totalWidth = (imageSize * 3) + (spacing * 2);
+    const startX = (width - totalWidth) / 2;
+    const startY = 180;
+
+    // Draw images with subtle shadow
+    for (let i = 0; i < images.length && i < 3; i++) {
+      const x = startX + (i * (imageSize + spacing));
+      const y = startY;
+      
+      // Shadow
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+      ctx.shadowBlur = 20;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 4;
+      
+      // White border/frame
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(x - 4, y - 4, imageSize + 8, imageSize + 8);
+      
+      // Reset shadow
+      ctx.shadowColor = 'transparent';
+      
+      // Draw image (cover fit)
+      const img = images[i];
+      const imgAspect = img.width / img.height;
+      let drawWidth, drawHeight, drawX, drawY;
+      
+      if (imgAspect > 1) {
+        // Wider than tall
+        drawHeight = imageSize;
+        drawWidth = imageSize * imgAspect;
+        drawX = x - (drawWidth - imageSize) / 2;
+        drawY = y;
+      } else {
+        // Taller than wide
+        drawWidth = imageSize;
+        drawHeight = imageSize / imgAspect;
+        drawX = x;
+        drawY = y - (drawHeight - imageSize) / 2;
+      }
+      
+      // Clip to image area
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, imageSize, imageSize);
+      ctx.clip();
+      ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+      ctx.restore();
+      
+      // Rank badge
+      ctx.fillStyle = '#8B5CF6';
+      const badgeSize = 36;
+      const badgeX = x + 12;
+      const badgeY = y + 12;
+      ctx.beginPath();
+      ctx.arc(badgeX + badgeSize/2, badgeY + badgeSize/2, badgeSize/2, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 20px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${i + 1}`, badgeX + badgeSize/2, badgeY + badgeSize/2 + 1);
+    }
+
+    // Reset text alignment
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+
+    // Footer
+    ctx.fillStyle = '#999999';
+    ctx.font = '16px Inter, sans-serif';
+    ctx.fillText(`Generated by AVA • ${new Date().toLocaleDateString()}`, 40, height - 30);
+
+    // Convert to blob
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob!), 'image/png', 1.0);
+    });
+  }, []);
+
+  // Export all ready looks
+  const handleExportAllReady = useCallback(async () => {
+    if (readyLooks.length === 0) {
+      toast.error("No export-ready looks");
       return;
     }
 
     setIsExporting(true);
     setExportProgress(0);
+    setExportStatus("Preparing export...");
 
     try {
       const zip = new JSZip();
+      const totalSlides = readyLooks.length * 4; // 4 shot types per look
       let processed = 0;
 
-      for (const [lookCode, views] of Object.entries(exportStructure)) {
-        // Create look folder
+      for (const look of readyLooks) {
+        const lookCode = look.lookCode.replace(/\s+/g, '_').toUpperCase();
         const lookFolder = zip.folder(lookCode);
         if (!lookFolder) continue;
 
-        for (const [shotType, items] of Object.entries(views)) {
-          // Create view subfolder
-          const folderName = SHOT_TYPE_FOLDER_NAMES[shotType as OutputShotType];
-          const viewFolder = lookFolder.folder(folderName);
-          if (!viewFolder) continue;
+        for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
+          setExportStatus(`Exporting ${lookCode} - ${OUTPUT_SHOT_LABELS[shotType]}...`);
 
-          for (const item of items) {
-            try {
-              // Fetch image
-              const response = await fetch(item.url);
-              if (!response.ok) throw new Error(`Failed to fetch ${item.filename}`);
-              
-              const blob = await response.blob();
-              viewFolder.file(item.filename, blob);
-              
-              processed++;
-              setExportProgress((processed / exportStats.totalImages) * 100);
-            } catch (error) {
-              console.error(`Failed to add ${item.filename}:`, error);
-            }
+          const viewOutputs = look.outputsByView[shotType] || [];
+          const favorites = viewOutputs
+            .filter(o => o.is_favorite && o.result_url && o.favorite_rank)
+            .sort((a, b) => (a.favorite_rank || 0) - (b.favorite_rank || 0))
+            .slice(0, 3);
+
+          if (favorites.length === 3) {
+            const urls = favorites.map(f => f.result_url!);
+            const slideBlob = await createSlide(lookCode, shotType, urls);
+            const filename = `${lookCode}_${SHOT_TYPE_SUFFIXES[shotType]}.png`;
+            lookFolder.file(filename, slideBlob);
           }
+
+          processed++;
+          setExportProgress((processed / totalSlides) * 100);
         }
       }
 
-      // Generate and download ZIP
-      const zipBlob = await zip.generateAsync({ 
+      setExportStatus("Generating ZIP file...");
+      const zipBlob = await zip.generateAsync({
         type: "blob",
         compression: "DEFLATE",
         compressionOptions: { level: 6 }
       });
 
-      // Create download link
+      // Download
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement("a");
       a.href = url;
@@ -152,132 +296,88 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast.success(`Exported ${exportStats.totalImages} images`);
+      toast.success(`Exported ${readyLooks.length} looks (${readyLooks.length * 4} slides)`);
     } catch (error) {
       console.error("Export failed:", error);
       toast.error(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsExporting(false);
       setExportProgress(0);
+      setExportStatus("");
     }
-  };
+  }, [readyLooks, createSlide]);
 
-  // Handle PDF export
-  const handleExportPdf = async () => {
-    if (exportStats.totalImages === 0) {
-      toast.error("No selections to export");
+  // Export selected looks
+  const handleExportSelected = useCallback(async () => {
+    if (looksToExport.length === 0) {
+      toast.error("No looks selected");
       return;
     }
 
     setIsExporting(true);
     setExportProgress(0);
+    setExportStatus("Preparing export...");
 
     try {
-      const pdf = new jsPDF({ 
-        orientation: 'landscape', 
-        unit: 'mm', 
-        format: 'a4' 
-      });
-      
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 15;
-      const imageSize = 55;
-      const spacing = 8;
-      
+      const zip = new JSZip();
+      const totalSlides = looksToExport.length * 4;
       let processed = 0;
-      const totalToProcess = Object.keys(exportStructure).length;
 
-      for (const [lookIndex, [lookCode, views]] of Object.entries(Object.entries(exportStructure))) {
-        if (parseInt(lookIndex) > 0) {
-          pdf.addPage();
-        }
-        
-        // Look Header
-        pdf.setFontSize(18);
-        pdf.setFont("helvetica", "bold");
-        pdf.text(`Look: ${lookCode}`, margin, margin + 5);
-        
-        pdf.setFontSize(10);
-        pdf.setFont("helvetica", "normal");
-        pdf.setTextColor(128, 128, 128);
-        pdf.text(`Batch: ${batch?.id?.slice(0, 8) || 'N/A'}`, margin, margin + 12);
-        pdf.setTextColor(0, 0, 0);
-        
-        let yOffset = margin + 25;
-        
+      for (const look of looksToExport) {
+        const lookCode = look.lookCode.replace(/\s+/g, '_').toUpperCase();
+        const lookFolder = zip.folder(lookCode);
+        if (!lookFolder) continue;
+
         for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
-          const items = views[shotType];
-          if (!items || items.length === 0) continue;
-          
-          // View label
-          pdf.setFontSize(11);
-          pdf.setFont("helvetica", "bold");
-          pdf.text(OUTPUT_SHOT_LABELS[shotType], margin, yOffset);
-          yOffset += 5;
-          
-          // Images row
-          for (const [imgIdx, item] of items.entries()) {
-            try {
-              const response = await fetch(item.url);
-              if (!response.ok) continue;
-              
-              const blob = await response.blob();
-              const base64 = await new Promise<string>((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.readAsDataURL(blob);
-              });
-              
-              const xPos = margin + (imgIdx * (imageSize + spacing));
-              
-              // Add image
-              pdf.addImage(base64, 'PNG', xPos, yOffset, imageSize, imageSize);
-              
-              // Add rank badge
-              pdf.setFillColor(139, 92, 246); // Primary purple
-              pdf.roundedRect(xPos + 2, yOffset + 2, 12, 6, 1, 1, 'F');
-              pdf.setFontSize(8);
-              pdf.setFont("helvetica", "bold");
-              pdf.setTextColor(255, 255, 255);
-              pdf.text(`#${item.rank}`, xPos + 4, yOffset + 6);
-              pdf.setTextColor(0, 0, 0);
-              
-            } catch (error) {
-              console.error(`Failed to add image to PDF:`, error);
-            }
+          setExportStatus(`Exporting ${lookCode} - ${OUTPUT_SHOT_LABELS[shotType]}...`);
+
+          const viewOutputs = look.outputsByView[shotType] || [];
+          const favorites = viewOutputs
+            .filter(o => o.is_favorite && o.result_url && o.favorite_rank)
+            .sort((a, b) => (a.favorite_rank || 0) - (b.favorite_rank || 0))
+            .slice(0, 3);
+
+          if (favorites.length === 3) {
+            const urls = favorites.map(f => f.result_url!);
+            const slideBlob = await createSlide(lookCode, shotType, urls);
+            const filename = `${lookCode}_${SHOT_TYPE_SUFFIXES[shotType]}.png`;
+            lookFolder.file(filename, slideBlob);
           }
-          
-          yOffset += imageSize + 10;
-          
-          // Check if we need a new page
-          if (yOffset > pageHeight - margin - imageSize) {
-            pdf.addPage();
-            yOffset = margin + 10;
-          }
+
+          processed++;
+          setExportProgress((processed / totalSlides) * 100);
         }
-        
-        processed++;
-        setExportProgress((processed / totalToProcess) * 100);
       }
-      
-      pdf.save(`repose_selections_${batch?.id?.slice(0, 8) || 'export'}.pdf`);
-      toast.success(`PDF exported with ${exportStats.totalImages} images`);
-      
+
+      setExportStatus("Generating ZIP file...");
+      const zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 }
+      });
+
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `repose_export_selected_${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Exported ${looksToExport.length} looks (${looksToExport.length * 4} slides)`);
+      setSelectedLookIds(new Set());
     } catch (error) {
-      console.error("PDF export failed:", error);
-      toast.error(`PDF export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error("Export failed:", error);
+      toast.error(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsExporting(false);
       setExportProgress(0);
+      setExportStatus("");
     }
-  };
+  }, [looksToExport, createSlide]);
 
-  const handleSendToClientReview = () => {
-    toast.info("Send to Client Review functionality coming soon");
-  };
-
-  if (batchLoading) {
+  if (batchLoading || isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <LeapfrogLoader />
@@ -294,140 +394,240 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
     );
   }
 
-  const hasSelections = exportStats.totalImages > 0;
-  const isComplete = overallStats.isAllComplete;
+  const selectedReady = Array.from(selectedLookIds).filter(id => 
+    readyLooks.some(l => l.lookId === id)
+  );
 
   return (
-    <div className="space-y-6">
-      {/* Export Summary */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Package className="w-5 h-5" />
-            Export Package
-          </CardTitle>
-          <CardDescription>
-            Download selected images organized by SKU and view
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div className="text-center p-4 bg-secondary/30 rounded-lg">
-              <p className="text-xs text-muted-foreground mb-1">Looks</p>
-              <p className="text-2xl font-bold">{exportStats.totalLooks}</p>
-            </div>
-            <div className="text-center p-4 bg-primary/10 rounded-lg">
-              <div className="flex items-center justify-center gap-1 text-primary mb-1">
-                <CheckCircle2 className="w-3 h-3" />
-                <span className="text-xs">Images Selected</span>
-              </div>
-              <p className="text-2xl font-bold text-primary">{exportStats.totalImages}</p>
-            </div>
-            <div className="text-center p-4 bg-secondary/30 rounded-lg">
-              <p className="text-xs text-muted-foreground mb-1">Status</p>
-              <Badge variant={isComplete ? "default" : "secondary"}>
-                {isComplete ? "Complete" : "In Progress"}
-              </Badge>
-            </div>
-            <div className="text-center p-4 bg-secondary/30 rounded-lg">
-              <p className="text-xs text-muted-foreground mb-1">Format</p>
-              <p className="text-sm font-medium">ZIP (PNG)</p>
-            </div>
-          </div>
-
-          {/* Export Progress */}
-          {isExporting && (
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm">Preparing export...</span>
-                <span className="text-sm text-muted-foreground">{Math.round(exportProgress)}%</span>
-              </div>
-              <Progress value={exportProgress} className="h-2" />
-            </div>
-          )}
-
-          {/* Export Actions */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <Button 
-              onClick={handleExportZip}
-              disabled={!hasSelections || isExporting}
-              className="flex-1 gap-2"
-              size="lg"
-            >
-              <Download className="w-4 h-4" />
-              {isExporting ? 'Exporting...' : `Download ZIP`}
-            </Button>
-            <Button 
-              onClick={handleExportPdf}
-              disabled={!hasSelections || isExporting}
-              className="flex-1 gap-2"
-              size="lg"
-              variant="secondary"
-            >
-              <FileText className="w-4 h-4" />
-              Download PDF
-            </Button>
-            <Button 
-              onClick={handleSendToClientReview}
-              variant="outline"
-              disabled={!hasSelections || isExporting}
-              className="flex-1 gap-2"
-              size="lg"
-            >
-              <Send className="w-4 h-4" />
-              Send to Client Review
-            </Button>
-          </div>
-
-          {!isComplete && hasSelections && (
-            <p className="text-sm text-amber-500 mt-4 text-center">
-              ⚠️ Some views have incomplete selections. Export will include only selected images.
+    <div className="h-[calc(100vh-220px)] flex flex-col">
+      {/* Top Summary Bar */}
+      <div className="flex items-center justify-between p-4 border-b border-border bg-card rounded-t-lg">
+        <div className="flex items-center gap-6">
+          <div>
+            <h2 className="text-xl font-semibold">Export</h2>
+            <p className="text-sm text-muted-foreground">
+              Download branded PNG slides for client delivery
             </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Folder Structure Preview */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <FolderTree className="w-4 h-4" />
-            Export Structure
-          </CardTitle>
-          <CardDescription>
-            Preview of the folder hierarchy in the ZIP
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="font-mono text-sm bg-secondary/30 rounded-lg p-4 max-h-80 overflow-auto">
-            {Object.entries(exportStructure).map(([lookCode, views]) => (
-              <div key={lookCode} className="mb-3">
-                <div className="text-foreground font-medium">📁 {lookCode}/</div>
-                {Object.entries(views).map(([shotType, items]) => {
-                  if (items.length === 0) return null;
-                  const folderName = SHOT_TYPE_FOLDER_NAMES[shotType as OutputShotType];
-                  return (
-                    <div key={shotType} className="ml-4">
-                      <div className="text-muted-foreground">📁 {folderName}/</div>
-                      {items.map((item) => (
-                        <div key={item.filename} className="ml-4 text-muted-foreground/70">
-                          📄 {item.filename}
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-            {Object.keys(exportStructure).length === 0 && (
-              <div className="text-muted-foreground text-center py-4">
-                No selections yet. Select favorites in the Review tab first.
-              </div>
+          </div>
+          <div className="flex items-center gap-4 pl-6 border-l border-border">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-primary">{readyLooks.length}</p>
+              <p className="text-xs text-muted-foreground">Export-ready</p>
+            </div>
+            <p className="text-muted-foreground text-lg">/</p>
+            <div className="text-center">
+              <p className="text-2xl font-bold">{groupedByLook.length}</p>
+              <p className="text-xs text-muted-foreground">Total Looks</p>
+            </div>
+            {incompleteLooks.length > 0 && (
+              <>
+                <div className="w-px h-8 bg-border" />
+                <div className="text-center">
+                  <p className="text-lg text-muted-foreground">{incompleteLooks.length}</p>
+                  <p className="text-xs text-muted-foreground">Incomplete</p>
+                </div>
+              </>
             )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {selectedLookIds.size > 0 && (
+            <Button variant="outline" size="sm" onClick={clearSelection}>
+              Clear ({selectedLookIds.size})
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            onClick={handleExportSelected}
+            disabled={selectedReady.length === 0 || isExporting}
+            className="gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Export Selected ({selectedReady.length})
+          </Button>
+          <Button
+            onClick={handleExportAllReady}
+            disabled={readyLooks.length === 0 || isExporting}
+            className="gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Export All Ready ({readyLooks.length})
+          </Button>
+        </div>
+      </div>
+
+      {/* Export Progress */}
+      {isExporting && (
+        <div className="p-4 bg-secondary/30 border-b border-border">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">{exportStatus}</span>
+            <span className="text-sm text-muted-foreground">{Math.round(exportProgress)}%</span>
+          </div>
+          <Progress value={exportProgress} className="h-2" />
+        </div>
+      )}
+
+      {/* Main Content - Sidebar + Preview */}
+      <div className="flex-1 flex min-h-0">
+        {/* Left Sidebar - Looks List */}
+        <div className="w-64 border-r border-border flex flex-col bg-card/50 flex-shrink-0">
+          <div className="p-3 border-b border-border">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Looks</span>
+              {readyLooks.length > 0 && (
+                <Button variant="ghost" size="sm" onClick={selectAllReady} className="h-6 text-xs">
+                  Select All
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <ScrollArea className="flex-1">
+            <div className="p-2 space-y-0.5">
+              {/* Ready Looks - Green, Selectable */}
+              {readyLooks.map((look) => (
+                <button
+                  key={look.lookId}
+                  onClick={() => toggleLookSelection(look.lookId)}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 rounded-md text-left transition-colors",
+                    selectedLookIds.has(look.lookId)
+                      ? "bg-primary/20 border border-primary/50"
+                      : "hover:bg-secondary/80"
+                  )}
+                >
+                  <div className="w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center flex-shrink-0">
+                    <CheckCircle2 className="w-3 h-3" />
+                  </div>
+                  <span className="text-sm font-medium truncate flex-1">{look.lookCode}</span>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-primary/10 text-primary">
+                    Ready
+                  </Badge>
+                </button>
+              ))}
+
+              {/* Separator */}
+              {readyLooks.length > 0 && incompleteLooks.length > 0 && (
+                <div className="py-2">
+                  <div className="border-t border-border" />
+                  <p className="text-[10px] text-muted-foreground/60 mt-2 px-3 uppercase tracking-wide">
+                    Incomplete
+                  </p>
+                </div>
+              )}
+
+              {/* Incomplete Looks - Grey, Not Selectable */}
+              {incompleteLooks.map((look) => {
+                const completedViews = look.selectionStats.completedViews;
+                return (
+                  <div
+                    key={look.lookId}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-md opacity-50 cursor-not-allowed"
+                  >
+                    <div className="w-4 h-4 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                      <Circle className="w-2 h-2 text-muted-foreground" />
+                    </div>
+                    <span className="text-sm text-muted-foreground truncate flex-1">{look.lookCode}</span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground">
+                      {completedViews}/4
+                    </Badge>
+                  </div>
+                );
+              })}
+            </div>
+          </ScrollArea>
+
+          {/* Sidebar Footer */}
+          <div className="p-3 border-t border-border bg-secondary/20">
+            <p className="text-xs text-muted-foreground">
+              <Lock className="w-3 h-3 inline mr-1" />
+              Review-locked. Edit in Review tab.
+            </p>
+          </div>
+        </div>
+
+        {/* Main Preview Panel */}
+        <div className="flex-1 p-6 overflow-auto">
+          {selectedLookIds.size === 0 ? (
+            <div className="h-full flex items-center justify-center">
+              <div className="text-center text-muted-foreground">
+                <Download className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                <h3 className="text-lg font-medium mb-2">Select looks to preview</h3>
+                <p className="text-sm max-w-md">
+                  Click on export-ready looks in the sidebar to see a preview of the slides that will be generated.
+                  {readyLooks.length === 0 && incompleteLooks.length > 0 && (
+                    <span className="block mt-2 text-amber-600">
+                      No looks are export-ready yet. Complete selections in the Review tab first.
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-8">
+              {looksToExport.map((look) => (
+                <Card key={look.lookId} className="overflow-hidden">
+                  <CardHeader className="py-3 bg-secondary/30">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <CheckCircle2 className="w-5 h-5 text-primary" />
+                      {look.lookCode}
+                      <Badge variant="default" className="ml-auto">Export Ready</Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      {ALL_OUTPUT_SHOT_TYPES.map((shotType) => {
+                        const viewOutputs = look.outputsByView[shotType] || [];
+                        const favorites = viewOutputs
+                          .filter(o => o.is_favorite && o.result_url)
+                          .sort((a, b) => (a.favorite_rank || 0) - (b.favorite_rank || 0))
+                          .slice(0, 3);
+
+                        return (
+                          <div key={shotType} className="border border-border rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-medium">{OUTPUT_SHOT_LABELS[shotType]}</span>
+                              <Badge variant="secondary" className="text-xs">
+                                {favorites.length}/3 selected
+                              </Badge>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              {favorites.map((output, idx) => (
+                                <div
+                                  key={output.id}
+                                  className="relative aspect-square rounded overflow-hidden bg-muted"
+                                >
+                                  <img
+                                    src={output.result_url!}
+                                    alt={`${shotType} ${idx + 1}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <div className="absolute top-1 left-1 w-5 h-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold">
+                                    {output.favorite_rank}
+                                  </div>
+                                </div>
+                              ))}
+                              {favorites.length < 3 && Array.from({ length: 3 - favorites.length }).map((_, idx) => (
+                                <div key={`empty-${idx}`} className="aspect-square rounded bg-muted/50 flex items-center justify-center">
+                                  <AlertCircle className="w-4 h-4 text-muted-foreground/30" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-3 text-center">
+                      Output: {look.lookCode.replace(/\s+/g, '_').toUpperCase()}_front.png, _crop_front.png, _detail.png, _back.png
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
