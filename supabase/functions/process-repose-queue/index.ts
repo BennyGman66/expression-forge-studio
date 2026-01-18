@@ -445,14 +445,22 @@ async function processRun(
 
     for (const item of lookItemsWithMapping) {
       const view = (item.view || "").toLowerCase();
+      const sourceUrl = (item.source_url || "").toLowerCase();
       let shotTypes: string[] = [];
 
-      if (view.includes("front")) {
-        shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
-      } else if (view.includes("back")) {
+      // Check both view field and source_url for view type indicators
+      const viewIndicator = view + " " + sourceUrl;
+      
+      if (viewIndicator.includes("back") || viewIndicator.includes("_b.") || viewIndicator.includes("_back")) {
         shotTypes = ["BACK_FULL"];
-      } else if (view.includes("detail")) {
+      } else if (viewIndicator.includes("detail") || viewIndicator.includes("close")) {
         shotTypes = ["DETAIL"];
+      } else if (viewIndicator.includes("front") || viewIndicator.includes("_f.") || viewIndicator.includes("_front") || viewIndicator.includes("_ff") || viewIndicator.includes("_fc")) {
+        shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
+      } else {
+        // Default: treat as front view since most product images are front-facing
+        console.log(`[process-repose-queue] No view detected for "${view}", defaulting to FRONT views`);
+        shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
       }
 
       for (const shotType of shotTypes) {
