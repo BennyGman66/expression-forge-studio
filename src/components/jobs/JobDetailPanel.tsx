@@ -144,14 +144,14 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
       const nextVersion = (existingSubmissions?.[0]?.version_number || 0) + 1;
 
       // 1. Create a job_submission
-      const { data: submission, error: subError } = await supabase
-        .from('job_submissions')
-        .insert({
-          job_id: jobId,
-          status: 'SUBMITTED',
-          version_number: nextVersion,
-          notes: 'Admin uploaded on behalf of freelancer'
-        })
+    const { data: submission, error: subError } = await supabase
+      .from('job_submissions')
+      .insert({
+        job_id: jobId,
+        status: 'SUBMITTED',
+        version_number: nextVersion,
+        summary_note: 'Admin uploaded on behalf of freelancer'
+      })
         .select()
         .single();
 
