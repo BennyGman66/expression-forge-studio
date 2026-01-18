@@ -34,6 +34,8 @@ import {
   useAddComment,
   useCreateThread,
   useCreateSubmission,
+  useJobAssetsWithHistory,
+  AssetSlot,
 } from '@/hooks/useReviewSystem';
 import { useJob, useJobOutputs } from '@/hooks/useJobs';
 import { useAuth } from '@/contexts/AuthContext';
@@ -67,8 +69,8 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const { isInternal, user } = useAuth();
   const imageViewerRef = useRef<ImageViewerHandle>(null);
   const queryClient = useQueryClient();
-  const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<SubmissionAsset | null>(null);
+  const [viewingVersionId, setViewingVersionId] = useState<string | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
@@ -85,12 +87,15 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const { data: submissions = [], refetch: refetchSubmissions } = useJobSubmissions(jobId);
   const { data: jobOutputs = [] } = useJobOutputs(jobId);
   
+  // Asset-centric: fetch all assets for the job with version history
+  const { data: assetSlots = [] } = useJobAssetsWithHistory(jobId);
+  
   const latestSubmission = submissions[0];
-  const selectedSubmission = submissions.find(s => s.id === selectedVersion) || latestSubmission;
-  const isViewingSuperseded = selectedSubmission && latestSubmission && 
-    selectedSubmission.version_number < latestSubmission.version_number;
-  const { data: assets = [] } = useSubmissionAssets(selectedSubmission?.id || null);
-  const { data: threads = [] } = useReviewThreads(selectedSubmission?.id || null);
+  // Get all current assets from slots
+  const assets = assetSlots.map(slot => slot.current);
+  
+  // Still need threads from a submission context - use latest
+  const { data: threads = [] } = useReviewThreads(latestSubmission?.id || null);
   const { data: annotations = [] } = useAssetAnnotations(selectedAsset?.id || null);
 
   const createAnnotation = useCreateAnnotation();
@@ -163,13 +168,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
 
   // No auto-backfill - submissions are only created when freelancer explicitly submits
 
-  // Auto-select first submission and asset
-  useEffect(() => {
-    if (submissions.length > 0 && !selectedVersion) {
-      setSelectedVersion(submissions[0].id);
-    }
-  }, [submissions, selectedVersion]);
-
+  // Auto-select first asset
   useEffect(() => {
     if (assets.length > 0 && !selectedAsset) {
       setSelectedAsset(assets[0]);
@@ -181,21 +180,33 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     }
   }, [assets, selectedAsset]);
 
-  // Calculate annotation counts per asset
-  const annotationCounts = assets.reduce((acc, asset) => {
-    const count = threads.filter(t => t.asset_id === asset.id && t.scope === 'ANNOTATION').length;
-    acc[asset.id] = count;
-    return acc;
-  }, {} as Record<string, number>);
+  // Calculate annotation counts per asset (including historical versions)
+  const annotationCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const slot of assetSlots) {
+      // Count for current version
+      const currentCount = threads.filter(t => t.asset_id === slot.current.id && t.scope === 'ANNOTATION').length;
+      counts[slot.current.id] = currentCount;
+      // Count for historical versions
+      for (const hist of slot.history) {
+        const histCount = threads.filter(t => t.asset_id === hist.id && t.scope === 'ANNOTATION').length;
+        counts[hist.id] = histCount;
+      }
+    }
+    return counts;
+  }, [assetSlots, threads]);
+
+  // Check if viewing a historical version
+  const isViewingHistoricalVersion = viewingVersionId !== null;
 
   const handleAnnotationCreate = useCallback(async (rect: AnnotationRect) => {
-    if (!selectedAsset || !selectedSubmission) return;
+    if (!selectedAsset || !latestSubmission) return;
     
     try {
       const result = await createAnnotation.mutateAsync({
         assetId: selectedAsset.id,
         rect,
-        submissionId: selectedSubmission.id,
+        submissionId: latestSubmission.id,
       });
       const newAnnotationId = result.annotation.id;
       setSelectedAnnotationId(newAnnotationId);
@@ -205,7 +216,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     } catch (error) {
       toast.error('Failed to create annotation');
     }
-  }, [selectedAsset, selectedSubmission, createAnnotation]);
+  }, [selectedAsset, latestSubmission, createAnnotation]);
 
   // Clear pending annotation when a comment is successfully added (via watching threads)
   useEffect(() => {
@@ -219,14 +230,14 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
 
   // Per-asset: Request changes on current asset
   const handleRequestChangesAsset = async () => {
-    if (!selectedSubmission || !job || !selectedAsset) return;
+    if (!latestSubmission || !job || !selectedAsset) return;
 
     try {
       // Create an asset-level thread if needed and add the note
       let assetThread = threads.find(t => t.scope === 'ASSET' && t.asset_id === selectedAsset.id);
       if (!assetThread) {
         assetThread = await createThread.mutateAsync({
-          submissionId: selectedSubmission.id,
+          submissionId: latestSubmission.id,
           scope: 'ASSET',
           assetId: selectedAsset.id,
         });
@@ -237,7 +248,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
       const result = await updateAssetStatus.mutateAsync({
         assetId: selectedAsset.id,
         status: 'CHANGES_REQUESTED',
-        submissionId: selectedSubmission.id,
+        submissionId: latestSubmission.id,
         jobId,
       });
 
@@ -247,7 +258,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
           userId: job.assigned_user_id,
           type: 'CHANGES_REQUESTED',
           jobId,
-          submissionId: selectedSubmission.id,
+          submissionId: latestSubmission.id,
           metadata: { assetLabel: selectedAsset.label },
         });
       }
@@ -262,13 +273,13 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
 
   // Per-asset: Approve current asset
   const handleApproveAsset = async () => {
-    if (!selectedSubmission || !job || !selectedAsset) return;
+    if (!latestSubmission || !job || !selectedAsset) return;
 
     try {
       const result = await updateAssetStatus.mutateAsync({
         assetId: selectedAsset.id,
         status: 'APPROVED',
-        submissionId: selectedSubmission.id,
+        submissionId: latestSubmission.id,
         jobId,
       });
 
@@ -279,7 +290,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
             userId: job.assigned_user_id,
             type: 'JOB_APPROVED',
             jobId,
-            submissionId: selectedSubmission.id,
+            submissionId: latestSubmission.id,
           });
         }
         toast.success('All assets approved! Job complete.');
@@ -363,7 +374,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   // Admin upload handler
   const handleAdminUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0 || !selectedSubmission) return;
+    if (!files || files.length === 0 || !latestSubmission) return;
     
     setUploadingAdmin(true);
     try {
@@ -386,7 +397,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
         const { error: assetError } = await supabase
           .from('submission_assets')
           .insert({
-            submission_id: selectedSubmission.id,
+            submission_id: latestSubmission.id,
             file_url: publicUrl,
             label: `Admin: ${file.name}`,
             sort_index: assets.length,
@@ -396,7 +407,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
       }
       
       toast.success(`${files.length} asset(s) added`);
-      queryClient.invalidateQueries({ queryKey: ['submission-assets', selectedSubmission.id] });
+      queryClient.invalidateQueries({ queryKey: ['job-assets-with-history', jobId] });
     } catch (err: any) {
       console.error('Admin upload error:', err);
       toast.error(err.message || 'Upload failed');
@@ -540,21 +551,11 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Version Selector - only show when multiple versions */}
-            {submissions.length > 1 && (
-              <Select value={selectedVersion || ''} onValueChange={setSelectedVersion}>
-                <SelectTrigger className="w-24 h-8">
-                  <SelectValue placeholder="Version" />
-                </SelectTrigger>
-                <SelectContent>
-                  {submissions.map((sub) => (
-                    <SelectItem key={sub.id} value={sub.id}>
-                      v{sub.version_number}
-                      {sub.status === 'APPROVED' && ' ✓'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Historical version indicator */}
+            {isViewingHistoricalVersion && (
+              <Badge variant="outline" className="bg-amber-500/20 text-amber-300 border-amber-500/30">
+                Viewing historical version
+              </Badge>
             )}
 
             {/* Progress - only show when not all approved */}
@@ -567,20 +568,13 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
             {/* Status Badge */}
             <Badge 
               variant="outline" 
-              className={getStatusBadgeStyle(selectedSubmission?.status || 'SUBMITTED')}
+              className={getStatusBadgeStyle(latestSubmission?.status || 'SUBMITTED')}
             >
-              {selectedSubmission?.status?.replace('_', ' ')}
+              {latestSubmission?.status?.replace('_', ' ')}
             </Badge>
 
-            {/* Superseded Version Banner */}
-            {isViewingSuperseded && (
-              <Badge variant="outline" className="bg-muted text-muted-foreground border-muted-foreground/30">
-                Historical v{selectedSubmission?.version_number} — v{latestSubmission?.version_number} is current
-              </Badge>
-            )}
-
-            {/* Per-Asset Actions - disabled on superseded versions */}
-            {isInternal && selectedAsset && selectedAsset.review_status !== 'APPROVED' && !isViewingSuperseded && (
+            {/* Per-Asset Actions - disabled when viewing historical version */}
+            {isInternal && selectedAsset && selectedAsset.review_status !== 'APPROVED' && !isViewingHistoricalVersion && (
               <>
                 <div className="h-4 w-px bg-border" />
                 <span className="text-xs text-muted-foreground">
@@ -624,7 +618,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
             )}
             
             {/* Admin Upload Button */}
-            {isInternal && !isViewingSuperseded && (
+            {isInternal && !isViewingHistoricalVersion && (
               <>
                 <div className="h-4 w-px bg-border" />
                 <Tooltip>
@@ -671,13 +665,21 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
           {/* Left: Asset Thumbnails */}
           <div className="w-24 border-r border-border bg-muted/30 shrink-0">
             <AssetThumbnails
-              assets={assets}
+              assetSlots={assetSlots}
               selectedAssetId={selectedAsset?.id || null}
               onSelect={(asset) => {
                 setSelectedAsset(asset);
                 setSelectedAnnotationId(null);
               }}
               annotationCounts={annotationCounts}
+              viewingVersionId={viewingVersionId}
+              onViewVersion={(asset) => {
+                if (asset) {
+                  setViewingVersionId(asset.id);
+                } else {
+                  setViewingVersionId(null);
+                }
+              }}
             />
           </div>
 
@@ -708,7 +710,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
           {/* Right: Comments Panel */}
           <div className="w-80 shrink-0">
             <ThreadPanel
-              submissionId={selectedSubmission?.id || ''}
+              submissionId={latestSubmission?.id || ''}
               threads={threads}
               annotations={annotations}
               selectedAnnotationId={selectedAnnotationId}

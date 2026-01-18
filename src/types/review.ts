@@ -47,6 +47,9 @@ export interface SubmissionAsset {
   review_status: AssetReviewStatus;
   reviewed_by_user_id: string | null;
   reviewed_at: string | null;
+  // Version tracking
+  superseded_by: string | null;
+  revision_number: number | null;
   // Joined
   annotations?: ImageAnnotation[];
 }
