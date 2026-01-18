@@ -4,9 +4,10 @@ import { Button, Flex, Text, Heading, Badge } from "@radix-ui/themes";
 interface HeaderProps {
   projectName?: string;
   onOpenProjects?: () => void;
+  title?: string;
 }
 
-export function Header({ projectName, onOpenProjects }: HeaderProps) {
+export function Header({ projectName, onOpenProjects, title = "Expression Map Factory" }: HeaderProps) {
   return (
     <header className="h-16 border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
       <Flex className="h-full px-6" align="center" justify="between">
@@ -20,7 +21,7 @@ export function Header({ projectName, onOpenProjects }: HeaderProps) {
           </Flex>
           <Flex direction="column" gap="0">
             <Heading size="4" weight="bold" className="tracking-tight">
-              Expression Map Factory
+              {title}
             </Heading>
             {projectName && (
               <Text size="1" color="gray">
