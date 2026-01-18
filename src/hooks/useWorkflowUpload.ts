@@ -5,9 +5,15 @@ import {
   ParsedUploadFile, 
   UploadSummary, 
   WorkflowView,
-  WORKFLOW_VIEWS
+  OutputFormat,
 } from '@/types/optimised-workflow';
 import { useToast } from '@/hooks/use-toast';
+
+// Check if file is a TIFF
+function isTiff(file: File): boolean {
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  return ext === 'tif' || ext === 'tiff' || file.type === 'image/tiff';
+}
 
 // Extract look code from filename (e.g., "01_MWOMW39826DW5 short#008.tif" -> "MWOMW39826DW5")
 function extractLookCode(filename: string): string {
@@ -165,13 +171,15 @@ export function useWorkflowUpload(projectId: string | null) {
           duplicatesSkipped: 0, 
           looksCreated: 0, 
           looksUpdated: 0,
-          byLookCode: new Map() 
+          byLookCode: new Map(),
+          tiffCount: 0,
         } 
       };
     }
 
     const parsed: ParsedUploadFile[] = [];
     const byLookCode = new Map<string, ParsedUploadFile[]>();
+    let tiffCount = 0;
 
     // Get existing looks and their checksums
     const { data: existingLooks } = await supabase
@@ -197,6 +205,9 @@ export function useWorkflowUpload(projectId: string | null) {
       const lookCode = extractLookCode(file.name);
       const inferredView = inferViewType(file.name);
       const checksum = await generateFileChecksum(file);
+      const needsConversion = isTiff(file);
+      
+      if (needsConversion) tiffCount++;
       
       const lookId = lookIdByCode.get(lookCode);
       const isDuplicate = lookId 
@@ -209,6 +220,7 @@ export function useWorkflowUpload(projectId: string | null) {
         inferredView,
         filename: file.name,
         isDuplicate,
+        needsConversion,
       };
 
       parsed.push(parsedFile);
@@ -234,18 +246,19 @@ export function useWorkflowUpload(projectId: string | null) {
         looksCreated,
         looksUpdated,
         byLookCode,
+        tiffCount,
       },
     };
   }, [projectId]);
 
   // Upload files and create looks
   const uploadMutation = useMutation({
-    mutationFn: async (parsedFiles: ParsedUploadFile[]) => {
+    mutationFn: async ({ files, targetFormat }: { files: ParsedUploadFile[]; targetFormat: OutputFormat }) => {
       if (!projectId) throw new Error('No project selected');
 
-      const filesToUpload = parsedFiles.filter(p => !p.isDuplicate);
+      const filesToUpload = files.filter(p => !p.isDuplicate);
       if (filesToUpload.length === 0) {
-        return { uploaded: 0, looks: 0 };
+        return { uploaded: 0, looks: 0, converted: 0 };
       }
 
       setIsProcessing(true);
@@ -293,36 +306,83 @@ export function useWorkflowUpload(projectId: string | null) {
 
       // Upload images
       let uploaded = 0;
+      let converted = 0;
       const total = filesToUpload.length;
+      const needsConversion = targetFormat !== 'original';
 
       for (const file of filesToUpload) {
         const lookId = lookIds.get(file.lookCode);
         if (!lookId) continue;
 
         const checksum = await generateFileChecksum(file.file);
-        const ext = file.filename.split('.').pop()?.toLowerCase() || 'jpg';
-        const storagePath = `workflow/${projectId}/${lookId}/${Date.now()}-${file.inferredView}.${ext}`;
+        const originalExt = file.filename.split('.').pop()?.toLowerCase() || 'jpg';
+        const finalExt = needsConversion ? targetFormat : originalExt;
+        const storagePath = `workflow/${projectId}/${lookId}/${Date.now()}-${file.inferredView}.${finalExt}`;
 
-        // Upload to storage
+        // Upload original to temp path first
+        const tempPath = `workflow/${projectId}/${lookId}/temp-${Date.now()}.${originalExt}`;
         const { error: uploadError } = await supabase.storage
           .from('images')
-          .upload(storagePath, file.file);
+          .upload(tempPath, file.file);
 
         if (uploadError) {
           console.error('Upload error:', uploadError);
           continue;
         }
 
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
+        // Get temp URL for conversion
+        const { data: { publicUrl: tempUrl } } = supabase.storage
           .from('images')
-          .getPublicUrl(storagePath);
+          .getPublicUrl(tempPath);
+
+        let finalUrl = tempUrl;
+
+        // Convert if needed
+        if (needsConversion) {
+          try {
+            const { data: conversionResult, error: conversionError } = await supabase.functions
+              .invoke('convert-image', {
+                body: {
+                  sourceUrl: tempUrl,
+                  targetFormat: targetFormat === 'jpeg' ? 'jpeg' : targetFormat,
+                  targetPath: storagePath,
+                  quality: targetFormat === 'png' ? 100 : 90,
+                },
+              });
+
+            if (conversionError) {
+              console.error('Conversion error:', conversionError);
+              finalUrl = tempUrl; // Fall back to original
+            } else if (conversionResult?.convertedUrl) {
+              finalUrl = conversionResult.convertedUrl;
+              converted++;
+              
+              // Delete temp file
+              await supabase.storage.from('images').remove([tempPath]);
+            }
+          } catch (err) {
+            console.error('Conversion failed:', err);
+            finalUrl = tempUrl;
+          }
+        } else {
+          // Move from temp to final path
+          const { error: moveError } = await supabase.storage
+            .from('images')
+            .move(tempPath, storagePath);
+          
+          if (!moveError) {
+            const { data: { publicUrl } } = supabase.storage
+              .from('images')
+              .getPublicUrl(storagePath);
+            finalUrl = publicUrl;
+          }
+        }
 
         // Create image record
         await supabase.from('workflow_images').insert({
           look_id: lookId,
           view: file.inferredView === 'unknown' ? 'full_front' : file.inferredView,
-          original_url: publicUrl,
+          original_url: finalUrl,
           file_checksum: checksum,
           filename: file.filename,
         });
@@ -331,14 +391,16 @@ export function useWorkflowUpload(projectId: string | null) {
         setUploadProgress(Math.round((uploaded / total) * 100));
       }
 
-      return { uploaded, looks: lookIds.size };
+      return { uploaded, looks: lookIds.size, converted };
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['workflow-looks', projectId] });
       queryClient.invalidateQueries({ queryKey: ['workflow-project', projectId] });
+      
+      const conversionNote = result.converted > 0 ? ` (${result.converted} converted)` : '';
       toast({
         title: 'Upload complete',
-        description: `${result.uploaded} images uploaded across ${result.looks} looks.`,
+        description: `${result.uploaded} images uploaded across ${result.looks} looks${conversionNote}.`,
       });
     },
     onError: (error) => {
@@ -356,7 +418,8 @@ export function useWorkflowUpload(projectId: string | null) {
 
   return {
     parseFiles,
-    uploadFiles: uploadMutation.mutate,
+    uploadFiles: (files: ParsedUploadFile[], targetFormat: OutputFormat = 'original') => 
+      uploadMutation.mutate({ files, targetFormat }),
     isProcessing: isProcessing || uploadMutation.isPending,
     uploadProgress,
   };

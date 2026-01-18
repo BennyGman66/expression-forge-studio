@@ -204,12 +204,15 @@ export interface BulkActionConfig {
 }
 
 // Upload types
+export type OutputFormat = 'original' | 'png' | 'jpeg' | 'webp';
+
 export interface ParsedUploadFile {
   file: File;
   lookCode: string;
   inferredView: WorkflowView | 'unknown';
   filename: string;
   isDuplicate: boolean;
+  needsConversion?: boolean; // True for TIFF files
 }
 
 export interface UploadSummary {
@@ -219,6 +222,7 @@ export interface UploadSummary {
   looksCreated: number;
   looksUpdated: number;
   byLookCode: Map<string, ParsedUploadFile[]>;
+  tiffCount: number; // Count of TIFF files that need conversion
 }
 
 // Stage action mapping

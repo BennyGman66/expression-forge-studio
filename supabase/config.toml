@@ -125,3 +125,6 @@ verify_jwt = false
 
 [functions.generate-ai-apply]
 verify_jwt = false
+
+[functions.convert-image]
+verify_jwt = false

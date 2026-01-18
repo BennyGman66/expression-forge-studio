@@ -1,10 +1,10 @@
 import { useState, useCallback } from 'react';
-import { Upload, FolderOpen, Loader2, Check } from 'lucide-react';
+import { Upload, FolderOpen, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useWorkflowUpload, getFilesFromDataTransfer } from '@/hooks/useWorkflowUpload';
 import { UploadSummaryDialog } from './UploadSummaryDialog';
-import { ParsedUploadFile, UploadSummary } from '@/types/optimised-workflow';
+import { ParsedUploadFile, UploadSummary, OutputFormat } from '@/types/optimised-workflow';
 import { cn } from '@/lib/utils';
 
 interface UploadDropZoneProps {
@@ -56,9 +56,9 @@ export function UploadDropZone({ projectId, compact = false }: UploadDropZonePro
     e.target.value = '';
   }, [parseFiles]);
 
-  const handleConfirmUpload = () => {
+  const handleConfirmUpload = (targetFormat: OutputFormat) => {
     setShowSummary(false);
-    uploadFiles(parsedFiles);
+    uploadFiles(parsedFiles, targetFormat);
   };
 
   if (isProcessing) {
