@@ -207,65 +207,92 @@ export interface AssetSlot {
 }
 
 // Asset-centric: Get all assets for a job grouped by slot with version history
+// Merges assets across ALL submissions so partial resubmissions don't hide unchanged assets
 export function useJobAssetsWithHistory(jobId: string | null) {
   return useQuery({
     queryKey: ['job-assets-with-history', jobId],
     queryFn: async () => {
       if (!jobId) return [];
       
-      // Get the LATEST submission only for this job (by version_number, then created_at as tiebreaker)
-      const { data: latestSubmission, error: subError } = await supabase
+      // Get ALL submissions for this job, ordered by version_number descending
+      const { data: submissions, error: subError } = await supabase
         .from('job_submissions')
-        .select('id')
+        .select('id, version_number')
         .eq('job_id', jobId)
-        .order('version_number', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order('version_number', { ascending: false });
       
       if (subError) throw subError;
-      if (!latestSubmission) return [];
+      if (!submissions?.length) return [];
       
-      // Get ALL assets for the latest submission
+      const submissionIds = submissions.map(s => s.id);
+      
+      // Get ALL assets from ALL submissions for this job
       const { data: allAssets, error: assetsError } = await supabase
         .from('submission_assets')
         .select('*, review_status, reviewed_by_user_id, reviewed_at, superseded_by, revision_number')
-        .eq('submission_id', latestSubmission.id)
+        .in('submission_id', submissionIds)
         .order('sort_index')
         .order('revision_number', { ascending: false });
       
       if (assetsError) throw assetsError;
       if (!allAssets?.length) return [];
       
-      // Group by label/sort_index to identify asset "slots"
-      // Current version = highest revision_number with superseded_by null
-      // Historical versions = lower revision_numbers OR superseded_by is not null
-      const slotMap = new Map<string, { current: SubmissionAsset | null; history: SubmissionAsset[] }>();
+      // Create a map of submission_id -> version_number for priority comparison
+      const submissionVersionMap = new Map<string, number>();
+      for (const sub of submissions) {
+        submissionVersionMap.set(sub.id, sub.version_number);
+      }
       
-      for (const asset of allAssets) {
-        // Use label as slot key, fallback to sort_index
+      // Group by label (slot key)
+      // For each slot, the "current" is the non-superseded asset from the NEWEST submission
+      // Assets from older submissions go to history (unless replaced in a newer one)
+      const slotMap = new Map<string, { 
+        current: SubmissionAsset | null; 
+        history: SubmissionAsset[];
+        currentSubmissionVersion: number;
+      }>();
+      
+      // Track which labels have been replaced in newer submissions
+      const replacedLabels = new Set<string>();
+      
+      // Process assets ordered by submission version (newest first)
+      // Sort by submission version, then by revision_number
+      const sortedAssets = [...allAssets].sort((a, b) => {
+        const versionA = submissionVersionMap.get(a.submission_id) || 0;
+        const versionB = submissionVersionMap.get(b.submission_id) || 0;
+        if (versionB !== versionA) return versionB - versionA; // Newer submissions first
+        return (b.revision_number || 1) - (a.revision_number || 1); // Higher revision first
+      });
+      
+      for (const asset of sortedAssets) {
         const slotKey = asset.label || `slot-${asset.sort_index}`;
+        const assetSubmissionVersion = submissionVersionMap.get(asset.submission_id) || 0;
         
         if (!slotMap.has(slotKey)) {
-          slotMap.set(slotKey, { current: null, history: [] });
+          slotMap.set(slotKey, { current: null, history: [], currentSubmissionVersion: 0 });
         }
         
         const slot = slotMap.get(slotKey)!;
         
-        if (asset.superseded_by === null) {
-          // Potential current version - take the one with highest revision_number
-          if (!slot.current || (asset.revision_number || 1) > (slot.current.revision_number || 1)) {
-            // Move previous current to history if exists
-            if (slot.current) {
-              slot.history.push(slot.current);
-            }
-            slot.current = asset as SubmissionAsset;
-          } else {
-            // Lower revision_number goes to history
-            slot.history.push(asset as SubmissionAsset);
+        // Determine if this asset should be current or history
+        const isSuperseded = asset.superseded_by !== null;
+        const isFromNewerOrSameSubmission = assetSubmissionVersion >= slot.currentSubmissionVersion;
+        
+        if (!isSuperseded && !slot.current) {
+          // First non-superseded asset for this slot becomes current
+          slot.current = asset as SubmissionAsset;
+          slot.currentSubmissionVersion = assetSubmissionVersion;
+          replacedLabels.add(slotKey);
+        } else if (!isSuperseded && isFromNewerOrSameSubmission && 
+                   assetSubmissionVersion > slot.currentSubmissionVersion) {
+          // Asset from a newer submission replaces current
+          if (slot.current) {
+            slot.history.push(slot.current);
           }
+          slot.current = asset as SubmissionAsset;
+          slot.currentSubmissionVersion = assetSubmissionVersion;
         } else {
-          // Has superseded_by - definitely historical
+          // Historical asset - either superseded or from older submission with same label already set
           slot.history.push(asset as SubmissionAsset);
         }
       }
@@ -274,8 +301,13 @@ export function useJobAssetsWithHistory(jobId: string | null) {
       const result: AssetSlot[] = [];
       for (const [slotKey, slot] of slotMap.entries()) {
         if (slot.current) {
-          // Sort history by revision_number descending
-          slot.history.sort((a, b) => (b.revision_number || 1) - (a.revision_number || 1));
+          // Sort history by submission version desc, then revision_number desc
+          slot.history.sort((a, b) => {
+            const versionA = submissionVersionMap.get(a.submission_id) || 0;
+            const versionB = submissionVersionMap.get(b.submission_id) || 0;
+            if (versionB !== versionA) return versionB - versionA;
+            return (b.revision_number || 1) - (a.revision_number || 1);
+          });
           result.push({
             slotKey,
             current: slot.current,
