@@ -843,7 +843,7 @@ export function useJobsReviewProgress() {
         return {} as ReviewProgressMap;
       }
       
-      // Fetch assets only for latest submissions
+      // Fetch assets only for latest submissions, excluding superseded (replaced) versions
       const { data, error } = await supabase
         .from('submission_assets')
         .select(`
@@ -851,7 +851,8 @@ export function useJobsReviewProgress() {
           review_status,
           submission:job_submissions!inner(job_id)
         `)
-        .in('submission_id', latestSubmissionIds);
+        .in('submission_id', latestSubmissionIds)
+        .is('superseded_by', null);
       
       if (error) throw error;
       
