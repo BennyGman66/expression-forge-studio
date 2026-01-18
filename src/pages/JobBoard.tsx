@@ -101,7 +101,7 @@ export default function JobBoard() {
     }
   }, [searchParams]);
 
-  // Real-time subscription for job updates
+  // Real-time subscription for job updates and submission changes
   useEffect(() => {
     const channel = supabase
       .channel('unified-jobs-realtime-admin')
@@ -114,6 +114,19 @@ export default function JobBoard() {
         },
         () => {
           queryClient.invalidateQueries({ queryKey: ['unified-jobs'] });
+          queryClient.invalidateQueries({ queryKey: ['jobs-review-progress'] });
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'job_submissions'
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['unified-jobs'] });
+          queryClient.invalidateQueries({ queryKey: ['jobs-review-progress'] });
         }
       )
       .subscribe();
@@ -130,7 +143,7 @@ export default function JobBoard() {
     setSearchParams(searchParams);
   };
 
-  const { data: jobs, isLoading: jobsLoading } = useJobs({
+  const { data: jobs, isLoading: jobsLoading, refetch: refetchJobs } = useJobs({
     status: statusFilter !== "all" ? statusFilter : undefined,
     type: typeFilter !== "all" ? typeFilter : undefined,
   });
@@ -517,7 +530,12 @@ export default function JobBoard() {
       {reviewJobId && (
         <JobReviewPanel
           jobId={reviewJobId}
-          onClose={() => setReviewJobId(null)}
+          onClose={() => {
+            setReviewJobId(null);
+            // Force refetch to ensure we have the latest status after review actions
+            refetchJobs();
+            queryClient.invalidateQueries({ queryKey: ['jobs-review-progress'] });
+          }}
         />
       )}
 
