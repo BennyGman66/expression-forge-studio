@@ -3749,6 +3749,284 @@ export type Database = {
         }
         Relationships: []
       }
+      workflow_images: {
+        Row: {
+          converted_url: string | null
+          created_at: string | null
+          file_checksum: string | null
+          filename: string | null
+          head_cropped_url: string | null
+          id: string
+          look_id: string
+          matched_face_url: string | null
+          matched_foundation_id: string | null
+          original_url: string
+          updated_at: string | null
+          view: string
+        }
+        Insert: {
+          converted_url?: string | null
+          created_at?: string | null
+          file_checksum?: string | null
+          filename?: string | null
+          head_cropped_url?: string | null
+          id?: string
+          look_id: string
+          matched_face_url?: string | null
+          matched_foundation_id?: string | null
+          original_url: string
+          updated_at?: string | null
+          view: string
+        }
+        Update: {
+          converted_url?: string | null
+          created_at?: string | null
+          file_checksum?: string | null
+          filename?: string | null
+          head_cropped_url?: string | null
+          id?: string
+          look_id?: string
+          matched_face_url?: string | null
+          matched_foundation_id?: string | null
+          original_url?: string
+          updated_at?: string | null
+          view?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_images_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_looks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workflow_looks: {
+        Row: {
+          created_at: string | null
+          digital_talent_id: string | null
+          generation_run_count: number | null
+          id: string
+          look_code: string
+          name: string | null
+          project_id: string
+          stage: Database["public"]["Enums"]["workflow_stage"] | null
+          stage_updated_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          digital_talent_id?: string | null
+          generation_run_count?: number | null
+          id?: string
+          look_code: string
+          name?: string | null
+          project_id: string
+          stage?: Database["public"]["Enums"]["workflow_stage"] | null
+          stage_updated_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          digital_talent_id?: string | null
+          generation_run_count?: number | null
+          id?: string
+          look_code?: string
+          name?: string | null
+          project_id?: string
+          stage?: Database["public"]["Enums"]["workflow_stage"] | null
+          stage_updated_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_looks_digital_talent_id_fkey"
+            columns: ["digital_talent_id"]
+            isOneToOne: false
+            referencedRelation: "digital_talents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workflow_looks_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workflow_outputs: {
+        Row: {
+          created_at: string | null
+          generation_run: number | null
+          id: string
+          image_id: string | null
+          is_selected: boolean | null
+          look_id: string
+          output_url: string | null
+          selection_order: number | null
+          status: string | null
+          updated_at: string | null
+          view: string
+        }
+        Insert: {
+          created_at?: string | null
+          generation_run?: number | null
+          id?: string
+          image_id?: string | null
+          is_selected?: boolean | null
+          look_id: string
+          output_url?: string | null
+          selection_order?: number | null
+          status?: string | null
+          updated_at?: string | null
+          view: string
+        }
+        Update: {
+          created_at?: string | null
+          generation_run?: number | null
+          id?: string
+          image_id?: string | null
+          is_selected?: boolean | null
+          look_id?: string
+          output_url?: string | null
+          selection_order?: number | null
+          status?: string | null
+          updated_at?: string | null
+          view?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_outputs_image_id_fkey"
+            columns: ["image_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workflow_outputs_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_looks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workflow_projects: {
+        Row: {
+          brand_id: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          name: string
+          updated_at: string | null
+        }
+        Insert: {
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          name: string
+          updated_at?: string | null
+        }
+        Update: {
+          brand_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          name?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_projects_brand_id_fkey"
+            columns: ["brand_id"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workflow_queue: {
+        Row: {
+          attempts: number | null
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          heartbeat_at: string | null
+          id: string
+          image_id: string | null
+          job_type: string | null
+          look_id: string | null
+          max_attempts: number | null
+          metadata: Json | null
+          priority: number | null
+          project_id: string | null
+          started_at: string | null
+          status: string | null
+          view: string | null
+        }
+        Insert: {
+          attempts?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          image_id?: string | null
+          job_type?: string | null
+          look_id?: string | null
+          max_attempts?: number | null
+          metadata?: Json | null
+          priority?: number | null
+          project_id?: string | null
+          started_at?: string | null
+          status?: string | null
+          view?: string | null
+        }
+        Update: {
+          attempts?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          image_id?: string | null
+          job_type?: string | null
+          look_id?: string | null
+          max_attempts?: number | null
+          metadata?: Json | null
+          priority?: number | null
+          project_id?: string | null
+          started_at?: string | null
+          status?: string | null
+          view?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_queue_image_id_fkey"
+            columns: ["image_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_images"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workflow_queue_look_id_fkey"
+            columns: ["look_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_looks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workflow_queue_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -3829,6 +4107,15 @@ export type Database = {
         | "IN_REVIEW"
         | "CHANGES_REQUESTED"
         | "APPROVED"
+      workflow_stage:
+        | "LOOKS_UPLOADED"
+        | "MODEL_PAIRED"
+        | "HEADS_CROPPED"
+        | "FACE_MATCHED"
+        | "GENERATED"
+        | "REVIEW_SELECTED"
+        | "JOB_BOARD"
+        | "DONE"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -4023,6 +4310,16 @@ export const Constants = {
         "IN_REVIEW",
         "CHANGES_REQUESTED",
         "APPROVED",
+      ],
+      workflow_stage: [
+        "LOOKS_UPLOADED",
+        "MODEL_PAIRED",
+        "HEADS_CROPPED",
+        "FACE_MATCHED",
+        "GENERATED",
+        "REVIEW_SELECTED",
+        "JOB_BOARD",
+        "DONE",
       ],
     },
   },
