@@ -1,4 +1,5 @@
 export { ProjectsGrid } from './ProjectsGrid';
+export { WorkflowProjectsPage } from './WorkflowProjectsPage';
 export { ProductionDashboard } from './ProductionDashboard';
 export { DashboardHeader } from './DashboardHeader';
 export { LooksDashboardTable } from './LooksDashboardTable';
