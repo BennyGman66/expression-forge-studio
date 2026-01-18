@@ -446,21 +446,31 @@ async function processRun(
     for (const item of lookItemsWithMapping) {
       const view = (item.view || "").toLowerCase();
       const sourceUrl = (item.source_url || "").toLowerCase();
+      const assignedView = (item.assigned_view || "").toLowerCase(); // Manual assignment takes priority
       let shotTypes: string[] = [];
 
-      // Check both view field and source_url for view type indicators
-      const viewIndicator = view + " " + sourceUrl;
-      
-      if (viewIndicator.includes("back") || viewIndicator.includes("_b.") || viewIndicator.includes("_back")) {
+      // PRIORITY 1: Use manually assigned view if available
+      if (assignedView === "front") {
+        console.log(`[process-repose-queue] Using assigned view: FRONT for item ${item.id}`);
+        shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
+      } else if (assignedView === "back") {
+        console.log(`[process-repose-queue] Using assigned view: BACK for item ${item.id}`);
         shotTypes = ["BACK_FULL"];
-      } else if (viewIndicator.includes("detail") || viewIndicator.includes("close")) {
-        shotTypes = ["DETAIL"];
-      } else if (viewIndicator.includes("front") || viewIndicator.includes("_f.") || viewIndicator.includes("_front") || viewIndicator.includes("_ff") || viewIndicator.includes("_fc")) {
-        shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
       } else {
-        // Default: treat as front view since most product images are front-facing
-        console.log(`[process-repose-queue] No view detected for "${view}", defaulting to FRONT views`);
-        shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
+        // PRIORITY 2: Auto-detect from view field and source_url
+        const viewIndicator = view + " " + sourceUrl;
+        
+        if (viewIndicator.includes("back") || viewIndicator.includes("_b.") || viewIndicator.includes("_back")) {
+          shotTypes = ["BACK_FULL"];
+        } else if (viewIndicator.includes("detail") || viewIndicator.includes("close")) {
+          shotTypes = ["DETAIL"];
+        } else if (viewIndicator.includes("front") || viewIndicator.includes("_f.") || viewIndicator.includes("_front") || viewIndicator.includes("_ff") || viewIndicator.includes("_fc")) {
+          shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
+        } else {
+          // Default: treat as front view since most product images are front-facing
+          console.log(`[process-repose-queue] No view detected for "${view}", defaulting to FRONT views`);
+          shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
+        }
       }
 
       for (const shotType of shotTypes) {

@@ -10,6 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { 
   ArrowRight, 
   AlertCircle, 
@@ -29,7 +30,8 @@ import {
   Sparkles,
   Image as ImageIcon,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  Wand2
 } from "lucide-react";
 import { useReposeBatch, useReposeBatchItems, useReposeOutputs, useUpdateReposeBatchConfig, useUpdateReposeBatchStatus } from "@/hooks/useReposeBatches";
 import { useUpdateLookProductType } from "@/hooks/useProductionProjects";
@@ -38,6 +40,7 @@ import { usePipelineJobs } from "@/hooks/usePipelineJobs";
 import { supabase } from "@/integrations/supabase/client";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { OptimizedImage } from "@/components/shared/OptimizedImage";
+import { ViewAssignmentPanel } from "./ViewAssignmentPanel";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReposeConfig } from "@/types/repose";
@@ -102,9 +105,15 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
   const [inspectedLookId, setInspectedLookId] = useState<string | null>(null);
   const [clayPoseCounts, setClayPoseCounts] = useState<ClayPoseCount[]>([]);
   const [loadingCounts, setLoadingCounts] = useState(false);
+  const [showViewAssignment, setShowViewAssignment] = useState(false);
   
   const shouldStopRef = useRef(false);
   const pipelineJobIdRef = useRef<string | null>(null);
+
+  // Count unassigned views
+  const unassignedViewCount = useMemo(() => {
+    return batchItems?.filter(i => !i.assigned_view).length || 0;
+  }, [batchItems]);
 
   // Look up look_id via source_output_id for items with missing look_id
   const { data: outputLookMap } = useQuery({
@@ -891,6 +900,25 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
             </div>
           </CardHeader>
           <CardContent className="p-0">
+            {/* View Assignment Warning */}
+            {unassignedViewCount > 0 && (
+              <div className="mx-4 mb-2 p-2.5 bg-blue-500/10 border border-blue-500/30 rounded-lg text-blue-700 dark:text-blue-400 text-sm flex items-center justify-between">
+                <div className="flex items-center">
+                  <Wand2 className="w-4 h-4 mr-2" />
+                  {unassignedViewCount} image{unassignedViewCount > 1 ? 's' : ''} have unknown view types (front/back)
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowViewAssignment(true)}
+                  className="h-7 gap-1"
+                >
+                  <Eye className="w-3 h-3" />
+                  Assign Views
+                </Button>
+              </div>
+            )}
+
             {looksWithoutProductType > 0 && (
               <div className="mx-4 mb-2 p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-700 dark:text-amber-400 text-sm">
                 <AlertCircle className="w-4 h-4 inline-block mr-2" />
@@ -1184,6 +1212,23 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* View Assignment Dialog */}
+      <Dialog open={showViewAssignment} onOpenChange={setShowViewAssignment}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Assign View Types</DialogTitle>
+          </DialogHeader>
+          {batchItems && batchId && (
+            <ViewAssignmentPanel
+              batchId={batchId}
+              items={batchItems}
+              onClose={() => setShowViewAssignment(false)}
+              onRefresh={() => queryClient.invalidateQueries({ queryKey: ["repose-batch-items", batchId] })}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -2865,6 +2865,7 @@ export type Database = {
       }
       repose_batch_items: {
         Row: {
+          assigned_view: string | null
           batch_id: string
           created_at: string | null
           id: string
@@ -2874,6 +2875,7 @@ export type Database = {
           view: string
         }
         Insert: {
+          assigned_view?: string | null
           batch_id: string
           created_at?: string | null
           id?: string
@@ -2883,6 +2885,7 @@ export type Database = {
           view: string
         }
         Update: {
+          assigned_view?: string | null
           batch_id?: string
           created_at?: string | null
           id?: string
