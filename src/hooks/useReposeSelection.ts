@@ -2,7 +2,7 @@ import { useMemo, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { useReposeOutputs, useReposeBatchItems } from "./useReposeBatches";
+import { useReposeOutputs, useReposeBatchItems, ReposeBatchItemWithLook } from "./useReposeBatches";
 import type { ReposeOutput } from "@/types/repose";
 import { OutputShotType, slotToShotType, ALL_OUTPUT_SHOT_TYPES } from "@/types/shot-types";
 import { MAX_FAVORITES_PER_VIEW } from "@/types/repose";
@@ -10,7 +10,8 @@ import { MAX_FAVORITES_PER_VIEW } from "@/types/repose";
 export interface LookWithOutputs {
   lookId: string;
   lookCode: string;
-  batchItemId: string;
+  batchItemIds: string[]; // Multiple batch items per look (one per shot type)
+  batchItemId: string; // Primary batch item ID for backwards compatibility
   sourceUrl: string;
   outputsByView: Record<OutputShotType, ReposeOutput[]>;
   selectionStats: ViewSelectionStats;
@@ -134,15 +135,35 @@ export function useReposeSelection(batchId: string | undefined) {
     if (!outputs || !batchItems) return [];
 
     const lookMap = new Map<string, LookWithOutputs>();
+    
+    // Build a map of batch item id to look code for quick lookup
+    const itemToLookCode = new Map<string, string>();
+    for (const item of batchItems as ReposeBatchItemWithLook[]) {
+      itemToLookCode.set(item.id, item.look_code || '');
+    }
 
     // First, create entries from batch items
-    for (const item of batchItems) {
+    for (const item of batchItems as ReposeBatchItemWithLook[]) {
       const lookId = item.look_id || item.id; // Use item id as fallback if no look_id
+      
+      // Generate look code - prefer look_code from talent_looks, fallback to extracting from source_url or ID
+      let lookCode = item.look_code;
+      if (!lookCode && item.source_url) {
+        // Try to extract SKU from filename (e.g., "WW0WW47846C1G_Front.png")
+        const urlMatch = item.source_url.match(/([A-Z0-9]{8,})/i);
+        if (urlMatch) {
+          lookCode = urlMatch[1];
+        }
+      }
+      if (!lookCode) {
+        lookCode = lookId.slice(0, 8);
+      }
       
       if (!lookMap.has(lookId)) {
         lookMap.set(lookId, {
           lookId,
-          lookCode: `Look ${lookId.slice(0, 6)}`, // Will be enriched later
+          lookCode,
+          batchItemIds: [item.id],
           batchItemId: item.id,
           sourceUrl: item.source_url,
           outputsByView: {} as Record<OutputShotType, ReposeOutput[]>,
@@ -153,6 +174,12 @@ export function useReposeSelection(batchId: string | undefined) {
             isAllComplete: false,
           },
         });
+      } else {
+        // Add additional batch item ID to existing look
+        const existing = lookMap.get(lookId)!;
+        if (!existing.batchItemIds.includes(item.id)) {
+          existing.batchItemIds.push(item.id);
+        }
       }
     }
 
@@ -218,20 +245,33 @@ export function useReposeSelection(batchId: string | undefined) {
     };
   }, [groupedByLook, outputs]);
 
-  // Get next available rank for a view
+  // Get next available rank for a view (now accepts batchItemId or lookId via batchItemIds array)
   const getNextAvailableRank = useCallback((batchItemId: string, shotType: OutputShotType): 1 | 2 | 3 | null => {
-    const viewOutputs = outputs?.filter(o => {
-      const oShotType = (o.shot_type || slotToShotType(o.slot || '')) as OutputShotType;
-      return o.batch_item_id === batchItemId && oShotType === shotType && o.is_favorite;
-    }) || [];
+    // Find the look that contains this batch item
+    const look = groupedByLook.find(l => l.batchItemIds.includes(batchItemId));
+    if (!look) {
+      // Fallback to single batch item filtering
+      const viewOutputs = outputs?.filter(o => {
+        const oShotType = (o.shot_type || slotToShotType(o.slot || '')) as OutputShotType;
+        return o.batch_item_id === batchItemId && oShotType === shotType && o.is_favorite;
+      }) || [];
+      const usedRanks = new Set(viewOutputs.map(o => o.favorite_rank));
+      if (!usedRanks.has(1)) return 1;
+      if (!usedRanks.has(2)) return 2;
+      if (!usedRanks.has(3)) return 3;
+      return null;
+    }
 
-    const usedRanks = new Set(viewOutputs.map(o => o.favorite_rank));
+    // Use the pre-calculated stats from the look
+    const viewOutputs = look.outputsByView[shotType] || [];
+    const selectedOutputs = viewOutputs.filter(o => o.is_favorite && o.status === 'complete');
+    const usedRanks = new Set(selectedOutputs.map(o => o.favorite_rank));
     
     if (!usedRanks.has(1)) return 1;
     if (!usedRanks.has(2)) return 2;
     if (!usedRanks.has(3)) return 3;
-    return null; // All ranks used
-  }, [outputs]);
+    return null;
+  }, [outputs, groupedByLook]);
 
   // Check if view is full (3 selections)
   const isViewFull = useCallback((batchItemId: string, shotType: OutputShotType): boolean => {
