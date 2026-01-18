@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
@@ -107,7 +108,10 @@ export function CurationLightbox({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-7xl h-[95vh] p-0 bg-black/98 border-none">
+      <DialogContent className="max-w-7xl h-[95vh] p-0 bg-black/98 border-none z-[100]">
+        <VisuallyHidden>
+          <DialogTitle>Image Viewer</DialogTitle>
+        </VisuallyHidden>
         {!currentImage ? (
           <div className="flex items-center justify-center h-full text-white/50">
             No images to display
