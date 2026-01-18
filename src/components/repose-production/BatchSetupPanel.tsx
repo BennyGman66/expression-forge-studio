@@ -464,6 +464,51 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
   const readySelectedLooks = selectedLooks.filter(l => l.isReady);
   const estimatedNewRuns = selectedLooks.length * rendersPerLook;
 
+  // Add to queue without starting - just creates runs
+  const handleAddToQueue = async () => {
+    if (!batchId || selectedLooks.length === 0 || !selectedBrandId) return;
+
+    try {
+      const config: ReposeConfig = {
+        posesPerShotType: rendersPerLook,
+        attemptsPerPose: 1,
+        model: selectedModel,
+      };
+      await updateConfig.mutateAsync({ batchId, config, brandId: selectedBrandId });
+
+      const lookIdsToQueue = selectedLooks.map(l => l.lookId);
+      const runsToCreate: Array<Record<string, unknown>> = [];
+      
+      for (const lookId of lookIdsToQueue) {
+        const existingRuns = runs?.filter(r => r.look_id === lookId) || [];
+        const maxIndex = existingRuns.reduce((max, r) => Math.max(max, r.run_index), 0);
+        
+        for (let i = 0; i < rendersPerLook; i++) {
+          runsToCreate.push({
+            batch_id: batchId,
+            look_id: lookId,
+            brand_id: selectedBrandId,
+            run_index: maxIndex + 1 + i,
+            config_snapshot: { ...config, brand_id: selectedBrandId } as Record<string, unknown>,
+          });
+        }
+      }
+
+      const { error: insertError } = await supabase
+        .from('repose_runs')
+        .insert(runsToCreate as any);
+      
+      if (insertError) throw insertError;
+
+      toast.success(`Added ${runsToCreate.length} runs to queue`);
+      setSelectedLookIds(new Set());
+      await refetchRuns();
+    } catch (error) {
+      console.error("Error adding to queue:", error);
+      toast.error("Failed to add to queue");
+    }
+  };
+
   // Start generation - now calls background edge function
   const handleStartGeneration = async () => {
     if (!batchId || selectedLooks.length === 0 || !selectedBrandId) return;
@@ -1084,9 +1129,21 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
                 </Button>
               )}
               {selectedLookIds.size > 0 && (
-                <Button variant="ghost" size="sm" onClick={clearSelection}>
-                  Clear Selection
-                </Button>
+                <>
+                  <Button variant="ghost" size="sm" onClick={clearSelection}>
+                    Clear Selection
+                  </Button>
+                  <Button 
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddToQueue}
+                    disabled={!selectedBrandId}
+                    className="gap-1.5"
+                  >
+                    <Layers className="w-4 h-4" />
+                    Add to Queue
+                  </Button>
+                </>
               )}
               {isGenerating ? (
                 <Button 
@@ -1104,7 +1161,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
                   className="gap-2"
                 >
                   <Play className="w-4 h-4" />
-                  Start Generation
+                  {queueStats.queued > 0 ? 'Start Queue' : 'Queue & Start'}
                 </Button>
               )}
             </div>
