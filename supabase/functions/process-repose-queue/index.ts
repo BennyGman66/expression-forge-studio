@@ -363,8 +363,8 @@ async function processRun(
       }
 
       for (const shotType of shotTypes) {
-        // Filter poses by slot
-        const relevantPoses = poses.filter((p: any) => {
+      // Filter poses by slot
+        let relevantPoses = poses.filter((p: any) => {
           const slot = (p.slot || "").toUpperCase();
           if (shotType === "FRONT_FULL" || shotType === "FRONT_CROPPED") {
             return slot.includes("A") || slot.includes("B");
@@ -373,6 +373,26 @@ async function processRun(
           if (shotType === "DETAIL") return slot.includes("D");
           return true;
         });
+
+        // For FRONT_CROPPED, filter by product_type to use correct crop poses
+        // Top → clay poses for upper-body crops, Trousers → clay poses for lower-body crops
+        if (shotType === "FRONT_CROPPED") {
+          const desiredPoseType = productType === "trousers" ? "trousers" : "top";
+          const matchingPoses = relevantPoses.filter((p: any) => {
+            const poseProductType = (p.product_type || "").toLowerCase();
+            if (desiredPoseType === "top") {
+              return poseProductType === "top" || poseProductType === "tops";
+            }
+            return poseProductType === desiredPoseType;
+          });
+
+          if (matchingPoses.length > 0) {
+            console.log(`[process-repose-queue] Using ${matchingPoses.length} ${desiredPoseType} poses for FRONT_CROPPED`);
+            relevantPoses = matchingPoses;
+          } else {
+            console.log(`[process-repose-queue] No ${desiredPoseType} poses found, using all ${relevantPoses.length} FRONT_CROPPED poses`);
+          }
+        }
 
         // Random selection
         const shuffled = relevantPoses.sort(() => Math.random() - 0.5);
