@@ -213,19 +213,20 @@ export function useJobAssetsWithHistory(jobId: string | null) {
     queryFn: async () => {
       if (!jobId) return [];
       
-      // Get the LATEST submission only for this job
+      // Get the LATEST submission only for this job (by version_number, then created_at as tiebreaker)
       const { data: latestSubmission, error: subError } = await supabase
         .from('job_submissions')
         .select('id')
         .eq('job_id', jobId)
         .order('version_number', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
       
       if (subError) throw subError;
       if (!latestSubmission) return [];
       
-      // Get ALL assets (including superseded) for the latest submission only
+      // Get ALL assets for the latest submission
       const { data: allAssets, error: assetsError } = await supabase
         .from('submission_assets')
         .select('*, review_status, reviewed_by_user_id, reviewed_at, superseded_by, revision_number')
@@ -237,8 +238,8 @@ export function useJobAssetsWithHistory(jobId: string | null) {
       if (!allAssets?.length) return [];
       
       // Group by label/sort_index to identify asset "slots"
-      // Current version = superseded_by is null
-      // Historical versions = superseded_by is not null (ordered by revision descending)
+      // Current version = highest revision_number with superseded_by null
+      // Historical versions = lower revision_numbers OR superseded_by is not null
       const slotMap = new Map<string, { current: SubmissionAsset | null; history: SubmissionAsset[] }>();
       
       for (const asset of allAssets) {
@@ -252,10 +253,19 @@ export function useJobAssetsWithHistory(jobId: string | null) {
         const slot = slotMap.get(slotKey)!;
         
         if (asset.superseded_by === null) {
-          // This is the current version
-          slot.current = asset as SubmissionAsset;
+          // Potential current version - take the one with highest revision_number
+          if (!slot.current || (asset.revision_number || 1) > (slot.current.revision_number || 1)) {
+            // Move previous current to history if exists
+            if (slot.current) {
+              slot.history.push(slot.current);
+            }
+            slot.current = asset as SubmissionAsset;
+          } else {
+            // Lower revision_number goes to history
+            slot.history.push(asset as SubmissionAsset);
+          }
         } else {
-          // This is a historical version
+          // Has superseded_by - definitely historical
           slot.history.push(asset as SubmissionAsset);
         }
       }
@@ -321,6 +331,7 @@ export function useUpdateAssetStatus() {
         .select('id')
         .eq('job_id', jobId)
         .order('version_number', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(1)
         .single();
       
