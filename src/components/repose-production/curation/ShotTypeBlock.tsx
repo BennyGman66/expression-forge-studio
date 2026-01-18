@@ -123,16 +123,18 @@ export function ShotTypeBlock({
 
       if (jobError) throw jobError;
 
-      // Create new runs for re-rendering
+      // Create new runs for re-rendering - INCLUDE brand_id
       const runs = [];
       for (let i = 0; i < count; i++) {
         runs.push({
           batch_id: batchId,
           look_id: lookId,
+          brand_id: batch.brand_id, // Critical: include brand_id
           run_index: Date.now() + i, // Unique index
           status: "queued",
           config_snapshot: {
             ...(batch.config_json as any),
+            brand_id: batch.brand_id,
             shotType, // Specific shot type to render
             isRerender: true,
           },

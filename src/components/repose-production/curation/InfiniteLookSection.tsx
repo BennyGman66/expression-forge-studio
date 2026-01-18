@@ -94,16 +94,18 @@ export function InfiniteLookSection({
 
       if (jobError) throw jobError;
 
-      // Create new runs for re-rendering all views
+      // Create new runs for re-rendering all views - INCLUDE brand_id
       const runs = [];
       for (let i = 0; i < count; i++) {
         runs.push({
           batch_id: batchId,
           look_id: look.lookId,
+          brand_id: batch.brand_id, // Critical: include brand_id
           run_index: Date.now() + i,
           status: "queued",
           config_snapshot: {
             ...(batch.config_json as any),
+            brand_id: batch.brand_id,
             isRerender: true,
           },
         });
