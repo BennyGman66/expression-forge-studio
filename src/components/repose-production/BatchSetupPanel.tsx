@@ -429,7 +429,7 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
   const readySelectedLooks = selectedLooks.filter(l => l.isReady);
   const estimatedNewRuns = selectedLooks.length * rendersPerLook;
 
-  // Start generation
+  // Start generation - now calls background edge function
   const handleStartGeneration = async () => {
     if (!batchId || selectedLooks.length === 0 || !selectedBrandId) return;
 
@@ -497,8 +497,25 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
       });
       pipelineJobIdRef.current = pipelineJobId;
 
-      // Start processing queue
-      await processQueue(pipelineJobId);
+      // Call background edge function instead of client-side processing
+      console.log(`[BatchSetupPanel] Starting background queue processing via edge function`);
+      const { error: invokeError } = await supabase.functions.invoke('process-repose-queue', {
+        body: { 
+          batchId, 
+          pipelineJobId,
+          model: selectedModel,
+        },
+      });
+
+      if (invokeError) {
+        console.error('Failed to start queue processor:', invokeError);
+        toast.error('Failed to start background processing');
+      } else {
+        toast.success('Generation started in background - you can close this tab');
+      }
+
+      // Generation continues in background, UI updates via realtime
+      setIsGenerating(false);
 
     } catch (error) {
       console.error('Generation error:', error);
@@ -507,275 +524,19 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     }
   };
 
-  // Process queue
-  const processQueue = async (pipelineJobId: string) => {
-    if (!batchId) return;
-
-    const concurrency = 3;
-    let processedCount = 0;
-    let failedCount = 0;
-
-    while (!shouldStopRef.current) {
-      // Get next queued runs
-      const { data: queuedRuns } = await supabase
-        .from('repose_runs')
-        .select('*')
-        .eq('batch_id', batchId)
-        .eq('status', 'queued')
-        .order('created_at', { ascending: true })
-        .limit(concurrency);
-
-      if (!queuedRuns?.length) {
-        // Check if all done
-        const { data: remaining } = await supabase
-          .from('repose_runs')
-          .select('id')
-          .eq('batch_id', batchId)
-          .in('status', ['queued', 'running']);
-
-        if (!remaining?.length) {
-          updateStatus.mutate({ batchId, status: 'COMPLETE' });
-          setStatus(pipelineJobId, 'COMPLETED');
-          toast.success('All runs complete!');
-        }
-        break;
-      }
-
-      // Process batch concurrently
-      await Promise.all(queuedRuns.map(async (run) => {
-        if (shouldStopRef.current) return;
-
-        try {
-          // Mark as running
-          await supabase
-            .from('repose_runs')
-            .update({ status: 'running', started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString() })
-            .eq('id', run.id);
-
-          // Process the run (create outputs and generate)
-          const configSnapshot = run.config_snapshot as Record<string, unknown> | null;
-          const runBrandId = (configSnapshot?.brand_id as string) || selectedBrandId;
-          const runModel = (configSnapshot?.model as string) || selectedModel;
-          await processReposeRun(run.id, run.look_id, runBrandId, runModel);
-
-          // Mark as complete
-          await supabase
-            .from('repose_runs')
-            .update({ status: 'complete', completed_at: new Date().toISOString() })
-            .eq('id', run.id);
-
-          processedCount++;
-        } catch (err) {
-          console.error(`Error processing run ${run.id}:`, err);
-          await supabase
-            .from('repose_runs')
-            .update({ status: 'failed', error_message: err instanceof Error ? err.message : 'Unknown error' })
-            .eq('id', run.id);
-          failedCount++;
-        }
-
-        // Update pipeline progress
-        await updateProgress(pipelineJobId, { doneDelta: 1, failedDelta: failedCount > 0 ? 1 : 0 });
-      }));
-
-      // Refresh
-      await refetchRuns();
-      await refetchOutputs();
-    }
-
-    if (shouldStopRef.current) {
-      setStatus(pipelineJobId, 'PAUSED');
-      toast.info('Generation paused');
-    }
+  // Stop generation - sets job to paused
+  const handleStopGeneration = async () => {
+    if (!pipelineJobIdRef.current) return;
     
-    setIsGenerating(false);
+    try {
+      await setStatus(pipelineJobIdRef.current, 'PAUSED');
+      toast.info('Generation paused');
+    } catch (error) {
+      console.error('Failed to pause:', error);
+    }
   };
 
-  // Process a single repose run - follows same pattern as useReposeQueue
-  const processReposeRun = async (runId: string, lookId: string, brandId: string, model: string) => {
-    // Get batch items for this look
-    const lookItems = batchItems?.filter(item => 
-      item.look_id === lookId || outputLookMap?.[item.source_output_id || ''] === lookId
-    ) || [];
-
-    if (!lookItems.length) {
-      console.log(`[processReposeRun] No batch items for look ${lookId}`);
-      return;
-    }
-
-    console.log(`[processReposeRun] Processing run ${runId} for look ${lookId} with ${lookItems.length} items`);
-
-    // Get look product type
-    const lookDetail = lookDetails?.find(l => l.id === lookId);
-    const productType = lookDetail?.product_type || 'top';
-
-    // Get the brand library for approved poses
-    const { data: library } = await supabase
-      .from('brand_pose_libraries')
-      .select('id')
-      .eq('brand_id', brandId)
-      .single();
-
-    if (!library) {
-      throw new Error('No pose library found for brand');
-    }
-
-    // Get usable poses with clay image URLs (approved or pending)
-    const { data: poses } = await supabase
-      .from('library_poses')
-      .select(`
-        id,
-        slot,
-        product_type,
-        clay_images (id, stored_url)
-      `)
-      .eq('library_id', library.id)
-      .in('curation_status', ['approved', 'pending'])
-      .not('clay_images', 'is', null);
-
-    if (!poses?.length) {
-      throw new Error('No usable poses found in library');
-    }
-
-    console.log(`[processReposeRun] Found ${poses.length} usable poses`);
-
-    // Create output records for each batch item
-    const outputsToCreate: Array<{
-      batch_id: string;
-      batch_item_id: string;
-      run_id: string;
-      pose_id: string | null;
-      pose_url: string | null;
-      shot_type: string;
-      attempt_index: number;
-      status: string;
-    }> = [];
-
-    const posesPerType = rendersPerLook || 2;
-
-    for (const item of lookItems) {
-      const view = item.view?.toLowerCase() || '';
-      let shotTypes: string[] = [];
-      
-      if (view.includes('front')) {
-        shotTypes = ['FRONT_FULL', 'FRONT_CROPPED'];
-      } else if (view.includes('back')) {
-        shotTypes = ['BACK_FULL'];
-      } else if (view.includes('detail')) {
-        shotTypes = ['DETAIL'];
-      }
-
-      for (const shotType of shotTypes) {
-        // Filter poses by slot mapping
-        const relevantPoses = (poses || []).filter(p => {
-          const slot = p.slot?.toUpperCase() || '';
-          if (shotType === 'FRONT_FULL' || shotType === 'FRONT_CROPPED') {
-            return slot.includes('A') || slot.includes('B');
-          }
-          if (shotType === 'BACK_FULL') return slot.includes('C');
-          if (shotType === 'DETAIL') return slot.includes('D');
-          return true;
-        });
-
-        // Take random poses up to posesPerType
-        const shuffled = relevantPoses.sort(() => Math.random() - 0.5);
-        const selectedPoses = shuffled.slice(0, posesPerType);
-
-        for (const pose of selectedPoses) {
-          const clayImage = pose.clay_images as { id: string; stored_url: string } | null;
-          if (!clayImage?.id || !clayImage?.stored_url) continue;
-
-          outputsToCreate.push({
-            batch_id: batchId!,
-            batch_item_id: item.id,
-            run_id: runId,
-            pose_id: clayImage.id, // Use clay_images.id - FK references clay_images table
-            pose_url: clayImage.stored_url,
-            shot_type: shotType,
-            attempt_index: 0,
-            status: 'queued',
-          });
-        }
-      }
-    }
-
-    if (outputsToCreate.length === 0) {
-      console.log(`[processReposeRun] No outputs to create`);
-      return;
-    }
-
-    console.log(`[processReposeRun] Creating ${outputsToCreate.length} output records`);
-
-    // Insert outputs
-    const { data: createdOutputs, error: insertError } = await supabase
-      .from('repose_outputs')
-      .insert(outputsToCreate)
-      .select('id');
-
-    if (insertError) {
-      console.error(`[processReposeRun] Failed to insert outputs:`, insertError);
-      throw insertError;
-    }
-
-    console.log(`[processReposeRun] Created ${createdOutputs?.length} outputs, calling edge function...`);
-
-    // Call generate-repose-single for each output with correct payload
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const output of createdOutputs || []) {
-      if (shouldStopRef.current) break;
-
-      try {
-        const { error } = await supabase.functions.invoke('generate-repose-single', {
-          body: { outputId: output.id, model },
-        });
-
-        if (error) {
-          console.error(`[processReposeRun] Generation failed for output ${output.id}:`, error);
-          await supabase
-            .from('repose_outputs')
-            .update({ status: 'failed' })
-            .eq('id', output.id);
-          failCount++;
-        } else {
-          successCount++;
-        }
-      } catch (err) {
-        console.error(`[processReposeRun] Error calling edge function:`, err);
-        await supabase
-          .from('repose_outputs')
-          .update({ status: 'failed' })
-          .eq('id', output.id);
-        failCount++;
-      }
-
-      // Update heartbeat
-      await supabase
-        .from('repose_runs')
-        .update({ heartbeat_at: new Date().toISOString() })
-        .eq('id', runId);
-
-      // Small delay between calls to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 300));
-    }
-
-    console.log(`[processReposeRun] Completed: ${successCount} success, ${failCount} failed`);
-
-    // Update run with output count
-    await supabase
-      .from('repose_runs')
-      .update({ output_count: successCount })
-      .eq('id', runId);
-  };
-
-  // Stop generation
-  const handleStopGeneration = () => {
-    shouldStopRef.current = true;
-    toast.info('Stopping generation...');
-  };
-
-  // Retry failed runs
+  // Retry failed runs - calls edge function
   const handleRetryFailed = async () => {
     if (!batchId) return;
 
@@ -793,24 +554,30 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     toast.success('Failed runs queued for retry');
     await refetchRuns();
 
-    // Resume processing
-    if (pipelineJobIdRef.current) {
-      await processQueue(pipelineJobIdRef.current);
-    }
+    // Start background processing via edge function
+    const pipelineJobId = await createJob({
+      type: 'REPOSE_GENERATION',
+      title: `Repose Retry: ${queueStats.failed} runs`,
+      total: queueStats.failed,
+      origin_route: `/repose-production/batch/${batchId}?tab=setup`,
+      origin_context: { batchId, model: selectedModel },
+      supports_pause: true,
+    });
+    pipelineJobIdRef.current = pipelineJobId;
+
+    await supabase.functions.invoke('process-repose-queue', {
+      body: { batchId, pipelineJobId, model: selectedModel },
+    });
   };
 
-  // Resume abandoned queue
+  // Resume abandoned queue - calls edge function
   const handleResumeQueue = async () => {
     if (!batchId) return;
-
-    shouldStopRef.current = false;
-    setIsGenerating(true);
 
     try {
       const existingQueued = queueStats.queued;
       const existingComplete = queueStats.complete + queueStats.failed;
 
-      // Create pipeline job for tracking
       const pipelineJobId = await createJob({
         type: 'REPOSE_GENERATION',
         title: `Repose Resume: ${existingQueued} remaining`,
@@ -820,25 +587,20 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
         supports_pause: true,
       });
 
-      // Pre-populate progress with already completed
       if (existingComplete > 0) {
         await updateProgress(pipelineJobId, { doneDelta: existingComplete });
       }
 
       pipelineJobIdRef.current = pipelineJobId;
-
-      // Update batch status back to RUNNING
       updateStatus.mutate({ batchId, status: 'RUNNING' });
+      toast.success(`Resuming ${existingQueued} queued runs in background`);
 
-      toast.success(`Resuming ${existingQueued} queued runs`);
-
-      // Resume processing
-      await processQueue(pipelineJobId);
-
+      await supabase.functions.invoke('process-repose-queue', {
+        body: { batchId, pipelineJobId, model: selectedModel },
+      });
     } catch (error) {
       console.error('Resume error:', error);
       toast.error(`Resume failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setIsGenerating(false);
     }
   };
 
@@ -852,13 +614,12 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
       .eq('batch_id', batchId)
       .eq('status', 'queued');
 
-    if (error) {
-      toast.error('Failed to clear queue');
-    } else {
+    if (!error) {
       toast.success('Cleared abandoned queue');
       refetchRuns();
     }
   };
+
 
   // Inspect look
   const inspectedLook = lookRows.find(l => l.lookId === inspectedLookId);
