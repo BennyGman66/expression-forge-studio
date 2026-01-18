@@ -118,10 +118,10 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
         logoImg.onerror = reject;
         logoImg.src = leapfrogLogo;
       });
-      // Logo in top-left, 80px height
-      const logoHeight = 80;
+      // Logo in top-left, 60px height
+      const logoHeight = 60;
       const logoWidth = (logoImg.width / logoImg.height) * logoHeight;
-      ctx.drawImage(logoImg, 40, 30, logoWidth, logoHeight);
+      ctx.drawImage(logoImg, 40, 25, logoWidth, logoHeight);
     } catch (e) {
       console.warn('Failed to load logo:', e);
     }
@@ -130,14 +130,14 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
     ctx.fillStyle = '#1A1A1A';
     ctx.font = 'bold 36px Inter, sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(lookCode, width - 40, 75);
+    ctx.fillText(lookCode, width - 40, 55);
 
     // Shot type label - below product code
     ctx.fillStyle = '#666666';
     ctx.font = '24px Inter, sans-serif';
-    ctx.fillText(OUTPUT_SHOT_LABELS[shotType], width - 40, 110);
+    ctx.fillText(OUTPUT_SHOT_LABELS[shotType], width - 40, 85);
 
-    // Load images
+    // Load images and get their dimensions
     const images: HTMLImageElement[] = [];
     for (const url of imageUrls) {
       try {
@@ -154,72 +154,87 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       }
     }
 
-    // Calculate image layout - 3 images centered
-    const imageSize = 400;
-    const spacing = 60;
-    const totalWidth = (imageSize * 3) + (spacing * 2);
-    const startX = (width - totalWidth) / 2;
-    const startY = 180;
+    // Layout: Images displayed at full proportion, fit within available space
+    const headerHeight = 100;
+    const footerHeight = 50;
+    const margin = 50;
+    const spacing = 40;
+    
+    // Available area for images
+    const availableHeight = height - headerHeight - footerHeight - (margin * 2);
+    const availableWidth = width - (margin * 2) - (spacing * 2); // Space for 3 images
+    const maxImageWidth = availableWidth / 3;
+    
+    // Calculate each image's display size maintaining aspect ratio
+    const imageDimensions: Array<{ width: number; height: number }> = [];
+    let maxHeight = 0;
+    
+    for (const img of images) {
+      const aspectRatio = img.width / img.height;
+      let displayWidth: number;
+      let displayHeight: number;
+      
+      // First, fit to max width
+      displayWidth = maxImageWidth;
+      displayHeight = displayWidth / aspectRatio;
+      
+      // If too tall, scale down to fit height
+      if (displayHeight > availableHeight) {
+        displayHeight = availableHeight;
+        displayWidth = displayHeight * aspectRatio;
+      }
+      
+      imageDimensions.push({ width: displayWidth, height: displayHeight });
+      maxHeight = Math.max(maxHeight, displayHeight);
+    }
+    
+    // Calculate total width and starting X to center
+    const totalImagesWidth = imageDimensions.reduce((sum, d) => sum + d.width, 0) + (spacing * (imageDimensions.length - 1));
+    const startX = (width - totalImagesWidth) / 2;
+    const startY = headerHeight + margin + (availableHeight - maxHeight) / 2;
 
     // Draw images with subtle shadow
+    let currentX = startX;
     for (let i = 0; i < images.length && i < 3; i++) {
-      const x = startX + (i * (imageSize + spacing));
-      const y = startY;
+      const img = images[i];
+      const dims = imageDimensions[i];
+      
+      // Center vertically within the row
+      const y = startY + (maxHeight - dims.height) / 2;
+      const x = currentX;
       
       // Shadow
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
-      ctx.shadowBlur = 20;
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
+      ctx.shadowBlur = 15;
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 4;
       
       // White border/frame
       ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(x - 4, y - 4, imageSize + 8, imageSize + 8);
+      ctx.fillRect(x - 4, y - 4, dims.width + 8, dims.height + 8);
       
       // Reset shadow
       ctx.shadowColor = 'transparent';
       
-      // Draw image (cover fit)
-      const img = images[i];
-      const imgAspect = img.width / img.height;
-      let drawWidth, drawHeight, drawX, drawY;
-      
-      if (imgAspect > 1) {
-        // Wider than tall
-        drawHeight = imageSize;
-        drawWidth = imageSize * imgAspect;
-        drawX = x - (drawWidth - imageSize) / 2;
-        drawY = y;
-      } else {
-        // Taller than wide
-        drawWidth = imageSize;
-        drawHeight = imageSize / imgAspect;
-        drawX = x;
-        drawY = y - (drawHeight - imageSize) / 2;
-      }
-      
-      // Clip to image area
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(x, y, imageSize, imageSize);
-      ctx.clip();
-      ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
-      ctx.restore();
+      // Draw image at full proportion (no clipping)
+      ctx.drawImage(img, x, y, dims.width, dims.height);
       
       // Rank badge
       ctx.fillStyle = '#8B5CF6';
-      const badgeSize = 36;
-      const badgeX = x + 12;
-      const badgeY = y + 12;
+      const badgeSize = 32;
+      const badgeX = x + 10;
+      const badgeY = y + 10;
       ctx.beginPath();
       ctx.arc(badgeX + badgeSize/2, badgeY + badgeSize/2, badgeSize/2, 0, Math.PI * 2);
       ctx.fill();
       
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 20px Inter, sans-serif';
+      ctx.font = 'bold 18px Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(`${i + 1}`, badgeX + badgeSize/2, badgeY + badgeSize/2 + 1);
+      
+      currentX += dims.width + spacing;
     }
 
     // Reset text alignment
@@ -229,7 +244,7 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
     // Footer
     ctx.fillStyle = '#999999';
     ctx.font = '16px Inter, sans-serif';
-    ctx.fillText(`Generated by AVA • ${new Date().toLocaleDateString()}`, 40, height - 30);
+    ctx.fillText(`Generated by AVA • ${new Date().toLocaleDateString()}`, 40, height - 25);
 
     // Convert to blob
     return new Promise((resolve) => {
