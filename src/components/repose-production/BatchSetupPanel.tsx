@@ -27,7 +27,9 @@ import {
   ChevronUp,
   Settings2,
   Sparkles,
-  Image as ImageIcon
+  Image as ImageIcon,
+  RefreshCw,
+  AlertTriangle
 } from "lucide-react";
 import { useReposeBatch, useReposeBatchItems, useReposeOutputs, useUpdateReposeBatchConfig, useUpdateReposeBatchStatus } from "@/hooks/useReposeBatches";
 import { useUpdateLookProductType } from "@/hooks/useProductionProjects";
@@ -415,6 +417,30 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
   const totalRuns = queueStats.queued + queueStats.running + queueStats.complete + queueStats.failed;
   const progressPercent = totalRuns > 0 ? ((queueStats.complete + queueStats.failed) / totalRuns) * 100 : 0;
 
+  // Last activity tracking
+  const lastActivityAt = useMemo(() => {
+    if (!runs?.length) return null;
+    const timestamps = runs
+      .filter(r => r.heartbeat_at || r.completed_at)
+      .map(r => new Date(r.heartbeat_at || r.completed_at || r.started_at || r.created_at).getTime());
+    if (timestamps.length === 0) return null;
+    return new Date(Math.max(...timestamps));
+  }, [runs]);
+
+  // Check if queue might be stalled (no activity for > 30 seconds with queued/running items)
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const isQueueStalled = useMemo(() => {
+    if (!lastActivityAt) return false;
+    if (queueStats.queued === 0 && queueStats.running === 0) return false;
+    const secondsSinceActivity = (now - lastActivityAt.getTime()) / 1000;
+    return secondsSinceActivity > 60; // Stalled if no activity for > 60 seconds
+  }, [lastActivityAt, queueStats.queued, queueStats.running, now]);
+
   // Detect abandoned queued runs (queued but nothing running and not actively generating)
   const hasAbandonedQueue = useMemo(() => {
     if (!runs || !batchId) return false;
@@ -768,37 +794,70 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
         )}
 
         {/* Live Progress (when running) */}
-        {(queueStats.running > 0 || (queueStats.queued > 0 && isGenerating)) && (
-          <Card className="border-primary/30 bg-primary/5">
+        {(queueStats.running > 0 || queueStats.queued > 0) && (
+          <Card className={cn(
+            "border-primary/30 bg-primary/5",
+            isQueueStalled && "border-amber-500/30 bg-amber-500/5"
+          )}>
             <CardContent className="py-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-primary animate-pulse" />
-                  <span className="font-medium">Generating</span>
+                  {isQueueStalled ? (
+                    <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-primary animate-pulse" />
+                  )}
+                  <span className="font-medium">
+                    {isQueueStalled ? 'Queue may be stalled' : 'Generating'}
+                  </span>
                 </div>
-                <span className="text-sm text-muted-foreground">
-                  {queueStats.complete + queueStats.failed} / {totalRuns} runs
-                </span>
+                <div className="flex items-center gap-3">
+                  {lastActivityAt && (
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      Last activity: {formatDistanceToNow(lastActivityAt, { addSuffix: true })}
+                    </span>
+                  )}
+                  <span className="text-sm text-muted-foreground">
+                    {queueStats.complete + queueStats.failed} / {totalRuns} runs
+                  </span>
+                </div>
               </div>
               <Progress value={progressPercent} className="h-2" />
-              <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                  {queueStats.running} running
-                </span>
-                <span className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-muted-foreground" />
-                  {queueStats.queued} queued
-                </span>
-                <span className="flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3 text-green-500" />
-                  {queueStats.complete} complete
-                </span>
-                {queueStats.failed > 0 && (
-                  <span className="flex items-center gap-1 text-red-500">
-                    <XCircle className="w-3 h-3" />
-                    {queueStats.failed} failed
+              <div className="flex justify-between mt-2">
+                <div className="flex gap-4 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <div className={cn(
+                      "w-2 h-2 rounded-full bg-blue-500",
+                      queueStats.running > 0 && "animate-pulse"
+                    )} />
+                    {queueStats.running} running
                   </span>
+                  <span className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-muted-foreground" />
+                    {queueStats.queued} queued
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-green-500" />
+                    {queueStats.complete} complete
+                  </span>
+                  {queueStats.failed > 0 && (
+                    <span className="flex items-center gap-1 text-red-500">
+                      <XCircle className="w-3 h-3" />
+                      {queueStats.failed} failed
+                    </span>
+                  )}
+                </div>
+                {isQueueStalled && (
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    onClick={handleResumeQueue}
+                    className="h-6 text-xs gap-1"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Resume Queue
+                  </Button>
                 )}
               </div>
             </CardContent>
