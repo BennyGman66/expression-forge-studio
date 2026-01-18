@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Download, Send, AlertCircle, CheckCircle2, FolderTree, Package } from "lucide-react";
+import { Download, Send, AlertCircle, CheckCircle2, FolderTree, Package, FileText } from "lucide-react";
 import { useReposeBatch, useReposeBatchItems } from "@/hooks/useReposeBatches";
 import { useReposeSelection } from "@/hooks/useReposeSelection";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
@@ -12,6 +12,7 @@ import { ALL_OUTPUT_SHOT_TYPES, OutputShotType, slotToShotType, OUTPUT_SHOT_LABE
 import { SHOT_TYPE_FOLDER_NAMES, MAX_FAVORITES_PER_VIEW } from "@/types/repose";
 import type { ReposeOutput } from "@/types/repose";
 import JSZip from "jszip";
+import { jsPDF } from "jspdf";
 
 interface ExportPanelProps {
   batchId: string | undefined;
@@ -161,6 +162,117 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
     }
   };
 
+  // Handle PDF export
+  const handleExportPdf = async () => {
+    if (exportStats.totalImages === 0) {
+      toast.error("No selections to export");
+      return;
+    }
+
+    setIsExporting(true);
+    setExportProgress(0);
+
+    try {
+      const pdf = new jsPDF({ 
+        orientation: 'landscape', 
+        unit: 'mm', 
+        format: 'a4' 
+      });
+      
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 15;
+      const imageSize = 55;
+      const spacing = 8;
+      
+      let processed = 0;
+      const totalToProcess = Object.keys(exportStructure).length;
+
+      for (const [lookIndex, [lookCode, views]] of Object.entries(Object.entries(exportStructure))) {
+        if (parseInt(lookIndex) > 0) {
+          pdf.addPage();
+        }
+        
+        // Look Header
+        pdf.setFontSize(18);
+        pdf.setFont("helvetica", "bold");
+        pdf.text(`Look: ${lookCode}`, margin, margin + 5);
+        
+        pdf.setFontSize(10);
+        pdf.setFont("helvetica", "normal");
+        pdf.setTextColor(128, 128, 128);
+        pdf.text(`Batch: ${batch?.id?.slice(0, 8) || 'N/A'}`, margin, margin + 12);
+        pdf.setTextColor(0, 0, 0);
+        
+        let yOffset = margin + 25;
+        
+        for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
+          const items = views[shotType];
+          if (!items || items.length === 0) continue;
+          
+          // View label
+          pdf.setFontSize(11);
+          pdf.setFont("helvetica", "bold");
+          pdf.text(OUTPUT_SHOT_LABELS[shotType], margin, yOffset);
+          yOffset += 5;
+          
+          // Images row
+          for (const [imgIdx, item] of items.entries()) {
+            try {
+              const response = await fetch(item.url);
+              if (!response.ok) continue;
+              
+              const blob = await response.blob();
+              const base64 = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.readAsDataURL(blob);
+              });
+              
+              const xPos = margin + (imgIdx * (imageSize + spacing));
+              
+              // Add image
+              pdf.addImage(base64, 'PNG', xPos, yOffset, imageSize, imageSize);
+              
+              // Add rank badge
+              pdf.setFillColor(139, 92, 246); // Primary purple
+              pdf.roundedRect(xPos + 2, yOffset + 2, 12, 6, 1, 1, 'F');
+              pdf.setFontSize(8);
+              pdf.setFont("helvetica", "bold");
+              pdf.setTextColor(255, 255, 255);
+              pdf.text(`#${item.rank}`, xPos + 4, yOffset + 6);
+              pdf.setTextColor(0, 0, 0);
+              
+            } catch (error) {
+              console.error(`Failed to add image to PDF:`, error);
+            }
+          }
+          
+          yOffset += imageSize + 10;
+          
+          // Check if we need a new page
+          if (yOffset > pageHeight - margin - imageSize) {
+            pdf.addPage();
+            yOffset = margin + 10;
+          }
+        }
+        
+        processed++;
+        setExportProgress((processed / totalToProcess) * 100);
+      }
+      
+      pdf.save(`repose_selections_${batch?.id?.slice(0, 8) || 'export'}.pdf`);
+      toast.success(`PDF exported with ${exportStats.totalImages} images`);
+      
+    } catch (error) {
+      console.error("PDF export failed:", error);
+      toast.error(`PDF export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsExporting(false);
+      setExportProgress(0);
+    }
+  };
+
   const handleSendToClientReview = () => {
     toast.info("Send to Client Review functionality coming soon");
   };
@@ -244,7 +356,17 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
               size="lg"
             >
               <Download className="w-4 h-4" />
-              {isExporting ? 'Exporting...' : `Download ZIP (${exportStats.totalImages} images)`}
+              {isExporting ? 'Exporting...' : `Download ZIP`}
+            </Button>
+            <Button 
+              onClick={handleExportPdf}
+              disabled={!hasSelections || isExporting}
+              className="flex-1 gap-2"
+              size="lg"
+              variant="secondary"
+            >
+              <FileText className="w-4 h-4" />
+              Download PDF
             </Button>
             <Button 
               onClick={handleSendToClientReview}
