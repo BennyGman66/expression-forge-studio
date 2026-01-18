@@ -102,6 +102,21 @@ Deno.serve(async (req) => {
       console.log(`[process-repose-queue] Reset ${noHeartbeatRuns.length} runs without heartbeat`);
     }
 
+    // CRITICAL: Reset stale OUTPUTS (stuck in "running" for > 2 minutes)
+    // This handles outputs that started but never completed due to crashes
+    const staleOutputThreshold = new Date(Date.now() - STALE_RUN_THRESHOLD_MS).toISOString();
+    const { data: staleOutputs } = await supabase
+      .from("repose_outputs")
+      .update({ status: "queued" })
+      .eq("batch_id", batchId)
+      .eq("status", "running")
+      .lt("created_at", staleOutputThreshold)
+      .select("id");
+
+    if (staleOutputs?.length) {
+      console.log(`[process-repose-queue] Reset ${staleOutputs.length} stale running outputs`);
+    }
+
     // Track processed runs for continuation
     const processedRunIds: Set<string> = resumeContext?.processedRunIds
       ? new Set(resumeContext.processedRunIds)
@@ -140,21 +155,23 @@ async function processQueueBackground(
 ) {
   let lastLogTime = Date.now();
 
-  // Helper to log stats
+  // Helper to log stats - now uses OUTPUTS for accurate progress
   async function logHeartbeat() {
-    const { data: stats } = await supabase
-      .from("repose_runs")
+    const { data: outputStats } = await supabase
+      .from("repose_outputs")
       .select("status")
       .eq("batch_id", batchId);
 
-    const running = stats?.filter((r: any) => r.status === "running").length || 0;
-    const queued = stats?.filter((r: any) => r.status === "queued").length || 0;
-    const complete = stats?.filter((r: any) => r.status === "complete").length || 0;
-    const failed = stats?.filter((r: any) => r.status === "failed").length || 0;
+    const running = outputStats?.filter((r: any) => r.status === "running").length || 0;
+    const queued = outputStats?.filter((r: any) => r.status === "queued").length || 0;
+    const complete = outputStats?.filter((r: any) => r.status === "complete").length || 0;
+    const failed = outputStats?.filter((r: any) => r.status === "failed").length || 0;
     const elapsed = Math.round((Date.now() - startTime) / 1000);
 
-    console.log(`[process-repose-queue] Heartbeat: ${complete} complete, ${running} running, ${queued} queued, ${failed} failed, elapsed ${elapsed}s`);
+    console.log(`[process-repose-queue] Heartbeat (outputs): ${complete} complete, ${running} running, ${queued} queued, ${failed} failed, elapsed ${elapsed}s`);
     lastLogTime = Date.now();
+    
+    return { complete, running, queued, failed, total: outputStats?.length || 0 };
   }
 
   // Helper to continue processing in a new worker
@@ -230,16 +247,16 @@ async function processQueueBackground(
         queuedRuns.map((run: any) => processRun(supabase, run, batchId, model, pipelineJobId, processedRunIds))
       );
 
-      // Update pipeline job progress
+      // Update pipeline job progress - track OUTPUTS not runs
       if (pipelineJobId) {
-        const { data: stats } = await supabase
-          .from("repose_runs")
+        const { data: outputStats } = await supabase
+          .from("repose_outputs")
           .select("status")
           .eq("batch_id", batchId);
 
-        const complete = stats?.filter((r: any) => r.status === "complete").length || 0;
-        const failed = stats?.filter((r: any) => r.status === "failed").length || 0;
-        const total = stats?.length || 0;
+        const complete = outputStats?.filter((r: any) => r.status === "complete").length || 0;
+        const failed = outputStats?.filter((r: any) => r.status === "failed").length || 0;
+        const total = outputStats?.length || 0;
 
         await supabase
           .from("pipeline_jobs")
@@ -247,40 +264,68 @@ async function processQueueBackground(
             progress_done: complete, 
             progress_failed: failed,
             progress_total: total,
+            progress_message: `Processing outputs: ${complete}/${total}`,
           })
           .eq("id", pipelineJobId);
       }
     }
 
-    // Final log
-    await logHeartbeat();
+    // After all runs processed, check for orphaned queued outputs and process them
+    console.log(`[process-repose-queue] All runs processed, checking for orphaned outputs...`);
+    await processOrphanedOutputs(supabase, batchId, model, pipelineJobId, startTime);
 
-    // Finalize job
+    // Final log
+    const finalStats = await logHeartbeat();
+
+    // Finalize job - use OUTPUT stats for accurate status
     if (pipelineJobId) {
-      const { data: stats } = await supabase
-        .from("repose_runs")
+      const { data: outputStats } = await supabase
+        .from("repose_outputs")
         .select("status")
         .eq("batch_id", batchId);
 
-      const failed = stats?.filter((r: any) => r.status === "failed").length || 0;
-      const finalStatus = failed > 0 ? "FAILED" : "COMPLETED";
+      const complete = outputStats?.filter((r: any) => r.status === "complete").length || 0;
+      const failed = outputStats?.filter((r: any) => r.status === "failed").length || 0;
+      const queued = outputStats?.filter((r: any) => r.status === "queued").length || 0;
+      const running = outputStats?.filter((r: any) => r.status === "running").length || 0;
+      const total = outputStats?.length || 0;
+
+      // Only mark complete if no more queued/running outputs
+      const finalStatus = (queued > 0 || running > 0) ? "RUNNING" : (failed > 0 && complete === 0) ? "FAILED" : "COMPLETED";
 
       await supabase
         .from("pipeline_jobs")
         .update({ 
           status: finalStatus, 
-          completed_at: new Date().toISOString() 
+          completed_at: finalStatus !== "RUNNING" ? new Date().toISOString() : null,
+          progress_done: complete,
+          progress_failed: failed,
+          progress_total: total,
+          progress_message: finalStatus === "COMPLETED" 
+            ? `Completed: ${complete}/${total}` 
+            : finalStatus === "FAILED"
+            ? `Failed: ${failed}/${total}`
+            : `Still processing: ${queued + running} remaining`
         })
         .eq("id", pipelineJobId);
 
-      console.log(`[process-repose-queue] Job finished with status ${finalStatus}`);
+      console.log(`[process-repose-queue] Job finished with status ${finalStatus} (${complete} complete, ${failed} failed, ${queued + running} pending)`);
     }
 
-    // Update batch status
-    await supabase
-      .from("repose_batches")
-      .update({ status: "COMPLETE" })
-      .eq("id", batchId);
+    // Update batch status only if truly complete
+    const { data: remainingOutputs } = await supabase
+      .from("repose_outputs")
+      .select("id")
+      .eq("batch_id", batchId)
+      .in("status", ["queued", "running"])
+      .limit(1);
+
+    if (!remainingOutputs?.length) {
+      await supabase
+        .from("repose_batches")
+        .update({ status: "COMPLETE" })
+        .eq("id", batchId);
+    }
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -611,4 +656,138 @@ async function markJobFailed(supabase: any, jobId: string, message: string) {
       progress_message: message,
     })
     .eq("id", jobId);
+}
+
+// Process orphaned outputs that are still queued/running after all runs completed
+async function processOrphanedOutputs(
+  supabase: any,
+  batchId: string,
+  model: string,
+  pipelineJobId: string | null,
+  startTime: number
+) {
+  console.log(`[process-repose-queue] Checking for orphaned outputs...`);
+
+  // Get all queued outputs for this batch
+  const { data: queuedOutputs, error } = await supabase
+    .from("repose_outputs")
+    .select("id")
+    .eq("batch_id", batchId)
+    .eq("status", "queued")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error(`[process-repose-queue] Error fetching orphaned outputs:`, error);
+    return;
+  }
+
+  if (!queuedOutputs?.length) {
+    console.log(`[process-repose-queue] No orphaned outputs to process`);
+    return;
+  }
+
+  console.log(`[process-repose-queue] Found ${queuedOutputs.length} orphaned queued outputs, processing...`);
+
+  let successCount = 0;
+  let failCount = 0;
+
+  // Process in batches of OUTPUT_CONCURRENCY
+  for (let i = 0; i < queuedOutputs.length; i += OUTPUT_CONCURRENCY) {
+    // Check if we're approaching timeout - if so, we'll continue in a new worker
+    if (Date.now() - startTime > MAX_PROCESSING_TIME_MS) {
+      console.log(`[process-repose-queue] Approaching timeout during orphan processing, will continue in new worker`);
+      return; // The caller will handle continuation
+    }
+
+    const batch = queuedOutputs.slice(i, i + OUTPUT_CONCURRENCY);
+    
+    console.log(`[process-repose-queue] Orphan batch ${Math.floor(i / OUTPUT_CONCURRENCY) + 1}: processing ${batch.length} outputs`);
+    
+    const results = await Promise.allSettled(
+      batch.map(async (output: { id: string }) => {
+        let lastError: Error | null = null;
+        
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            if (attempt > 0) {
+              console.log(`[process-repose-queue] Retry ${attempt} for orphan output ${output.id}`);
+              await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+            }
+            
+            const { error } = await supabase.functions.invoke("generate-repose-single", {
+              body: { outputId: output.id, model },
+            });
+            
+            if (error) {
+              lastError = error;
+              console.error(`[process-repose-queue] Orphan generation attempt ${attempt + 1} failed for ${output.id}:`, error.message || error);
+              
+              // If it's a 503/504, retry
+              if (error.message?.includes('503') || error.message?.includes('504') || error.message?.includes('Service Unavailable') || error.message?.includes('Gateway Timeout')) {
+                continue;
+              }
+              // Other errors, don't retry
+              break;
+            }
+            return { success: true };
+          } catch (err) {
+            lastError = err as Error;
+            console.error(`[process-repose-queue] Error orphan attempt ${attempt + 1} for ${output.id}:`, (err as Error).message);
+            
+            // Retry on network errors
+            if (attempt < MAX_RETRIES) {
+              continue;
+            }
+          }
+        }
+        
+        // All retries exhausted
+        console.error(`[process-repose-queue] All retries failed for orphan ${output.id}`);
+        await supabase
+          .from("repose_outputs")
+          .update({ status: "failed", error_message: lastError?.message || "Unknown error after retries" })
+          .eq("id", output.id);
+        return { success: false };
+      })
+    );
+
+    // Count results
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value.success) {
+        successCount++;
+      } else {
+        failCount++;
+      }
+    }
+
+    // Update pipeline progress
+    if (pipelineJobId) {
+      const { data: outputStats } = await supabase
+        .from("repose_outputs")
+        .select("status")
+        .eq("batch_id", batchId);
+
+      const complete = outputStats?.filter((r: any) => r.status === "complete").length || 0;
+      const failed = outputStats?.filter((r: any) => r.status === "failed").length || 0;
+      const total = outputStats?.length || 0;
+
+      await supabase
+        .from("pipeline_jobs")
+        .update({ 
+          progress_done: complete, 
+          progress_failed: failed,
+          progress_total: total,
+          progress_message: `Processing orphaned outputs: ${complete}/${total}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", pipelineJobId);
+    }
+
+    // Delay between batches
+    if (i + OUTPUT_CONCURRENCY < queuedOutputs.length) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+
+  console.log(`[process-repose-queue] Orphaned outputs complete: ${successCount} success, ${failCount} failed`);
 }
