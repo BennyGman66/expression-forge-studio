@@ -232,6 +232,98 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
     }
   };
 
+  const [repairingInputs, setRepairingInputs] = useState(false);
+
+  const handleRepairMissingInputs = async () => {
+    if (!jobId || !job?.look_id) return;
+    
+    setRepairingInputs(true);
+    try {
+      // Get all source images for the look
+      const { data: sourceImages } = await supabase
+        .from('look_source_images')
+        .select('id, view, source_url, original_source_url')
+        .eq('look_id', job.look_id);
+      
+      if (!sourceImages || sourceImages.length === 0) {
+        toast.info('No source images found for this look');
+        return;
+      }
+      
+      // Get existing job inputs to find what views are already attached
+      const existingViews = new Set(
+        inputs?.map(i => {
+          const meta = i.artifact?.metadata as { view?: string } | undefined;
+          return meta?.view;
+        }).filter(Boolean)
+      );
+      
+      let addedCount = 0;
+      
+      for (const img of sourceImages) {
+        // Normalize view
+        const normalized = img.view.toLowerCase();
+        let view = 'full_front';
+        let artifactType: 'LOOK_ORIGINAL_FRONT' | 'LOOK_ORIGINAL_BACK' | 'LOOK_ORIGINAL_SIDE' = 'LOOK_ORIGINAL_FRONT';
+        let label = 'Original Full front';
+        
+        if (normalized.includes('back')) {
+          view = 'back';
+          artifactType = 'LOOK_ORIGINAL_BACK';
+          label = 'Original Full back';
+        } else if (normalized.includes('detail') || normalized === 'side') {
+          view = 'detail';
+          artifactType = 'LOOK_ORIGINAL_SIDE';
+          label = 'Original Detail';
+        } else if (normalized.includes('front') || normalized === 'front') {
+          view = 'full_front';
+          artifactType = 'LOOK_ORIGINAL_FRONT';
+          label = 'Original Full front';
+        }
+        
+        // Skip if this view already exists
+        if (existingViews.has(view)) {
+          continue;
+        }
+        
+        // Create artifact
+        const { data: artifact, error } = await supabase
+          .from('unified_artifacts')
+          .insert({
+            project_id: job.project_id,
+            look_id: job.look_id,
+            type: artifactType,
+            file_url: img.original_source_url || img.source_url,
+            metadata: { view, source_image_id: img.id },
+          })
+          .select()
+          .single();
+        
+        if (!error && artifact) {
+          await supabase.from('job_inputs').insert({
+            job_id: jobId,
+            artifact_id: artifact.id,
+            label,
+          });
+          addedCount++;
+          existingViews.add(view); // Prevent duplicates within same run
+        }
+      }
+      
+      if (addedCount > 0) {
+        toast.success(`Added ${addedCount} missing input(s)`);
+        // The query will auto-refetch
+      } else {
+        toast.info('No missing inputs found');
+      }
+    } catch (err) {
+      console.error('Failed to repair inputs:', err);
+      toast.error('Failed to repair inputs');
+    } finally {
+      setRepairingInputs(false);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -388,6 +480,20 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">No inputs attached</p>
+                )}
+                
+                {/* Repair Missing Inputs Button */}
+                {job?.look_id && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRepairMissingInputs}
+                    disabled={repairingInputs}
+                    className="mt-3 w-full gap-2"
+                  >
+                    <Plus className="h-3 w-3" />
+                    {repairingInputs ? 'Repairing...' : 'Repair Missing Inputs'}
+                  </Button>
                 )}
               </div>
 
