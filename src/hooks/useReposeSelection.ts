@@ -149,14 +149,19 @@ export function useReposeSelection(batchId: string | undefined) {
       // Generate look code - prefer look_code from talent_looks, fallback to extracting from source_url or ID
       let lookCode = item.look_code;
       if (!lookCode && item.source_url) {
-        // Try to extract SKU from filename (e.g., "WW0WW47846C1G_Front.png")
-        const urlMatch = item.source_url.match(/([A-Z0-9]{8,})/i);
-        if (urlMatch) {
-          lookCode = urlMatch[1];
+        // Extract filename from URL first (after the last slash)
+        const urlParts = item.source_url.split('/');
+        const filename = urlParts[urlParts.length - 1] || '';
+        // Decode URL encoding and try to extract SKU pattern (e.g., "WW0WW47846C1G", "XM0XM07731FAP")
+        const decodedFilename = decodeURIComponent(filename);
+        // Look for typical SKU patterns: 2-3 letters + numbers + optional letters (at least 10 chars)
+        const skuMatch = decodedFilename.match(/([A-Z]{2,3}[0-9A-Z]{6,}[A-Z0-9]*)/i);
+        if (skuMatch) {
+          lookCode = skuMatch[1].toUpperCase();
         }
       }
       if (!lookCode) {
-        lookCode = lookId.slice(0, 8);
+        lookCode = `Look ${lookId.slice(0, 6)}`;
       }
       
       if (!lookMap.has(lookId)) {
