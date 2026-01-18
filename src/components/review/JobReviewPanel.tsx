@@ -126,6 +126,15 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     return result;
   }, [assets, threads]);
 
+  // Calculate superseded (old version) asset IDs to filter out their comments
+  const supersededAssetIds = useMemo(() => {
+    const ids: string[] = [];
+    assetSlots.forEach(slot => {
+      slot.history.forEach(hist => ids.push(hist.id));
+    });
+    return ids;
+  }, [assetSlots]);
+
   // Find current issue index
   const currentIssueIndex = useMemo(() => {
     if (!selectedAnnotationId) return -1;
@@ -822,6 +831,7 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
               isDrawing={isDrawing}
               onToggleDrawing={() => setIsDrawing(!isDrawing)}
               pendingAnnotationId={pendingAnnotationId}
+              supersededAssetIds={supersededAssetIds}
             />
           </div>
         </div>
