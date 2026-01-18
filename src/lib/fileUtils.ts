@@ -12,7 +12,15 @@ export function fixBrokenStorageUrl(url: string | null | undefined): string {
   if (lastSlash === -1) return url;
   
   const basePath = url.slice(0, lastSlash + 1);
-  const filename = url.slice(lastSlash + 1);
+  let filename = url.slice(lastSlash + 1);
+  
+  // Fix double-encoded characters that can occur from multiple encoding passes
+  // %2520 → %20 (double-encoded space)
+  filename = filename.replace(/%2520/g, '%20');
+  // %252F → %2F (double-encoded slash)
+  filename = filename.replace(/%252F/g, '%2F');
+  // %2523 → %23 (double-encoded hash)
+  filename = filename.replace(/%2523/g, '%23');
   
   // Encode any unencoded # characters in the filename
   // (already-encoded %23 won't be affected)

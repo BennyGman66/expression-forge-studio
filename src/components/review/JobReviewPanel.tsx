@@ -81,7 +81,9 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [uploadingAdmin, setUploadingAdmin] = useState(false);
+  const [replacingAsset, setReplacingAsset] = useState(false);
   const adminFileInputRef = useRef<HTMLInputElement>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: job, isLoading: jobLoading } = useJob(jobId);
   const { data: submissions = [], refetch: refetchSubmissions } = useJobSubmissions(jobId);
@@ -421,6 +423,67 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
     }
   };
 
+  // Replace an existing asset with a new version (for per-asset versioning)
+  const handleReplaceAsset = async (file: File, existingAsset: SubmissionAsset) => {
+    if (!file || !existingAsset) return;
+    
+    setReplacingAsset(true);
+    try {
+      // 1. Upload the file
+      const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const fileName = `admin-uploads/${jobId}/${Date.now()}-${safeName}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('images')
+        .upload(fileName, file);
+      
+      if (uploadError) throw uploadError;
+      
+      const { data: { publicUrl } } = supabase.storage
+        .from('images')
+        .getPublicUrl(fileName);
+      
+      // 2. Create new asset with incremented revision
+      const newRevision = (existingAsset.revision_number || 1) + 1;
+      const { data: newAsset, error: insertError } = await supabase
+        .from('submission_assets')
+        .insert({
+          submission_id: existingAsset.submission_id,
+          file_url: publicUrl,
+          label: existingAsset.label,  // Same label = same slot
+          sort_index: existingAsset.sort_index,  // Same position
+          revision_number: newRevision,
+          freelancer_identity_id: job?.freelancer_identity_id || null,
+          review_status: null,  // Reset status for new version
+        })
+        .select()
+        .single();
+      
+      if (insertError) throw insertError;
+      
+      // 3. Mark old asset as superseded
+      const { error: updateError } = await supabase
+        .from('submission_assets')
+        .update({ superseded_by: newAsset.id })
+        .eq('id', existingAsset.id);
+      
+      if (updateError) throw updateError;
+      
+      // 4. Refresh data - the new asset will be auto-selected on next render
+      await queryClient.invalidateQueries({ queryKey: ['job-assets-with-history', jobId] });
+      
+      toast.success(`Asset replaced - now V${newRevision}`);
+    } catch (err: any) {
+      console.error('Replace asset error:', err);
+      toast.error(err.message || 'Replace failed');
+    } finally {
+      setReplacingAsset(false);
+      if (replaceFileInputRef.current) {
+        replaceFileInputRef.current.value = '';
+      }
+    }
+  };
+
   // Detect orphaned outputs (job_outputs exist but no submissions)
   const hasOrphanedOutputs = submissions.length === 0 && jobOutputs.length > 0;
 
@@ -603,6 +666,29 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                   <Check className="h-4 w-4" />
                   Approve
                 </Button>
+                
+                {/* Replace button for assets needing changes */}
+                {selectedAsset.review_status === 'CHANGES_REQUESTED' && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        disabled={replacingAsset}
+                        onClick={() => replaceFileInputRef.current?.click()}
+                      >
+                        {replacingAsset ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        Replace
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Upload a new version of this asset</TooltipContent>
+                  </Tooltip>
+                )}
               </>
             )}
             
@@ -650,6 +736,18 @@ export function JobReviewPanel({ jobId, onClose }: JobReviewPanelProps) {
                   multiple
                   className="hidden"
                   onChange={handleAdminUpload}
+                />
+                {/* Hidden file input for asset replacement */}
+                <input
+                  ref={replaceFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.[0] && selectedAsset) {
+                      handleReplaceAsset(e.target.files[0], selectedAsset);
+                    }
+                  }}
                 />
               </>
             )}
