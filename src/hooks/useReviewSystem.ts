@@ -312,11 +312,24 @@ export function useUpdateAssetStatus() {
       
       if (assetError) throw assetError;
       
-      // Fetch only CURRENT assets (not superseded) to determine aggregate status
+      // Get the LATEST submission for this job (may differ from passed submissionId)
+      const { data: latestSubmission, error: latestError } = await supabase
+        .from('job_submissions')
+        .select('id')
+        .eq('job_id', jobId)
+        .order('version_number', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (latestError) throw latestError;
+      
+      const latestSubmissionId = latestSubmission.id;
+      
+      // Fetch only CURRENT assets (not superseded) from the LATEST submission
       const { data: allAssets, error: fetchError } = await supabase
         .from('submission_assets')
         .select('review_status')
-        .eq('submission_id', submissionId)
+        .eq('submission_id', latestSubmissionId)
         .is('superseded_by', null);
       
       if (fetchError) throw fetchError;
@@ -337,11 +350,11 @@ export function useUpdateAssetStatus() {
         jobStatus = 'APPROVED';
       }
       
-      // Update submission status
+      // Update the latest submission status
       await supabase
         .from('job_submissions')
         .update({ status: submissionStatus })
-        .eq('id', submissionId);
+        .eq('id', latestSubmissionId);
       
       // Update job status
       await supabase
