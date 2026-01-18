@@ -211,9 +211,9 @@ export function ReviewCurationPanel({ batchId, onExportReady }: ReviewCurationPa
                         />
                       )}
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      Select top 3 favorites for each view. Double-click to open lightbox.
-                    </p>
+                  <p className="text-sm text-muted-foreground">
+                    Select top 3 favorites for each view. Click to view larger.
+                  </p>
                   </div>
                 </div>
 
