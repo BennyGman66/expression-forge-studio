@@ -108,7 +108,7 @@ export function CurationLightbox({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-7xl h-[95vh] p-0 bg-black/98 border-none z-[100]">
+      <DialogContent className="max-w-7xl h-[95vh] p-0 bg-black/98 border-none z-[100] flex flex-col !gap-0 [&>button]:hidden">
         <VisuallyHidden>
           <DialogTitle>Image Viewer</DialogTitle>
         </VisuallyHidden>
@@ -117,7 +117,7 @@ export function CurationLightbox({
             No images to display
           </div>
         ) : (
-        <div className="relative h-full flex flex-col">
+        <div className="flex-1 flex flex-col min-h-0">
           {/* Header */}
           <div className="flex items-center justify-between p-4 text-white flex-shrink-0">
             <div className="flex items-center gap-3">
@@ -146,7 +146,7 @@ export function CurationLightbox({
           </div>
 
           {/* Main Image Area */}
-          <div className="flex-1 flex items-center justify-center relative px-16 min-h-0 overflow-hidden">
+          <div className="flex-1 flex items-center justify-center relative px-16 overflow-hidden" style={{ minHeight: 0 }}>
             {/* Previous Button */}
             <Button
               variant="ghost"
