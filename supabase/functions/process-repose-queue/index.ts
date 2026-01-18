@@ -363,15 +363,22 @@ async function processRun(
       }
 
       for (const shotType of shotTypes) {
-      // Filter poses by slot
+        // Filter poses by slot - each shot type uses its dedicated slot
         let relevantPoses = poses.filter((p: any) => {
           const slot = (p.slot || "").toUpperCase();
-          if (shotType === "FRONT_FULL" || shotType === "FRONT_CROPPED") {
-            return slot.includes("A") || slot.includes("B");
+          // Slot A = FRONT_FULL only (full-front clay poses)
+          if (shotType === "FRONT_FULL") {
+            return slot.includes("A");
           }
+          // Slot B = FRONT_CROPPED only (cropped-front clay poses, filtered by product_type below)
+          if (shotType === "FRONT_CROPPED") {
+            return slot.includes("B");
+          }
+          // Slot C = BACK_FULL
           if (shotType === "BACK_FULL") return slot.includes("C");
+          // Slot D = DETAIL
           if (shotType === "DETAIL") return slot.includes("D");
-          return true;
+          return false;
         });
 
         // For FRONT_CROPPED, filter by product_type to use correct crop poses
