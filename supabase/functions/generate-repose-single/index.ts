@@ -15,7 +15,7 @@ serve(async (req) => {
 
   try {
     const { outputId, model } = await req.json();
-    const selectedModel = model || 'google/gemini-2.5-flash-image-preview';
+    const selectedModel = model || 'google/gemini-3-pro-image-preview';
     if (!outputId) {
       return new Response(
         JSON.stringify({ error: 'Missing outputId' }),
@@ -72,48 +72,27 @@ serve(async (req) => {
     console.log(`[generate-repose-single] Pose: ${poseUrl}`);
     console.log(`[generate-repose-single] Shot Type: ${shotType}`);
 
-    // Shot-type-specific framing instructions
-    const shotTypeInstructions: Record<string, string> = {
-      FRONT_FULL: 'Generate a full-body photograph from head to feet. The entire outfit should be visible.',
-      FRONT_CROPPED: 'Generate a CROPPED upper-body photograph showing ONLY waist up. Crop the image below the waist - do NOT show full legs.',
-      BACK_FULL: 'Generate a full-body back view photograph from head to feet. Show the back of the outfit completely.',
-      DETAIL: 'Generate a close-up detail shot focusing on a specific area of the outfit.',
-    };
-
-    const framingInstruction = shotTypeInstructions[shotType] || shotTypeInstructions.FRONT_FULL;
-
     // Generate the reposed image using AI
-    const prompt = `You are a fashion photography expert specializing in pose transfer for e-commerce.
+    const prompt = `Use the provided greyscale reference image as a strict pose, camera, and framing template.
 
-TASK: ${framingInstruction}
+Repose the subject in the input photo to exactly match the reference in:
+- body pose and limb positioning
+- head tilt and shoulder angle
+- weight distribution and stance
+- camera height, focal distance, and perspective
+- image crop and framing
 
-Transfer the exact body pose from the grey clay mannequin reference onto the fashion model in the product image.
+The output must be cropped to match the reference image exactly.
 
-CRITICAL - READ CAREFULLY:
+If the reference image does not show the full body, do not include the full body in the output.
 
-IMAGE 1 (Product Photo): This is your ONLY source for:
-- The model's face, skin tone, and hair
-- ALL clothing items, colors, patterns, accessories, and styling
-- The background and lighting style
+Do not zoom out, extend the frame, or reveal additional body parts beyond what is visible in the reference.
 
-IMAGE 2 (Grey Clay Mannequin): This is ONLY a pose reference showing:
-- Body position and posture
-- Arm and hand placement
-- Leg stance and orientation
-- The mannequin is a GREY SCULPTURE with NO CLOTHING - ignore any apparent texture
+Do not alter the subject's identity, facial features, hairstyle, body proportions, clothing, colours, logos, fabric textures, or materials.
 
-REQUIREMENTS:
-1. POSE: Exactly replicate the mannequin's body position
-2. CLOTHING: Use ONLY the exact clothing from Image 1 - same colors, same items, same accessories
-3. FACE: Keep the model's exact facial features from Image 1
-4. FRAMING: ${framingInstruction}
-5. QUALITY: Output should look like a professional fashion photograph
+Do not stylise or reinterpret the image.
 
-NEVER:
-- Change the clothing color or style
-- Add or remove accessories
-- Take any styling cues from the grey mannequin
-- Generate different garments than what appears in Image 1`;
+The final image should look like the original photo, naturally repositioned and cropped identically to the reference image.`;
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -128,7 +107,9 @@ NEVER:
             role: 'user',
             content: [
               { type: 'text', text: prompt },
+              { type: 'text', text: 'INPUT PHOTO (subject to repose):' },
               { type: 'image_url', image_url: { url: sourceUrl } },
+              { type: 'text', text: 'GREYSCALE REFERENCE (pose, camera, and framing template):' },
               { type: 'image_url', image_url: { url: poseUrl } },
             ],
           },

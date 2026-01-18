@@ -101,15 +101,18 @@ export function CurationLightbox({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, handlePrevious, handleNext, handleToggle, onClose, currentImage]);
 
-  if (!currentImage) return null;
-
-  const isSelected = currentImage.output.is_favorite;
-  const rank = currentImage.output.favorite_rank;
-  const nextRank = !isSelected ? getNextRank(currentImage.output) : null;
+  const isSelected = currentImage?.output.is_favorite;
+  const rank = currentImage?.output.favorite_rank;
+  const nextRank = currentImage && !isSelected ? getNextRank(currentImage.output) : null;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-7xl h-[95vh] p-0 bg-black/98 border-none">
+        {!currentImage ? (
+          <div className="flex items-center justify-center h-full text-white/50">
+            No images to display
+          </div>
+        ) : (
         <div className="relative h-full flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between p-4 text-white flex-shrink-0">
@@ -236,6 +239,7 @@ export function CurationLightbox({
             </ScrollArea>
           </div>
         </div>
+        )}
       </DialogContent>
     </Dialog>
   );
