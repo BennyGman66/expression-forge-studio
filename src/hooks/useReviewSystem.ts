@@ -312,11 +312,12 @@ export function useUpdateAssetStatus() {
       
       if (assetError) throw assetError;
       
-      // Fetch all assets to determine aggregate status
+      // Fetch only CURRENT assets (not superseded) to determine aggregate status
       const { data: allAssets, error: fetchError } = await supabase
         .from('submission_assets')
         .select('review_status')
-        .eq('submission_id', submissionId);
+        .eq('submission_id', submissionId)
+        .is('superseded_by', null);
       
       if (fetchError) throw fetchError;
       
@@ -352,6 +353,7 @@ export function useUpdateAssetStatus() {
     },
     onSuccess: (_, { submissionId, jobId }) => {
       queryClient.invalidateQueries({ queryKey: ['submission-assets', submissionId] });
+      queryClient.invalidateQueries({ queryKey: ['job-assets-with-history', jobId] });
       queryClient.invalidateQueries({ queryKey: ['job-submissions'] });
       queryClient.invalidateQueries({ queryKey: ['latest-submission'] });
       queryClient.invalidateQueries({ queryKey: ['unified-jobs'] });
