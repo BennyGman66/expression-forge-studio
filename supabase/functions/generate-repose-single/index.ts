@@ -7,6 +7,30 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+/**
+ * Fixes broken storage URLs that contain unencoded hash (#) characters.
+ * The hash character causes the API to interpret the rest as a URL fragment.
+ */
+function fixBrokenStorageUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  
+  const lastSlash = url.lastIndexOf('/');
+  if (lastSlash === -1) return url;
+  
+  const basePath = url.slice(0, lastSlash + 1);
+  let filename = url.slice(lastSlash + 1);
+  
+  // Fix double-encoded characters
+  filename = filename.replace(/%2520/g, '%20');
+  filename = filename.replace(/%252F/g, '%2F');
+  filename = filename.replace(/%2523/g, '%23');
+  
+  // Encode unencoded # characters
+  const fixedFilename = filename.replace(/#/g, '%23');
+  
+  return basePath + fixedFilename;
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -52,8 +76,8 @@ serve(async (req) => {
       throw new Error('Output not found');
     }
 
-    const sourceUrl = output.repose_batch_items?.source_url;
-    const poseUrl = output.pose_url;
+    const sourceUrl = fixBrokenStorageUrl(output.repose_batch_items?.source_url);
+    const poseUrl = fixBrokenStorageUrl(output.pose_url);
     const shotType = output.shot_type || 'FRONT_FULL';
 
     if (!sourceUrl || !poseUrl) {
