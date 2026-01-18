@@ -8,7 +8,8 @@ import {
   Shield, 
   Users, 
   ExternalLink,
-  Eye
+  Eye,
+  Workflow
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,14 @@ const avatarToPdpApps = [
     icon: Users,
     path: "/repose-production",
     stepNumber: 3,
+  },
+  {
+    id: "optimised-workflow",
+    title: "Optimised Workflow",
+    description: "Unified single-page production dashboard with stage tracking.",
+    icon: Workflow,
+    path: "/optimised-workflow",
+    stepNumber: 4,
   },
 ];
 

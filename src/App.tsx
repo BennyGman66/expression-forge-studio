@@ -29,6 +29,7 @@ import ReposeProduction from "./pages/ReposeProduction";
 import PublicJobWorkspace from "./pages/PublicJobWorkspace";
 import PublicFreelancerBoard from "./pages/PublicFreelancerBoard";
 import FreelancerAuth from "./pages/FreelancerAuth";
+import OptimisedWorkflow from "./pages/OptimisedWorkflow";
 
 const queryClient = new QueryClient();
 
@@ -105,6 +106,23 @@ const App = () => (
               element={
                 <ProtectedRoute requiredRoles={['admin', 'internal']}>
                   <ReposeProduction />
+                </ProtectedRoute>
+              } 
+            />
+            {/* Optimised Workflow - Isolated new app */}
+            <Route 
+              path="/optimised-workflow" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <OptimisedWorkflow />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/optimised-workflow/:projectId" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <OptimisedWorkflow />
                 </ProtectedRoute>
               } 
             />
