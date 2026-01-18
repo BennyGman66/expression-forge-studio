@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { fixBrokenStorageUrl } from '@/lib/fileUtils';
 import type { SubmissionAsset, AssetReviewStatus } from '@/types/review';
+import type { AssetSlot } from '@/hooks/useReviewSystem';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -23,7 +24,6 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { MessageSquare, Check, AlertTriangle, Clock, Lock, ChevronDown, History, Trash2, Loader2 } from 'lucide-react';
-import { AssetSlot } from '@/hooks/useReviewSystem';
 
 interface AssetThumbnailsProps {
   assetSlots: AssetSlot[];

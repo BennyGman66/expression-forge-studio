@@ -36,11 +36,11 @@ import {
   useCreateSubmission,
   useJobAssetsWithHistory,
   useDeleteAsset,
-  AssetSlot,
 } from '@/hooks/useReviewSystem';
+import type { AssetSlot } from '@/hooks/useReviewSystem';
 import { useJob, useJobOutputs } from '@/hooks/useJobs';
 import { useAuth } from '@/contexts/AuthContext';
-import { SubmissionAsset, AnnotationRect, SubmissionStatus, ImageAnnotation, AssetReviewStatus } from '@/types/review';
+import type { SubmissionAsset, AnnotationRect, SubmissionStatus, ImageAnnotation, AssetReviewStatus } from '@/types/review';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
