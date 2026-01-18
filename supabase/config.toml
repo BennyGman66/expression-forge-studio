@@ -128,3 +128,6 @@ verify_jwt = false
 
 [functions.convert-image]
 verify_jwt = false
+
+[functions.detect-view-type]
+verify_jwt = false

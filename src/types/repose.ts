@@ -44,6 +44,7 @@ export interface ReposeBatchItem {
   view: string;
   source_output_id: string | null;
   source_url: string;
+  assigned_view: 'front' | 'back' | null; // Manual view assignment
   created_at: string;
 }
 
