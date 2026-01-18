@@ -31,7 +31,8 @@ interface ThreadPanelProps {
   isDrawing?: boolean;
   onToggleDrawing?: () => void;
   pendingAnnotationId?: string | null;
-  showGeneralCommentInput?: boolean; // Allow general comments without annotation
+  showGeneralCommentInput?: boolean;
+  supersededAssetIds?: string[]; // Asset IDs that have been replaced by newer versions
 }
 
 export function ThreadPanel({
@@ -47,6 +48,7 @@ export function ThreadPanel({
   onToggleDrawing,
   pendingAnnotationId,
   showGeneralCommentInput = false,
+  supersededAssetIds = [],
 }: ThreadPanelProps) {
   const { user } = useAuth();
   const [newComment, setNewComment] = useState('');
@@ -59,6 +61,7 @@ export function ThreadPanel({
 
   // Build a flat list of all comments with annotation context (Frame.io style)
   // For non-internal users, only show SHARED comments
+  // Filter out comments from superseded assets (V1 when V2 exists)
   const allComments = useMemo(() => {
     const comments: Array<{
       comment: ReviewComment;
@@ -68,6 +71,11 @@ export function ThreadPanel({
     }> = [];
 
     threads.forEach(thread => {
+      // Skip threads attached to superseded assets (V1 feedback when V2 exists)
+      if (thread.asset_id && supersededAssetIds.includes(thread.asset_id)) {
+        return;
+      }
+
       const annotationIndex = thread.annotation_id 
         ? annotations.findIndex(a => a.id === thread.annotation_id)
         : null;
@@ -91,7 +99,7 @@ export function ThreadPanel({
     return comments.sort((a, b) => 
       new Date(a.comment.created_at).getTime() - new Date(b.comment.created_at).getTime()
     );
-  }, [threads, annotations, isInternal]);
+  }, [threads, annotations, isInternal, supersededAssetIds]);
 
   // Find thread for selected annotation
   const selectedAnnotationThread = threads.find(
