@@ -108,11 +108,11 @@ Deno.serve(async (req) => {
 
     console.log(`[rerender-favorites-4k] Found ${favorites.length} favorites to re-render at ${imageSize}`);
 
-    // Create a pipeline job to track this 4K rendering batch
+    // Create a pipeline job to track this 4K rendering batch (use REPOSE_GENERATION type)
     const { data: job, error: jobError } = await supabase
       .from("pipeline_jobs")
       .insert({
-        type: "4K_RERENDER",
+        type: "REPOSE_GENERATION",
         title: `Re-render ${favorites.length} favorites @ ${imageSize}`,
         status: "RUNNING",
         origin_route: `/repose-production/batch/${batchId}?tab=4k-edit`,
@@ -122,6 +122,7 @@ Deno.serve(async (req) => {
           shotTypes: shotTypes || [],
           lookIds: lookIds || [],
           isRerender: true,
+          is4K: true,
         },
         progress_done: 0,
         progress_failed: 0,

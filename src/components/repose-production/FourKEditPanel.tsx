@@ -75,7 +75,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
         result_url,
         error_message,
         created_at,
-        repose_batch_items!batch_item_id(look_id, look_code)
+        repose_batch_items!batch_item_id(look_id)
       `)
       .eq("batch_id", batchId)
       .gte("created_at", oneHourAgo)
@@ -90,7 +90,6 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     const enriched = (data || []).map((o: any) => ({
       ...o,
       look_id: o.repose_batch_items?.look_id,
-      look_code: o.repose_batch_items?.look_code,
     }));
 
     setOutputs(enriched);
@@ -112,10 +111,11 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
       .select("id, status, progress_done, progress_failed, progress_total")
       .eq("type", "REPOSE_GENERATION")
       .ilike("origin_context", `%${batchId}%`)
+      .ilike("origin_context", `%is4K%`)
       .in("status", ["RUNNING", "QUEUED"])
       .order("created_at", { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (data) {
       setActiveJob(data);
