@@ -145,15 +145,26 @@ export function InfiniteLookSection({
   }, [batchId, look.lookId, look.lookCode, rerenderCount, onRefresh]);
 
   // Cancel all pending outputs for this look
-  const handleCancelPending = useCallback(async () => {
+  const handleCancelPending = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    console.log("[InfiniteLookSection] Cancel clicked for look:", look.lookCode);
+    console.log("[InfiniteLookSection] All outputs count:", allOutputs.length);
+    console.log("[InfiniteLookSection] Pending outputs:", allOutputs.filter(o => o.status === 'queued' || o.status === 'running'));
+    
     const pendingOutputIds = allOutputs
       .filter(o => o.status === 'queued' || o.status === 'running')
       .map(o => o.id);
     
-    if (pendingOutputIds.length === 0) return;
+    console.log("[InfiniteLookSection] Pending IDs to cancel:", pendingOutputIds.length);
+    
+    if (pendingOutputIds.length === 0) {
+      toast.info("No pending outputs to cancel");
+      return;
+    }
     
     try {
-      const { error } = await supabase
+      const { error, count } = await supabase
         .from("repose_outputs")
         .update({ 
           status: "failed", 
@@ -163,13 +174,14 @@ export function InfiniteLookSection({
       
       if (error) throw error;
       
+      console.log("[InfiniteLookSection] Cancelled count:", count);
       toast.success(`Cancelled ${pendingOutputIds.length} pending renders`);
       onRefresh();
     } catch (error) {
       console.error("Cancel error:", error);
       toast.error("Failed to cancel pending renders");
     }
-  }, [allOutputs, onRefresh]);
+  }, [allOutputs, onRefresh, look.lookCode]);
 
   // Retry all failed outputs
   const handleRetryAllFailed = useCallback(async () => {
