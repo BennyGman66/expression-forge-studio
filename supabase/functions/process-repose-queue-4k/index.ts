@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
       })
       .eq("id", pipelineJobId);
 
-    // Reset stale running outputs (stuck for > 2 minutes)
+    // Reset stale running outputs (stuck for > 45 seconds)
     const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
     const { data: staleOutputs } = await supabase
       .from("repose_outputs")
@@ -71,6 +71,19 @@ Deno.serve(async (req) => {
 
     if (staleOutputs?.length) {
       console.log(`[process-repose-queue-4k] Reset ${staleOutputs.length} stale running outputs`);
+    }
+
+    // Reset stale 'uploading' outputs (AI succeeded but upload timed out)
+    const { data: staleUploading } = await supabase
+      .from("repose_outputs")
+      .update({ status: "queued", error_message: "Upload timeout, retrying" })
+      .eq("batch_id", batchId)
+      .eq("status", "uploading")
+      .lt("created_at", staleThreshold)
+      .select("id");
+
+    if (staleUploading?.length) {
+      console.log(`[process-repose-queue-4k] Reset ${staleUploading.length} stale uploading outputs`);
     }
 
     // Track processed outputs for continuation
@@ -261,13 +274,13 @@ async function processQueueBackground(
       // Longer delay between batches for rate limit safety
       await new Promise((r) => setTimeout(r, 3000));
 
-      // Periodically reset stale running outputs during processing
+      // Periodically reset stale running/uploading outputs during processing
       const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
       const { data: resetStale } = await supabase
         .from("repose_outputs")
         .update({ status: "queued" })
         .eq("batch_id", batchId)
-        .eq("status", "running")
+        .in("status", ["running", "uploading"])
         .lt("created_at", staleThreshold)
         .select("id");
 
@@ -352,6 +365,33 @@ async function processOutput(
           `[process-repose-queue-4k] Generation attempt ${attempt + 1} failed for ${outputId}:`,
           errorMsg
         );
+
+        // Check if the output was actually completed despite the error (timeout during response)
+        const { data: outputCheck } = await supabase
+          .from("repose_outputs")
+          .select("status, result_url")
+          .eq("id", outputId)
+          .single();
+
+        if (outputCheck?.status === "complete" && outputCheck?.result_url) {
+          console.log(`[process-repose-queue-4k] Output ${outputId} actually completed despite error`);
+          processedIds.add(outputId);
+          return { success: true };
+        }
+
+        // If stuck in 'uploading', reset to queued for retry (AI succeeded, upload failed)
+        if (outputCheck?.status === "uploading") {
+          console.log(`[process-repose-queue-4k] Output ${outputId} stuck in uploading, resetting to queued`);
+          await supabase
+            .from("repose_outputs")
+            .update({ status: "queued", error_message: "Upload timeout, retrying" })
+            .eq("id", outputId);
+          // Continue to next retry
+          if (attempt < MAX_RETRIES) {
+            await new Promise((r) => setTimeout(r, BASE_RETRY_DELAY_MS));
+            continue;
+          }
+        }
 
         // All errors are retryable for 4K - just try again with backoff
         // The generate-repose-single function handles rate limits by requeuing

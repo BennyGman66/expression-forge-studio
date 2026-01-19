@@ -43,7 +43,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Prom
   ]);
 }
 
-const AI_TIMEOUT_MS = 55000; // 55 second timeout for AI calls
+const AI_TIMEOUT_MS = 30000; // 30 second timeout for AI calls - leaves room for upload
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -259,8 +259,17 @@ The final image should look like the original photo, naturally repositioned in 3
 
     const imageFormat = base64Match[1];
     const base64Data = base64Match[2];
+    
+    // Mark as uploading BEFORE starting the slow upload process
+    // This way if we timeout during upload, we know AI succeeded
+    await supabase
+      .from('repose_outputs')
+      .update({ status: 'uploading' })
+      .eq('id', outputId);
+    
+    console.log(`[generate-repose-single] Marked as uploading, starting storage upload...`);
+    
     const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-
     const fileName = `repose/${output.batch_id}/${outputId}_${Date.now()}.${imageFormat}`;
     
     const { error: uploadError } = await supabase.storage
@@ -272,6 +281,11 @@ The final image should look like the original photo, naturally repositioned in 3
 
     if (uploadError) {
       console.error('[generate-repose-single] Upload error:', uploadError);
+      // Reset to queued so it can be retried
+      await supabase
+        .from('repose_outputs')
+        .update({ status: 'queued', error_message: 'Upload failed, will retry' })
+        .eq('id', outputId);
       throw new Error('Failed to upload image');
     }
 
@@ -285,6 +299,7 @@ The final image should look like the original photo, naturally repositioned in 3
       .update({ 
         status: 'complete',
         result_url: publicUrl.publicUrl,
+        error_message: null,
       })
       .eq('id', outputId);
 
@@ -302,7 +317,7 @@ The final image should look like the original photo, naturally repositioned in 3
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('[generate-repose-single] Error:', errorMessage);
     
-    // Try to mark as failed if we have the outputId
+    // Try to handle the error appropriately
     try {
       const { outputId } = await (async () => {
         try {
@@ -317,13 +332,35 @@ The final image should look like the original photo, naturally repositioned in 3
         const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         const supabase = createClient(supabaseUrl, supabaseKey);
         
+        // Check if we were in 'uploading' status (AI succeeded but upload timed out)
+        const { data: currentOutput } = await supabase
+          .from('repose_outputs')
+          .select('status')
+          .eq('id', outputId)
+          .single();
+        
+        if (currentOutput?.status === 'uploading') {
+          // AI succeeded, upload failed/timed out - reset to queued for retry
+          console.log('[generate-repose-single] Upload timeout, resetting to queued for retry');
+          await supabase
+            .from('repose_outputs')
+            .update({ status: 'queued', error_message: 'Upload timeout, will retry' })
+            .eq('id', outputId);
+          
+          return new Response(
+            JSON.stringify({ error: 'Upload timeout', retryable: true }),
+            { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
+        // Otherwise mark as failed
         await supabase
           .from('repose_outputs')
-          .update({ status: 'failed' })
+          .update({ status: 'failed', error_message: errorMessage })
           .eq('id', outputId);
       }
     } catch (e) {
-      console.error('[generate-repose-single] Failed to mark as failed:', e);
+      console.error('[generate-repose-single] Failed to handle error:', e);
     }
 
     return new Response(
