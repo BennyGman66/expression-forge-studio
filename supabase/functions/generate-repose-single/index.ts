@@ -211,12 +211,26 @@ The final image should look like the original photo, naturally repositioned in 3
       const rawError = typeof embeddedError.metadata?.raw === 'string' 
         ? embeddedError.metadata.raw 
         : JSON.stringify(embeddedError.metadata?.raw || '');
-      const errorMessage = embeddedError.message || rawError || 'Unknown embedded error';
+      const errorMessage = embeddedError.message || '';
       
-      console.error('[generate-repose-single] Embedded error detected:', errorCode, errorMessage.slice(0, 300));
+      // Combine ALL error text fields to check for rate limit indicators
+      const allErrorText = `${errorCode} ${errorMessage} ${rawError}`.toLowerCase();
       
-      // Rate limit - requeue for retry
-      if (errorCode === 429 || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('429')) {
+      console.error('[generate-repose-single] Embedded error detected:', errorCode, 'message:', errorMessage.slice(0, 100), 'raw:', rawError.slice(0, 200));
+      
+      // Check for rate limit indicators in ANY of the error fields
+      const isRateLimited = 
+        errorCode === 429 || 
+        errorCode === 502 || // Gateway errors often wrap rate limits
+        errorCode === 503 ||
+        allErrorText.includes('resource_exhausted') || 
+        allErrorText.includes('429') ||
+        allErrorText.includes('rate') ||
+        allErrorText.includes('quota') ||
+        allErrorText.includes('too many');
+      
+      if (isRateLimited) {
+        console.log('[generate-repose-single] Rate limit detected, requeuing output');
         await supabase
           .from('repose_outputs')
           .update({ status: 'queued' })
