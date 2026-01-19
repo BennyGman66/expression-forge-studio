@@ -334,7 +334,7 @@ export function ShotTypeBlock({
               No outputs for this view yet
             </p>
           ) : (
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-3 gap-3">
               {/* Completed outputs */}
               {completedOutputs.map((output) => (
                 <OutputTile
@@ -346,11 +346,11 @@ export function ShotTypeBlock({
                 />
               ))}
               
-              {/* Pending outputs - placeholder tiles - matching smaller size */}
+              {/* Pending outputs - placeholder tiles */}
               {pendingOutputs.map((output) => (
                 <div
                   key={output.id}
-                  className="w-36 h-36 rounded-lg border-2 border-dashed border-muted flex flex-col items-center justify-center gap-2 bg-muted/20"
+                  className="aspect-[3/4] rounded-lg border-2 border-dashed border-muted flex flex-col items-center justify-center gap-2 bg-muted/20"
                 >
                   {output.status === 'running' ? (
                     <>
@@ -370,7 +370,7 @@ export function ShotTypeBlock({
               {failedOutputs.map((output) => (
                 <div
                   key={output.id}
-                  className="w-36 h-36 rounded-lg border-2 border-dashed border-destructive/30 flex flex-col items-center justify-center gap-2 bg-destructive/5"
+                  className="aspect-[3/4] rounded-lg border-2 border-dashed border-destructive/30 flex flex-col items-center justify-center gap-2 bg-destructive/5"
                 >
                   <span className="text-xs text-destructive">Failed</span>
                 </div>
