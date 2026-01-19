@@ -1,4 +1,4 @@
-// Version: 2026-01-19-v2 - Added temp storage for 4K uploads
+// Version: 2026-01-19-v3 - Fixed status update to uploading before 202
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -209,15 +209,24 @@ The final image should look like the original photo, naturally repositioned in 3
 
     // AI call succeeded! Mark as uploading and return 202 immediately
     // The response body reading happens in background to avoid timeout
-    await supabase
+    const { error: statusError } = await supabase
       .from('repose_outputs')
-      .update({ status: 'uploading' })
+      .update({ status: 'uploading', heartbeat_at: new Date().toISOString() })
       .eq('id', outputId);
+    
+    if (statusError) {
+      console.error(`[generate-repose-single] Failed to update status to uploading:`, statusError);
+    }
     
     console.log(`[generate-repose-single] AI complete in ${elapsed}s, returning 202 and processing body in background`);
     
+    // Start the background processing BEFORE returning the response
+    // This ensures EdgeRuntime.waitUntil has been called before the response is sent
+    const backgroundPromise = processResponseInBackground(supabase, outputId, output.batch_id, aiResponse, selectedImageSize);
+    EdgeRuntime.waitUntil(backgroundPromise);
+    
     // Return 202 Accepted immediately - body processing happens in background
-    const response = new Response(
+    return new Response(
       JSON.stringify({ 
         success: true, 
         status: 'uploading',
@@ -225,13 +234,6 @@ The final image should look like the original photo, naturally repositioned in 3
       }),
       { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
-    
-    // Process the response body in background (this is where the timeout was happening)
-    EdgeRuntime.waitUntil(
-      processResponseInBackground(supabase, outputId, output.batch_id, aiResponse, selectedImageSize)
-    );
-    
-    return response;
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
