@@ -23,6 +23,7 @@ export interface LookWithOutputs {
   sourceUrl: string;
   outputsByView: Record<OutputShotType, ReposeOutput[]>;
   selectionStats: ViewSelectionStats;
+  exportedAt: string | null; // When this look was last exported
 }
 
 export interface ViewSelectionStats {
@@ -263,12 +264,17 @@ export function useReposeSelection(batchId: string | undefined) {
             skippedViews: 0,
             isAllComplete: false,
           },
+          exportedAt: item.exported_at || null,
         });
       } else {
+        // Update exportedAt if this batch item has a more recent export
+        const existingLook = lookMap.get(lookId)!;
+        if (item.exported_at && (!existingLook.exportedAt || item.exported_at > existingLook.exportedAt)) {
+          existingLook.exportedAt = item.exported_at;
+        }
         // Add additional batch item ID to existing look
-        const existing = lookMap.get(lookId)!;
-        if (!existing.batchItemIds.includes(item.id)) {
-          existing.batchItemIds.push(item.id);
+        if (!existingLook.batchItemIds.includes(item.id)) {
+          existingLook.batchItemIds.push(item.id);
         }
       }
     }
