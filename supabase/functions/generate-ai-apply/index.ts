@@ -1,6 +1,6 @@
+// Version: 2026-01-19-v2 - Accept views array and jobId from client
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -26,7 +26,9 @@ const STUDIO_LIGHTING_PROMPT = `Model shot in soft, high-key studio lighting. Ba
 interface RequestBody {
   projectId: string;
   lookId: string;
-  view?: string; // Single view or undefined for all
+  view?: string; // Single view (legacy)
+  views?: string[]; // Array of views (preferred - from client)
+  jobId?: string; // Job ID created by client (preferred)
   type: 'run' | 'add_more' | 'retry_failed';
   attemptsPerView?: number;
   model?: string;
@@ -136,6 +138,8 @@ serve(async (req) => {
       projectId, 
       lookId, 
       view, 
+      views,
+      jobId: clientJobId,
       type, 
       attemptsPerView = 4,
       model = 'google/gemini-2.5-flash-image-preview',
@@ -143,54 +147,80 @@ serve(async (req) => {
       prompt: customPrompt
     } = body;
 
-    console.log(`[AI Apply] Starting ${type} for look ${lookId}, view: ${view || 'all'}, model: ${model}`);
+    // Log which views were requested
+    const requestedViews = views?.length ? views.join(',') : (view || 'all');
+    console.log(`[AI Apply] Starting ${type} for look ${lookId}, views: [${requestedViews}], model: ${model}, clientJobId: ${clientJobId || 'none'}`);
 
-    // Get or create AI Apply job for this look
-    let { data: existingJob } = await supabase
-      .from('ai_apply_jobs')
-      .select('*')
-      .eq('project_id', projectId)
-      .eq('look_id', lookId)
-      .single();
-
+    // Use client-provided jobId if available, otherwise get/create job
     let jobId: string;
     let digitalTalentId: string | null = null;
 
-    if (!existingJob) {
-      // Get digital talent ID from face_application_jobs
-      const { data: faceAppJob } = await supabase
-        .from('face_application_jobs')
+    if (clientJobId) {
+      // Client provided a job ID - use it directly
+      jobId = clientJobId;
+      console.log(`[AI Apply] Using client-provided jobId: ${jobId}`);
+      
+      // Get the job to retrieve digitalTalentId
+      const { data: existingJob } = await supabase
+        .from('ai_apply_jobs')
         .select('digital_talent_id')
+        .eq('id', jobId)
+        .single();
+      
+      digitalTalentId = existingJob?.digital_talent_id || null;
+      
+      // Update job status to running
+      await supabase
+        .from('ai_apply_jobs')
+        .update({ status: 'running', model, strictness, updated_at: new Date().toISOString() })
+        .eq('id', jobId);
+    } else {
+      // Legacy path: get or create job by project_id + look_id
+      let { data: existingJob } = await supabase
+        .from('ai_apply_jobs')
+        .select('*')
         .eq('project_id', projectId)
         .eq('look_id', lookId)
         .single();
 
-      digitalTalentId = faceAppJob?.digital_talent_id;
+      if (!existingJob) {
+        // Get digital talent ID from face_application_jobs
+        const { data: faceAppJob } = await supabase
+          .from('face_application_jobs')
+          .select('digital_talent_id')
+          .eq('project_id', projectId)
+          .eq('look_id', lookId)
+          .single();
 
-      const { data: newJob, error: jobError } = await supabase
-        .from('ai_apply_jobs')
-        .insert({
-          project_id: projectId,
-          look_id: lookId,
-          digital_talent_id: digitalTalentId,
-          status: 'running',
-          model,
-          attempts_per_view: attemptsPerView,
-          strictness,
-        })
-        .select()
-        .single();
+        digitalTalentId = faceAppJob?.digital_talent_id;
 
-      if (jobError) throw jobError;
-      jobId = newJob.id;
-    } else {
-      jobId = existingJob.id;
-      digitalTalentId = existingJob.digital_talent_id;
-      // Update job status
-      await supabase
-        .from('ai_apply_jobs')
-        .update({ status: 'running', model, strictness })
-        .eq('id', jobId);
+        const { data: newJob, error: jobError } = await supabase
+          .from('ai_apply_jobs')
+          .insert({
+            project_id: projectId,
+            look_id: lookId,
+            digital_talent_id: digitalTalentId,
+            status: 'running',
+            model,
+            attempts_per_view: attemptsPerView,
+            strictness,
+          })
+          .select()
+          .single();
+
+        if (jobError) throw jobError;
+        jobId = newJob.id;
+        console.log(`[AI Apply] Created new job: ${jobId}`);
+      } else {
+        jobId = existingJob.id;
+        digitalTalentId = existingJob.digital_talent_id;
+        // Update job status
+        await supabase
+          .from('ai_apply_jobs')
+          .update({ status: 'running', model, strictness })
+          .eq('id', jobId);
+        console.log(`[AI Apply] Using existing job: ${jobId}`);
+      }
     }
 
     // Normalize view names - always use 'front' not 'full_front' or 'cropped_front'
@@ -199,8 +229,18 @@ serve(async (req) => {
       return v;
     };
 
-    // Determine which views to process
-    const viewsToProcess = view ? [normalizeView(view)] : ['front', 'back', 'detail'];
+    // Determine which views to process - prefer views array, then single view, then default
+    let viewsToProcess: string[];
+    if (views && views.length > 0) {
+      viewsToProcess = views.map(normalizeView);
+      console.log(`[AI Apply] Using client-provided views array: [${viewsToProcess.join(', ')}]`);
+    } else if (view) {
+      viewsToProcess = [normalizeView(view)];
+      console.log(`[AI Apply] Using single view: ${viewsToProcess[0]}`);
+    } else {
+      viewsToProcess = ['front', 'back', 'detail'];
+      console.log(`[AI Apply] Using default views: [${viewsToProcess.join(', ')}]`);
+    }
 
     // Get source images (simplified query - no FK join needed)
     const { data: sourceImages } = await supabase
