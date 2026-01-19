@@ -405,7 +405,7 @@ export function useProjectsEligibleForRepose() {
       // Get ALL projects that have jobs (not just approved ones)
       const { data: jobs } = await supabase
         .from("unified_jobs")
-        .select("project_id, status")
+        .select("project_id, look_id, status")
         .not("project_id", "is", null);
 
       const projectIds = [...new Set(jobs?.map(j => j.project_id).filter(Boolean))] as string[];
@@ -423,22 +423,48 @@ export function useProjectsEligibleForRepose() {
 
       if (error) throw error;
 
-      // Calculate stats per project
+      // Calculate stats per project - count UNIQUE LOOKS, not jobs
       const statsMap = new Map<string, { 
         total: number; 
         approved: number; 
         open: number; 
         in_progress: number 
       }>();
-      
+
+      // First, group jobs by project_id and look_id to deduplicate
+      const lookStatusByProject = new Map<string, Map<string, string[]>>();
+
       jobs?.forEach(j => {
-        if (!j.project_id) return;
-        const current = statsMap.get(j.project_id) || { total: 0, approved: 0, open: 0, in_progress: 0 };
-        current.total++;
-        if (j.status === 'APPROVED' || j.status === 'CLOSED') current.approved++;
-        if (j.status === 'OPEN') current.open++;
-        if (['IN_PROGRESS', 'SUBMITTED', 'NEEDS_CHANGES'].includes(j.status)) current.in_progress++;
-        statsMap.set(j.project_id, current);
+        if (!j.project_id || !j.look_id) return;
+        
+        if (!lookStatusByProject.has(j.project_id)) {
+          lookStatusByProject.set(j.project_id, new Map());
+        }
+        const projectLooks = lookStatusByProject.get(j.project_id)!;
+        
+        if (!projectLooks.has(j.look_id)) {
+          projectLooks.set(j.look_id, []);
+        }
+        projectLooks.get(j.look_id)!.push(j.status);
+      });
+
+      // Now count unique looks per project
+      lookStatusByProject.forEach((looks, projectId) => {
+        const stats = { total: 0, approved: 0, open: 0, in_progress: 0 };
+        
+        looks.forEach((statuses) => {
+          stats.total++;
+          // A look is "approved" if ANY of its jobs are approved
+          if (statuses.some(s => s === 'APPROVED' || s === 'CLOSED')) {
+            stats.approved++;
+          } else if (statuses.some(s => s === 'OPEN')) {
+            stats.open++;
+          } else if (statuses.some(s => ['IN_PROGRESS', 'SUBMITTED', 'NEEDS_CHANGES'].includes(s))) {
+            stats.in_progress++;
+          }
+        });
+        
+        statsMap.set(projectId, stats);
       });
 
       return (projects || []).map(p => ({
