@@ -357,33 +357,48 @@ export function useUpdateAssetStatus() {
       
       if (assetError) throw assetError;
       
-      // Get the LATEST submission for this job (may differ from passed submissionId)
-      const { data: latestSubmission, error: latestError } = await supabase
+      // Get ALL submissions for this job to check assets across all of them
+      const { data: allSubmissions, error: subError } = await supabase
         .from('job_submissions')
-        .select('id')
+        .select('id, version_number')
         .eq('job_id', jobId)
-        .order('version_number', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .order('version_number', { ascending: false });
       
-      if (latestError) throw latestError;
+      if (subError) throw subError;
+      if (!allSubmissions?.length) throw new Error('No submissions found for job');
       
-      const latestSubmissionId = latestSubmission.id;
+      const submissionIds = allSubmissions.map(s => s.id);
+      const latestSubmissionId = allSubmissions[0].id;
       
-      // Fetch only CURRENT assets (not superseded) from the LATEST submission
+      // Fetch CURRENT assets (not superseded) from ALL submissions
       const { data: allAssets, error: fetchError } = await supabase
         .from('submission_assets')
-        .select('review_status')
-        .eq('submission_id', latestSubmissionId)
+        .select('label, review_status, created_at, submission_id')
+        .in('submission_id', submissionIds)
         .is('superseded_by', null);
       
       if (fetchError) throw fetchError;
       
-      // Calculate aggregate status
-      const statuses = allAssets.map(a => a.review_status);
+      // Build a version map for prioritization
+      const versionMap = new Map<string, number>();
+      allSubmissions.forEach(s => versionMap.set(s.id, s.version_number));
+      
+      // Deduplicate by label, keeping the most recent version (highest submission version)
+      const latestByLabel = new Map<string, { review_status: string | null }>();
+      allAssets?.forEach(asset => {
+        const existing = latestByLabel.get(asset.label);
+        const assetVersion = versionMap.get(asset.submission_id) || 0;
+        const existingVersion = existing ? versionMap.get((existing as any).submission_id) || 0 : -1;
+        
+        if (!existing || assetVersion > existingVersion) {
+          latestByLabel.set(asset.label, { ...asset } as any);
+        }
+      });
+      
+      // Calculate aggregate status from deduplicated assets
+      const statuses = Array.from(latestByLabel.values()).map(a => a.review_status);
       const anyChangesRequested = statuses.some(s => s === 'CHANGES_REQUESTED');
-      const allApproved = statuses.every(s => s === 'APPROVED');
+      const allApproved = statuses.length > 0 && statuses.every(s => s === 'APPROVED');
       
       let submissionStatus: SubmissionStatus = 'IN_REVIEW';
       let jobStatus: 'SUBMITTED' | 'NEEDS_CHANGES' | 'APPROVED' = 'SUBMITTED';
@@ -407,6 +422,32 @@ export function useUpdateAssetStatus() {
         .from('unified_jobs')
         .update({ status: jobStatus })
         .eq('id', jobId);
+      
+      // If asset was approved, sync to job_outputs
+      if (status === 'APPROVED') {
+        const { data: approvedAsset } = await supabase
+          .from('submission_assets')
+          .select('file_url, label')
+          .eq('id', assetId)
+          .single();
+        
+        if (approvedAsset) {
+          // Delete any existing output with this label, then insert
+          await supabase
+            .from('job_outputs')
+            .delete()
+            .eq('job_id', jobId)
+            .eq('label', approvedAsset.label);
+          
+          await supabase
+            .from('job_outputs')
+            .insert({
+              job_id: jobId,
+              file_url: approvedAsset.file_url,
+              label: approvedAsset.label,
+            });
+        }
+      }
       
       return { allApproved, anyChangesRequested };
     },
