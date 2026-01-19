@@ -8,7 +8,7 @@ import type { ReposeOutput } from "@/types/repose";
 import type { LookWithOutputs } from "@/hooks/useReposeSelection";
 import { ShotTypeBlock } from "./ShotTypeBlock";
 import { cn } from "@/lib/utils";
-import { Check, RotateCw, Loader2, AlertCircle } from "lucide-react";
+import { Check, RotateCw, Loader2, AlertCircle, X } from "lucide-react";
 import { getImageUrl } from "@/lib/imageUtils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -144,6 +144,33 @@ export function InfiniteLookSection({
     }
   }, [batchId, look.lookId, look.lookCode, rerenderCount, onRefresh]);
 
+  // Cancel all pending outputs for this look
+  const handleCancelPending = useCallback(async () => {
+    const pendingOutputIds = allOutputs
+      .filter(o => o.status === 'queued' || o.status === 'running')
+      .map(o => o.id);
+    
+    if (pendingOutputIds.length === 0) return;
+    
+    try {
+      const { error } = await supabase
+        .from("repose_outputs")
+        .update({ 
+          status: "failed", 
+          error_message: "Cancelled by user" 
+        })
+        .in("id", pendingOutputIds);
+      
+      if (error) throw error;
+      
+      toast.success(`Cancelled ${pendingOutputIds.length} pending renders`);
+      onRefresh();
+    } catch (error) {
+      console.error("Cancel error:", error);
+      toast.error("Failed to cancel pending renders");
+    }
+  }, [allOutputs, onRefresh]);
+
   // Retry all failed outputs
   const handleRetryAllFailed = useCallback(async () => {
     const failedOutputIds = allOutputs.filter(o => o.status === 'failed').map(o => o.id);
@@ -202,9 +229,15 @@ export function InfiniteLookSection({
           <div className="flex items-center gap-3">
             {/* Status Indicators */}
             {hasPending && (
-              <Badge variant="outline" className="gap-1.5 text-blue-600 border-blue-300">
+              <Badge 
+                variant="outline" 
+                className="gap-1.5 text-blue-600 border-blue-300 cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-colors"
+                onClick={handleCancelPending}
+                title="Click to cancel pending renders"
+              >
                 <Loader2 className="w-3 h-3 animate-spin" />
                 {queuedCount + runningCount} pending
+                <X className="w-3 h-3 ml-1 opacity-60 hover:opacity-100" />
               </Badge>
             )}
             
