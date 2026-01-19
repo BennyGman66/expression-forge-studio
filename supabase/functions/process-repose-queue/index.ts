@@ -390,6 +390,17 @@ async function processRun(
       });
     }
 
+    // DEBUG: Log all batch items found for this look
+    console.log(`[process-repose-queue] Total batch items in batch: ${batchItems?.length || 0}`);
+    console.log(`[process-repose-queue] Batch items for look ${lookId}: ${lookItemsWithMapping.length}`);
+    console.log(`[process-repose-queue] Batch items detail:`, lookItemsWithMapping.map((i: any) => ({
+      id: i.id,
+      look_id: i.look_id,
+      assigned_view: i.assigned_view,
+      view: i.view,
+      source_url: i.source_url?.substring(i.source_url.lastIndexOf('/') + 1) || 'no-url'
+    })));
+
     if (!lookItemsWithMapping.length) {
       console.log(`[process-repose-queue] No batch items for look ${lookId}`);
       await supabase
