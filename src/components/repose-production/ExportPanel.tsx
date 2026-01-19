@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Download, CheckCircle2, Circle, AlertCircle, Lock } from "lucide-react";
-import { useReposeBatch } from "@/hooks/useReposeBatches";
+import { Download, CheckCircle2, Circle, AlertCircle, Lock, Check } from "lucide-react";
+import { useReposeBatch, useMarkLooksExported } from "@/hooks/useReposeBatches";
 import { useReposeSelection, LookWithOutputs } from "@/hooks/useReposeSelection";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { toast } from "sonner";
@@ -30,6 +30,7 @@ const SHOT_TYPE_SUFFIXES: Record<OutputShotType, string> = {
 export function ExportPanel({ batchId }: ExportPanelProps) {
   const { data: batch, isLoading: batchLoading } = useReposeBatch(batchId);
   const { outputs, groupedByLook, overallStats, isLoading } = useReposeSelection(batchId);
+  const markExported = useMarkLooksExported();
 
   const [selectedLookIds, setSelectedLookIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
@@ -308,6 +309,12 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
+      // Mark all exported looks as exported
+      const allBatchItemIds = readyLooks.flatMap(l => l.batchItemIds);
+      if (allBatchItemIds.length > 0) {
+        await markExported.mutateAsync({ batchItemIds: allBatchItemIds });
+      }
+
       toast.success(`Exported ${readyLooks.length} looks (${readyLooks.length * 4} slides)`);
     } catch (error) {
       console.error("Export failed:", error);
@@ -376,6 +383,12 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+
+      // Mark selected looks as exported
+      const selectedBatchItemIds = looksToExport.flatMap(l => l.batchItemIds);
+      if (selectedBatchItemIds.length > 0) {
+        await markExported.mutateAsync({ batchItemIds: selectedBatchItemIds });
+      }
 
       toast.success(`Exported ${looksToExport.length} looks (${looksToExport.length * 4} slides)`);
       setSelectedLookIds(new Set());
@@ -498,26 +511,42 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
           <ScrollArea className="flex-1">
             <div className="p-2 space-y-0.5">
               {/* Ready Looks - Green, Selectable */}
-              {readyLooks.map((look) => (
-                <button
-                  key={look.lookId}
-                  onClick={() => toggleLookSelection(look.lookId)}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-3 py-2 rounded-md text-left transition-colors",
-                    selectedLookIds.has(look.lookId)
-                      ? "bg-primary/20 border border-primary/50"
-                      : "hover:bg-secondary/80"
-                  )}
-                >
-                  <div className="w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center flex-shrink-0">
-                    <CheckCircle2 className="w-3 h-3" />
-                  </div>
-                  <span className="text-sm font-medium truncate flex-1">{look.lookCode}</span>
-                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-primary/10 text-primary">
-                    Ready
-                  </Badge>
-                </button>
-              ))}
+              {readyLooks.map((look) => {
+                const isExported = !!look.exportedAt;
+                return (
+                  <button
+                    key={look.lookId}
+                    onClick={() => toggleLookSelection(look.lookId)}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-3 py-2 rounded-md text-left transition-colors",
+                      selectedLookIds.has(look.lookId)
+                        ? "bg-primary/20 border border-primary/50"
+                        : "hover:bg-secondary/80"
+                    )}
+                  >
+                    <div className={cn(
+                      "w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0",
+                      isExported 
+                        ? "bg-muted text-muted-foreground" 
+                        : "bg-primary text-primary-foreground"
+                    )}>
+                      {isExported ? <Check className="w-2.5 h-2.5" /> : <CheckCircle2 className="w-3 h-3" />}
+                    </div>
+                    <span className="text-sm font-medium truncate flex-1">{look.lookCode}</span>
+                    <Badge 
+                      variant="secondary" 
+                      className={cn(
+                        "text-[10px] px-1.5 py-0 h-4",
+                        isExported 
+                          ? "bg-muted/50 text-muted-foreground" 
+                          : "bg-primary/10 text-primary"
+                      )}
+                    >
+                      {isExported ? "Exported" : "Ready"}
+                    </Badge>
+                  </button>
+                );
+              })}
 
               {/* Separator */}
               {readyLooks.length > 0 && incompleteLooks.length > 0 && (

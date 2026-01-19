@@ -72,9 +72,10 @@ export function useReposeBatches() {
   });
 }
 
-// Extended batch item with look code
+// Extended batch item with look code and exported_at
 export interface ReposeBatchItemWithLook extends ReposeBatchItem {
   look_code?: string | null;
+  exported_at?: string | null;
 }
 
 // Fetch batch items for a batch with look codes
@@ -286,6 +287,33 @@ export function useUpdateReposeBatchStatus() {
     },
     onError: (error) => {
       toast.error(`Failed to update batch status: ${error.message}`);
+    },
+  });
+}
+
+// Mark looks as exported
+export function useMarkLooksExported() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ 
+      batchItemIds 
+    }: { 
+      batchItemIds: string[];
+    }) => {
+      const { error } = await supabase
+        .from("repose_batch_items")
+        .update({ exported_at: new Date().toISOString() })
+        .in("id", batchItemIds);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["repose-batch-items"] });
+      queryClient.invalidateQueries({ queryKey: ["repose-outputs"] });
+    },
+    onError: (error) => {
+      console.error("Failed to mark looks as exported:", error);
     },
   });
 }
