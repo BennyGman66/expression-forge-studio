@@ -2975,6 +2975,7 @@ export type Database = {
           batch_id: string
           batch_item_id: string
           created_at: string | null
+          error_message: string | null
           favorite_rank: number | null
           id: string
           is_favorite: boolean | null
@@ -2992,6 +2993,7 @@ export type Database = {
           batch_id: string
           batch_item_id: string
           created_at?: string | null
+          error_message?: string | null
           favorite_rank?: number | null
           id?: string
           is_favorite?: boolean | null
@@ -3009,6 +3011,7 @@ export type Database = {
           batch_id?: string
           batch_item_id?: string
           created_at?: string | null
+          error_message?: string | null
           favorite_rank?: number | null
           id?: string
           is_favorite?: boolean | null

@@ -312,7 +312,13 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       // Mark all exported looks as exported
       const allBatchItemIds = readyLooks.flatMap(l => l.batchItemIds);
       if (allBatchItemIds.length > 0) {
-        await markExported.mutateAsync({ batchItemIds: allBatchItemIds });
+        try {
+          await markExported.mutateAsync({ batchItemIds: allBatchItemIds });
+          console.log(`Marked ${allBatchItemIds.length} batch items as exported`);
+        } catch (markError) {
+          console.error("Failed to mark as exported:", markError);
+          toast.warning("Export successful, but failed to mark as exported");
+        }
       }
 
       toast.success(`Exported ${readyLooks.length} looks (${readyLooks.length * 4} slides)`);
@@ -387,7 +393,13 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       // Mark selected looks as exported
       const selectedBatchItemIds = looksToExport.flatMap(l => l.batchItemIds);
       if (selectedBatchItemIds.length > 0) {
-        await markExported.mutateAsync({ batchItemIds: selectedBatchItemIds });
+        try {
+          await markExported.mutateAsync({ batchItemIds: selectedBatchItemIds });
+          console.log(`Marked ${selectedBatchItemIds.length} batch items as exported`);
+        } catch (markError) {
+          console.error("Failed to mark as exported:", markError);
+          toast.warning("Export successful, but failed to mark as exported");
+        }
       }
 
       toast.success(`Exported ${looksToExport.length} looks (${looksToExport.length * 4} slides)`);
