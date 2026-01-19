@@ -1,4 +1,4 @@
-// Version: 2026-01-19-v3 - Fixed status update to uploading before 202
+// Version: 2026-01-19-v4 - Read full response body before 202 to prevent truncation
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -207,30 +207,107 @@ The final image should look like the original photo, naturally repositioned in 3
       throw new Error(`AI API error: ${aiResponse.status}`);
     }
 
-    // AI call succeeded! Mark as uploading and return 202 immediately
-    // The response body reading happens in background to avoid timeout
-    const { error: statusError } = await supabase
-      .from('repose_outputs')
-      .update({ status: 'uploading', heartbeat_at: new Date().toISOString() })
-      .eq('id', outputId);
+    // Read response body BEFORE returning - this ensures we get the full 4K payload
+    // Reading ~10-15MB takes ~5-10s but keeps us well under the 60s timeout
+    const responseText = await aiResponse.text();
+    console.log(`[generate-repose-single] Got ${Math.round(responseText.length / 1024)}KB response in ${elapsed}s`);
     
-    if (statusError) {
-      console.error(`[generate-repose-single] Failed to update status to uploading:`, statusError);
+    // Parse JSON to verify response is complete and valid
+    let aiResult;
+    try {
+      aiResult = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('[generate-repose-single] JSON parse error:', parseError);
+      await supabase
+        .from('repose_outputs')
+        .update({ status: 'failed', error_message: 'Invalid JSON response from AI' })
+        .eq('id', outputId);
+      return new Response(
+        JSON.stringify({ error: 'Invalid AI response' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
     
-    console.log(`[generate-repose-single] AI complete in ${elapsed}s, returning 202 and processing body in background`);
+    // Check for embedded error in response
+    const embeddedError = aiResult.choices?.[0]?.error;
+    if (embeddedError) {
+      const errorCode = embeddedError.code;
+      const errorMessage = embeddedError.message || '';
+      console.error('[generate-repose-single] Embedded error:', errorCode, errorMessage.slice(0, 100));
+      
+      const allErrorText = `${errorCode} ${errorMessage}`.toLowerCase();
+      if (allErrorText.includes('resource_exhausted') || allErrorText.includes('429') || allErrorText.includes('rate')) {
+        await supabase
+          .from('repose_outputs')
+          .update({ status: 'queued' })
+          .eq('id', outputId);
+        return new Response(
+          JSON.stringify({ error: 'Rate limited, will retry' }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      await supabase
+        .from('repose_outputs')
+        .update({ status: 'failed', error_message: `AI error: ${errorCode}` })
+        .eq('id', outputId);
+      return new Response(
+        JSON.stringify({ error: `AI error: ${errorCode}` }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     
-    // Start the background processing BEFORE returning the response
-    // This ensures EdgeRuntime.waitUntil has been called before the response is sent
-    const backgroundPromise = processResponseInBackground(supabase, outputId, output.batch_id, aiResponse, selectedImageSize);
+    // Extract the generated image URL
+    const generatedImageUrl = aiResult.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    if (!generatedImageUrl) {
+      console.error('[generate-repose-single] No image in response');
+      await supabase
+        .from('repose_outputs')
+        .update({ status: 'failed', error_message: 'No image generated' })
+        .eq('id', outputId);
+      return new Response(
+        JSON.stringify({ error: 'No image generated' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // Extract base64 data
+    const base64Match = generatedImageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+    if (!base64Match) {
+      console.error('[generate-repose-single] Invalid image format');
+      await supabase
+        .from('repose_outputs')
+        .update({ status: 'failed', error_message: 'Invalid image format' })
+        .eq('id', outputId);
+      return new Response(
+        JSON.stringify({ error: 'Invalid image format' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const imageFormat = base64Match[1];
+    const base64Data = base64Match[2];
+    console.log(`[generate-repose-single] Extracted ${imageFormat} base64: ${Math.round(base64Data.length / 1024)}KB`);
+    
+    // Mark as uploading now that we have valid image data
+    await supabase
+      .from('repose_outputs')
+      .update({ status: 'uploading' })
+      .eq('id', outputId);
+    
+    const totalElapsed = Math.round((Date.now() - startTime) / 1000);
+    console.log(`[generate-repose-single] AI + parse complete in ${totalElapsed}s, uploading in background`);
+    
+    // Background: just the storage upload (we already have the parsed data)
+    const backgroundPromise = uploadImageInBackground(supabase, outputId, output.batch_id, base64Data, imageFormat, selectedImageSize);
     EdgeRuntime.waitUntil(backgroundPromise);
     
-    // Return 202 Accepted immediately - body processing happens in background
+    // Return 202 Accepted - upload happens in background
     return new Response(
       JSON.stringify({ 
         success: true, 
         status: 'uploading',
-        message: 'AI generation complete, processing response in background',
+        message: 'Image generated, uploading to storage',
       }),
       { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -288,146 +365,24 @@ The final image should look like the original photo, naturally repositioned in 3
 });
 
 /**
- * Processes the AI response body in the background.
- * This is where we read the large base64 data and store it.
+ * Uploads the image to storage in the background.
+ * The AI response has already been parsed - we just need to upload.
  */
-async function processResponseInBackground(
-  supabase: any,
-  outputId: string,
-  batchId: string,
-  aiResponse: Response,
-  imageSize: string | null
-): Promise<void> {
-  try {
-    console.log(`[generate-repose-single:bg] Reading response body for ${outputId}`);
-    
-    // Read the response body (this can take time for 4K images)
-    const responseText = await aiResponse.text();
-    console.log(`[generate-repose-single:bg] Got ${Math.round(responseText.length / 1024)}KB response`);
-    
-    let aiResult;
-    try {
-      aiResult = JSON.parse(responseText);
-    } catch (parseError) {
-      console.error('[generate-repose-single:bg] JSON parse error:', parseError);
-      await supabase
-        .from('repose_outputs')
-        .update({ status: 'failed', error_message: 'Failed to parse AI response' })
-        .eq('id', outputId);
-      return;
-    }
-    
-    // Check for embedded error
-    const embeddedError = aiResult.choices?.[0]?.error;
-    if (embeddedError) {
-      const errorCode = embeddedError.code;
-      const errorMessage = embeddedError.message || '';
-      console.error('[generate-repose-single:bg] Embedded error:', errorCode, errorMessage.slice(0, 100));
-      
-      // Check for rate limit
-      const allErrorText = `${errorCode} ${errorMessage}`.toLowerCase();
-      if (allErrorText.includes('resource_exhausted') || allErrorText.includes('429') || allErrorText.includes('rate')) {
-        await supabase
-          .from('repose_outputs')
-          .update({ status: 'queued' })
-          .eq('id', outputId);
-        return;
-      }
-      
-      await supabase
-        .from('repose_outputs')
-        .update({ status: 'failed', error_message: `Embedded error: ${errorCode}` })
-        .eq('id', outputId);
-      return;
-    }
-    
-    const generatedImageUrl = aiResult.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-    if (!generatedImageUrl) {
-      console.error('[generate-repose-single:bg] No image in response');
-      await supabase
-        .from('repose_outputs')
-        .update({ status: 'failed', error_message: 'No image generated' })
-        .eq('id', outputId);
-      return;
-    }
-    
-    console.log(`[generate-repose-single:bg] Got image URL, length: ${generatedImageUrl.length} chars`);
-    
-    // Extract base64 data
-    const base64Match = generatedImageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
-    if (!base64Match) {
-      console.error('[generate-repose-single:bg] Invalid image format');
-      await supabase
-        .from('repose_outputs')
-        .update({ status: 'failed', error_message: 'Invalid image format' })
-        .eq('id', outputId);
-      return;
-    }
-    
-    const imageFormat = base64Match[1];
-    const base64Data = base64Match[2];
-    console.log(`[generate-repose-single:bg] Extracted base64: ${Math.round(base64Data.length / 1024)}KB`);
-    
-    // For 4K images, store to temp first then complete separately
-    const is4K = imageSize === '4K';
-    
-    if (is4K) {
-      // Store base64 to temp storage
-      const tempPath = `temp/${outputId}.${imageFormat}.b64`;
-      const base64Blob = new Blob([base64Data], { type: 'text/plain' });
-      
-      const { error: tempUploadError } = await supabase.storage
-        .from('images')
-        .upload(tempPath, base64Blob, {
-          contentType: 'text/plain',
-          upsert: true,
-        });
-      
-      if (tempUploadError) {
-        console.error('[generate-repose-single:bg] Temp upload error:', tempUploadError);
-        await supabase
-          .from('repose_outputs')
-          .update({ status: 'queued', error_message: 'Temp upload failed, will retry' })
-          .eq('id', outputId);
-        return;
-      }
-      
-      // Update with temp_path for complete-repose-upload to handle
-      await supabase
-        .from('repose_outputs')
-        .update({ temp_path: tempPath })
-        .eq('id', outputId);
-      
-      console.log(`[generate-repose-single:bg] 4K temp stored, will complete via separate function`);
-      
-      // Try to complete upload now
-      await completeUploadFromTemp(supabase, outputId, batchId, base64Data, imageFormat, tempPath);
-    } else {
-      // For non-4K, upload directly
-      await uploadImageDirectly(supabase, outputId, batchId, base64Data, imageFormat);
-    }
-    
-  } catch (error) {
-    console.error('[generate-repose-single:bg] Background processing failed:', error);
-    // Leave in 'uploading' status - queue processor will handle via complete-repose-upload
-  }
-}
-
-/**
- * Uploads image directly to storage (for non-4K images)
- */
-async function uploadImageDirectly(
+async function uploadImageInBackground(
   supabase: any,
   outputId: string,
   batchId: string,
   base64Data: string,
-  imageFormat: string
+  imageFormat: string,
+  imageSize: string | null
 ): Promise<void> {
   try {
+    console.log(`[generate-repose-single:bg] Starting upload for ${outputId}`);
+    
     const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
     const fileName = `repose/${batchId}/${outputId}_${Date.now()}.${imageFormat}`;
     
-    console.log(`[generate-repose-single:bg] Uploading ${imageBytes.length} bytes to ${fileName}`);
+    console.log(`[generate-repose-single:bg] Uploading ${Math.round(imageBytes.length / 1024)}KB to ${fileName}`);
     
     const { error: uploadError } = await supabase.storage
       .from('images')
@@ -440,7 +395,7 @@ async function uploadImageDirectly(
       console.error('[generate-repose-single:bg] Upload error:', uploadError);
       await supabase
         .from('repose_outputs')
-        .update({ status: 'failed', error_message: 'Upload failed' })
+        .update({ status: 'failed', error_message: 'Storage upload failed' })
         .eq('id', outputId);
       return;
     }
@@ -461,7 +416,7 @@ async function uploadImageDirectly(
 
     console.log(`[generate-repose-single:bg] Upload complete: ${publicUrl.publicUrl}`);
   } catch (error) {
-    console.error('[generate-repose-single:bg] Direct upload failed:', error);
+    console.error('[generate-repose-single:bg] Upload failed:', error);
     await supabase
       .from('repose_outputs')
       .update({ status: 'failed', error_message: 'Upload exception' })
@@ -469,60 +424,3 @@ async function uploadImageDirectly(
   }
 }
 
-/**
- * Completes upload from temp storage (for 4K images)
- */
-async function completeUploadFromTemp(
-  supabase: any,
-  outputId: string,
-  batchId: string,
-  base64Data: string,
-  imageFormat: string,
-  tempPath: string
-): Promise<void> {
-  try {
-    const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-    const fileName = `repose/${batchId}/${outputId}_${Date.now()}.${imageFormat}`;
-    
-    console.log(`[generate-repose-single:bg] 4K upload ${imageBytes.length} bytes to ${fileName}`);
-    
-    const { error: uploadError } = await supabase.storage
-      .from('images')
-      .upload(fileName, imageBytes, {
-        contentType: `image/${imageFormat}`,
-        upsert: true,
-      });
-
-    if (uploadError) {
-      console.error('[generate-repose-single:bg] 4K upload error:', uploadError);
-      // Leave in uploading with temp_path - complete-repose-upload will retry
-      return;
-    }
-
-    const { data: publicUrl } = supabase.storage
-      .from('images')
-      .getPublicUrl(fileName);
-
-    await supabase
-      .from('repose_outputs')
-      .update({ 
-        status: 'complete',
-        result_url: publicUrl.publicUrl,
-        error_message: null,
-        temp_path: null,
-      })
-      .eq('id', outputId);
-
-    console.log(`[generate-repose-single:bg] 4K upload complete: ${publicUrl.publicUrl}`);
-    
-    // Clean up temp file
-    await supabase.storage
-      .from('images')
-      .remove([tempPath]);
-      
-    console.log(`[generate-repose-single:bg] Cleaned up temp file`);
-  } catch (error) {
-    console.error('[generate-repose-single:bg] 4K upload failed:', error);
-    // Leave in uploading with temp_path - complete-repose-upload will handle
-  }
-}
