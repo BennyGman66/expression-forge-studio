@@ -135,32 +135,21 @@ async function processQueueBackground(
 
   // Helper to log stats
   async function logHeartbeat() {
-    // Query outputs for this job specifically
-    let query = supabase
-      .from("repose_outputs")
-      .select("id, status")
-      .eq("batch_id", batchId)
-      .eq("status", "queued");
-
-    if (targetOutputIds.length > 0) {
-      query = query.in("id", targetOutputIds);
-    }
-
-    const { data: queuedOutputs } = await query;
-
+    // Query ALL outputs for this batch to get accurate stats
     const { data: allOutputs } = await supabase
       .from("repose_outputs")
       .select("id, status")
-      .eq("batch_id", batchId)
-      .in("id", targetOutputIds.length > 0 ? targetOutputIds : [batchId]); // Fallback query
+      .eq("batch_id", batchId);
 
-    const running = allOutputs?.filter((o: any) => o.status === "running").length || 0;
-    const queued = queuedOutputs?.length || 0;
     const complete = allOutputs?.filter((o: any) => o.status === "complete").length || 0;
+    const running = allOutputs?.filter((o: any) => o.status === "running").length || 0;
+    const uploading = allOutputs?.filter((o: any) => o.status === "uploading").length || 0;
+    const queued = allOutputs?.filter((o: any) => o.status === "queued").length || 0;
     const failed = allOutputs?.filter((o: any) => o.status === "failed").length || 0;
+    const total = allOutputs?.length || 0;
     const elapsed = Math.round((Date.now() - startTime) / 1000);
 
-    console.log(`[process-repose-queue-4k] Heartbeat: ${complete} complete, ${running} running, ${queued} queued, ${failed} failed, elapsed ${elapsed}s`);
+    console.log(`[process-repose-queue-4k] Heartbeat: ${complete} complete, ${running} running, ${uploading} uploading, ${queued} queued, ${failed} failed, elapsed ${elapsed}s`);
     lastLogTime = Date.now();
 
     // Update job progress
@@ -169,8 +158,8 @@ async function processQueueBackground(
       .update({
         progress_done: complete,
         progress_failed: failed,
-        progress_total: targetOutputIds.length || (complete + running + queued + failed),
-        progress_message: `4K Rendering: ${complete}/${targetOutputIds.length || (complete + running + queued + failed)}`,
+        progress_total: total,
+        progress_message: `4K Rendering: ${complete}/${total} (${queued} queued)`,
         updated_at: new Date().toISOString(),
       })
       .eq("id", pipelineJobId);
@@ -230,8 +219,9 @@ async function processQueueBackground(
       }
 
       // Fetch next batch of queued outputs
-      // NOTE: We don't use targetOutputIds for the query because Supabase .in() has a ~500 item limit
-      // Instead, we just query all queued outputs for this batch and check membership in code
+      // NOTE: We process ALL queued outputs for this batch, regardless of targetOutputIds
+      // targetOutputIds was only used for selective re-renders, but in practice we now
+      // just process everything that's queued to avoid ID filtering issues
       const { data: queuedOutputs, error: queryError } = await supabase
         .from("repose_outputs")
         .select("id, pose_url, shot_type")
@@ -245,27 +235,16 @@ async function processQueueBackground(
         break;
       }
 
-      // If targetOutputIds is specified, filter results (for selective re-renders)
-      const filteredOutputs = targetOutputIds.length > 0
-        ? queuedOutputs?.filter((o: any) => targetOutputIds.includes(o.id))
-        : queuedOutputs;
-
-      if (!filteredOutputs?.length) {
-        // If we had targetOutputIds but no matches, there might be more queued outputs outside our target set
-        // In that case, we're done with the targeted subset
-        if (targetOutputIds.length > 0 && queuedOutputs?.length) {
-          console.log(`[process-repose-queue-4k] No more targeted outputs in queue, finishing (${queuedOutputs.length} other queued exist)`);
-        } else {
-          console.log(`[process-repose-queue-4k] No more queued outputs, finishing`);
-        }
+      if (!queuedOutputs?.length) {
+        console.log(`[process-repose-queue-4k] No more queued outputs, finishing`);
         break;
       }
 
-      console.log(`[process-repose-queue-4k] Processing ${filteredOutputs.length} outputs at ${imageSize}`);
+      console.log(`[process-repose-queue-4k] Processing ${queuedOutputs.length} outputs at ${imageSize}`);
 
-      // Process outputs concurrently
+      // Process outputs (single at a time for 4K to avoid rate limits)
       const results = await Promise.allSettled(
-        filteredOutputs.map((output: any) =>
+        queuedOutputs.map((output: any) =>
           processOutput(supabase, output.id, imageSize, processedIds)
         )
       );
