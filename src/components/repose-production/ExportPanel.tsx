@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, CheckCircle2, Circle, AlertCircle, Lock, Check, Images } from "lucide-react";
+import { Download, CheckCircle2, Circle, AlertCircle, Lock, Check, Images, RotateCw } from "lucide-react";
 import { useReposeBatch, useMarkLooksExported } from "@/hooks/useReposeBatches";
 import { useReposeSelection, LookWithOutputs } from "@/hooks/useReposeSelection";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
@@ -15,6 +15,7 @@ import { MAX_FAVORITES_PER_VIEW } from "@/types/repose";
 import { cn } from "@/lib/utils";
 import JSZip from "jszip";
 import leapfrogLogo from "@/assets/leapfrog-logo.png";
+import { supabase } from "@/integrations/supabase/client";
 
 interface ExportPanelProps {
   batchId: string | undefined;
@@ -43,6 +44,7 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
 
   const [selectedLookIds, setSelectedLookIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
+  const [isRerendering, setIsRerendering] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState<string>("");
   const [upscaleMultiplier, setUpscaleMultiplier] = useState<number>(2); // Default to 2x
@@ -528,6 +530,54 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
     }
   }, [upscaleMultiplier]);
 
+  // Count total favorites for selected looks (for 4K re-render button)
+  const selectedFavoriteCount = useMemo(() => {
+    if (selectedLookIds.size === 0) return 0;
+    let count = 0;
+    for (const look of readyLooks) {
+      if (selectedLookIds.has(look.lookId)) {
+        for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
+          const viewOutputs = look.outputsByView[shotType] || [];
+          count += viewOutputs.filter(o => o.is_favorite && o.result_url).length;
+        }
+      }
+    }
+    return count;
+  }, [selectedLookIds, readyLooks]);
+
+  // Re-render selected favorites at 4K resolution
+  const handleRerender4K = useCallback(async () => {
+    if (selectedLookIds.size === 0) {
+      toast.error("No looks selected");
+      return;
+    }
+
+    setIsRerendering(true);
+    
+    try {
+      const lookIds = Array.from(selectedLookIds);
+      
+      const { data, error } = await supabase.functions.invoke("rerender-favorites-4k", {
+        body: {
+          batchId,
+          lookIds,
+          imageSize: "4K",
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success(`Started re-rendering ${data.count} favorites at 4K resolution`);
+    } catch (error) {
+      console.error("Re-render failed:", error);
+      toast.error(`Re-render failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsRerendering(false);
+    }
+  }, [batchId, selectedLookIds]);
+
   if (batchLoading || isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -644,6 +694,20 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
           >
             <Images className="w-4 h-4" />
             Export All Assets ({readyLooks.length})
+          </Button>
+          
+          {/* Separator */}
+          <div className="w-px h-6 bg-border" />
+          
+          {/* Re-render at 4K Button */}
+          <Button
+            variant="secondary"
+            onClick={handleRerender4K}
+            disabled={selectedLookIds.size === 0 || isRerendering || isExporting}
+            className="gap-2"
+          >
+            <RotateCw className={cn("w-4 h-4", isRerendering && "animate-spin")} />
+            Re-render @ 4K ({selectedFavoriteCount})
           </Button>
         </div>
       </div>
