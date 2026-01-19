@@ -95,6 +95,26 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
   const detectStalled = useDetectStalledRuns();
   const { createJob, updateProgress, setStatus } = usePipelineJobs();
 
+  // Fetch active pipeline job for this batch from database (survives page reload)
+  const { data: activePipelineJob, refetch: refetchActivePipelineJob } = useQuery({
+    queryKey: ["active-repose-job", batchId],
+    queryFn: async () => {
+      if (!batchId) return null;
+      const { data } = await supabase
+        .from("pipeline_jobs")
+        .select("id, status")
+        .eq("type", "REPOSE_GENERATION")
+        .contains("origin_context", { batchId })
+        .in("status", ["RUNNING", "QUEUED"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+      return data;
+    },
+    enabled: !!batchId,
+    refetchInterval: 5000,
+  });
+
   // Local state
   const [selectedBrandId, setSelectedBrandId] = useState<string>("");
   const [rendersPerLook, setRendersPerLook] = useState(2);
@@ -356,17 +376,20 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     };
   }, [batchId, refetchOutputs]);
 
-  // Track generation based on runs
+  // Track generation based on runs AND active pipeline job
   useEffect(() => {
     const hasRunning = runs?.some(r => r.status === 'running');
     const hasQueued = runs?.some(r => r.status === 'queued');
-    setIsGenerating(hasRunning || false);
+    const hasActiveJob = activePipelineJob?.status === 'RUNNING' || activePipelineJob?.status === 'QUEUED';
+    
+    // Show as generating if: runs are queued/running OR there's an active pipeline job
+    setIsGenerating(hasRunning || hasQueued || hasActiveJob);
     
     // Update batch status if needed
     if (batch?.status === 'DRAFT' && (hasRunning || hasQueued)) {
       updateStatus.mutate({ batchId: batchId!, status: 'RUNNING' });
     }
-  }, [runs, batch?.status, batchId]);
+  }, [runs, batch?.status, batchId, activePipelineJob]);
 
   // Stall detection
   useEffect(() => {
@@ -594,8 +617,8 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
         toast.success('Generation started in background - you can close this tab');
       }
 
-      // Generation continues in background, UI updates via realtime
-      setIsGenerating(false);
+      // Generation state is now managed via realtime + active job query
+      // Don't set isGenerating to false - let the useEffect handle it
 
     } catch (error) {
       console.error('Generation error:', error);
@@ -604,15 +627,33 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     }
   };
 
-  // Stop generation - sets job to paused
+  // Stop generation - sets job to paused and cancels queued runs
   const handleStopGeneration = async () => {
-    if (!pipelineJobIdRef.current) return;
+    // Use active job from database (survives page reload), fallback to ref
+    const jobId = activePipelineJob?.id || pipelineJobIdRef.current;
+    
+    if (!jobId) {
+      toast.error('No active job found to stop');
+      return;
+    }
     
     try {
-      await setStatus(pipelineJobIdRef.current, 'PAUSED');
-      toast.info('Generation paused');
+      // Pause the pipeline job
+      await setStatus(jobId, 'PAUSED');
+      
+      // Also update any running/queued runs to failed so they don't continue
+      await supabase
+        .from('repose_runs')
+        .update({ status: 'failed', error_message: 'Cancelled by user' })
+        .eq('batch_id', batchId)
+        .in('status', ['queued', 'running']);
+      
+      toast.success('Generation stopped');
+      refetchRuns();
+      refetchActivePipelineJob();
     } catch (error) {
-      console.error('Failed to pause:', error);
+      console.error('Failed to stop:', error);
+      toast.error('Failed to stop generation');
     }
   };
 
