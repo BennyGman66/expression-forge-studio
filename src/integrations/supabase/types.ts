@@ -2868,6 +2868,7 @@ export type Database = {
           assigned_view: string | null
           batch_id: string
           created_at: string | null
+          exported_at: string | null
           id: string
           look_id: string | null
           source_output_id: string | null
@@ -2878,6 +2879,7 @@ export type Database = {
           assigned_view?: string | null
           batch_id: string
           created_at?: string | null
+          exported_at?: string | null
           id?: string
           look_id?: string | null
           source_output_id?: string | null
@@ -2888,6 +2890,7 @@ export type Database = {
           assigned_view?: string | null
           batch_id?: string
           created_at?: string | null
+          exported_at?: string | null
           id?: string
           look_id?: string | null
           source_output_id?: string | null
