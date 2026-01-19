@@ -112,11 +112,10 @@ serve(async (req) => {
           imageSize,
           favoriteCount: favorites.length,
         },
-        progress_complete: 0,
-        progress_running: favorites.length,
-        progress_queued: 0,
+        progress_done: 0,
         progress_failed: 0,
         progress_total: favorites.length,
+        started_at: new Date().toISOString(),
       })
       .select()
       .single();
@@ -177,9 +176,9 @@ serve(async (req) => {
             await supabase
               .from("pipeline_jobs")
               .update({
-                progress_complete: completed,
+                progress_done: completed,
                 progress_failed: failed,
-                progress_running: favorites.length - completed - failed,
+                updated_at: new Date().toISOString(),
               })
               .eq("id", job.id);
           }
@@ -195,9 +194,9 @@ serve(async (req) => {
           .from("pipeline_jobs")
           .update({
             status: failed === favorites.length ? "FAILED" : "COMPLETED",
-            progress_complete: completed,
+            progress_done: completed,
             progress_failed: failed,
-            progress_running: 0,
+            completed_at: new Date().toISOString(),
           })
           .eq("id", job.id);
       }
