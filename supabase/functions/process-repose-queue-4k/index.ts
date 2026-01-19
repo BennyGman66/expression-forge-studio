@@ -230,7 +230,9 @@ async function processQueueBackground(
       }
 
       // Fetch next batch of queued outputs
-      let query = supabase
+      // NOTE: We don't use targetOutputIds for the query because Supabase .in() has a ~500 item limit
+      // Instead, we just query all queued outputs for this batch and check membership in code
+      const { data: queuedOutputs, error: queryError } = await supabase
         .from("repose_outputs")
         .select("id, pose_url, shot_type")
         .eq("batch_id", batchId)
@@ -238,22 +240,32 @@ async function processQueueBackground(
         .order("created_at", { ascending: true })
         .limit(OUTPUT_CONCURRENCY);
 
-      if (targetOutputIds.length > 0) {
-        query = query.in("id", targetOutputIds);
-      }
-
-      const { data: queuedOutputs } = await query;
-
-      if (!queuedOutputs?.length) {
-        console.log(`[process-repose-queue-4k] No more queued outputs, finishing`);
+      if (queryError) {
+        console.error(`[process-repose-queue-4k] Query error:`, queryError);
         break;
       }
 
-      console.log(`[process-repose-queue-4k] Processing ${queuedOutputs.length} outputs at ${imageSize}`);
+      // If targetOutputIds is specified, filter results (for selective re-renders)
+      const filteredOutputs = targetOutputIds.length > 0
+        ? queuedOutputs?.filter((o: any) => targetOutputIds.includes(o.id))
+        : queuedOutputs;
+
+      if (!filteredOutputs?.length) {
+        // If we had targetOutputIds but no matches, there might be more queued outputs outside our target set
+        // In that case, we're done with the targeted subset
+        if (targetOutputIds.length > 0 && queuedOutputs?.length) {
+          console.log(`[process-repose-queue-4k] No more targeted outputs in queue, finishing (${queuedOutputs.length} other queued exist)`);
+        } else {
+          console.log(`[process-repose-queue-4k] No more queued outputs, finishing`);
+        }
+        break;
+      }
+
+      console.log(`[process-repose-queue-4k] Processing ${filteredOutputs.length} outputs at ${imageSize}`);
 
       // Process outputs concurrently
       const results = await Promise.allSettled(
-        queuedOutputs.map((output: any) =>
+        filteredOutputs.map((output: any) =>
           processOutput(supabase, output.id, imageSize, processedIds)
         )
       );
