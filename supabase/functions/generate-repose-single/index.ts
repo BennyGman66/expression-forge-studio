@@ -115,6 +115,8 @@ serve(async (req) => {
     // Generate the reposed image using AI
     const prompt = `Use the provided greyscale reference image as a strict pose, camera, and framing template.
 
+**OUTPUT FORMAT: Generate a 3:4 portrait aspect ratio image (768x1024 pixels).**
+
 Repose the subject in the input photo to exactly match the reference in:
 - body pose and limb positioning
 - head tilt and shoulder angle
@@ -122,7 +124,7 @@ Repose the subject in the input photo to exactly match the reference in:
 - camera height, focal distance, and perspective
 - image crop and framing
 
-The output must be cropped to match the reference image exactly.
+The output must be a 3:4 portrait aspect ratio image matching the reference pose exactly.
 
 If the reference image does not show the full body, do not include the full body in the output.
 
@@ -132,7 +134,7 @@ Do not alter the subject's identity, facial features, hairstyle, body proportion
 
 Do not stylise or reinterpret the image.
 
-The final image should look like the original photo, naturally repositioned and cropped identically to the reference image.`;
+The final image should look like the original photo, naturally repositioned in 3:4 portrait format and cropped identically to the reference image.`;
 
     // Call AI API with timeout protection
     const response = await withTimeout(
@@ -157,6 +159,7 @@ The final image should look like the original photo, naturally repositioned and 
             },
           ],
           modalities: ['image', 'text'],
+          size: '768x1024', // 3:4 portrait aspect ratio
         }),
       }),
       AI_TIMEOUT_MS,
