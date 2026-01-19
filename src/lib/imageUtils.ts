@@ -35,9 +35,9 @@ function getSupabaseResizedUrl(url: string, size: number): string {
     '/storage/v1/render/image/'
   );
   
-  // Add resize parameters
+  // Add resize parameters - use contain to preserve full image without cropping
   const separator = resizedUrl.includes('?') ? '&' : '?';
-  return `${resizedUrl}${separator}width=${size}&height=${size}&resize=cover`;
+  return `${resizedUrl}${separator}width=${size}&resize=contain`;
 }
 
 /**
