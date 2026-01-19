@@ -36,7 +36,10 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
     setFavoriteRank,
     getNextAvailableRank,
     isViewFull,
-    refetchOutputs,
+    isViewSkipped,
+    skipView,
+    undoSkipView,
+    refetchAll,
   } = useReposeSelection(batchId);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -234,7 +237,10 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
                   onOpenLightbox={(outputId) => openLightbox(outputId, look.lookId)}
                   getNextAvailableRank={(shotType) => getNextAvailableRank(look.batchItemId, shotType)}
                   isViewFull={(shotType) => isViewFull(look.batchItemId, shotType)}
-                  onRefresh={refetchOutputs}
+                  isViewSkipped={(shotType) => isViewSkipped(look.lookId, shotType)}
+                  onSkipView={(shotType) => skipView.mutate({ lookId: look.lookId, shotType })}
+                  onUndoSkipView={(shotType) => undoSkipView.mutate({ lookId: look.lookId, shotType })}
+                  onRefresh={refetchAll}
                 />
               </div>
             ))}

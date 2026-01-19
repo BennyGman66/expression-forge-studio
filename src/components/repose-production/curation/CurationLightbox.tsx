@@ -160,7 +160,7 @@ export function CurationLightbox({
             {/* Image with explicit container */}
             <div className="h-full w-full flex items-center justify-center">
               <img
-                src={currentImage.url}
+                src={getImageUrl(currentImage.url, 'preview')}
                 alt={`Output ${currentIndex + 1}`}
                 className="max-h-full max-w-full object-contain"
               />

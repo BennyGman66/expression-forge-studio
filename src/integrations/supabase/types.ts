@@ -3122,6 +3122,41 @@ export type Database = {
           },
         ]
       }
+      repose_skipped_views: {
+        Row: {
+          batch_id: string
+          id: string
+          look_id: string
+          shot_type: string
+          skipped_at: string | null
+          skipped_by: string | null
+        }
+        Insert: {
+          batch_id: string
+          id?: string
+          look_id: string
+          shot_type: string
+          skipped_at?: string | null
+          skipped_by?: string | null
+        }
+        Update: {
+          batch_id?: string
+          id?: string
+          look_id?: string
+          shot_type?: string
+          skipped_at?: string | null
+          skipped_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "repose_skipped_views_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "repose_batches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       review_comments: {
         Row: {
           attachment_url: string | null

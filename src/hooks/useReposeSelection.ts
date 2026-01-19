@@ -1,11 +1,19 @@
 import { useMemo, useCallback } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useReposeOutputs, useReposeBatchItems, ReposeBatchItemWithLook } from "./useReposeBatches";
 import type { ReposeOutput } from "@/types/repose";
 import { OutputShotType, slotToShotType, ALL_OUTPUT_SHOT_TYPES } from "@/types/shot-types";
 import { MAX_FAVORITES_PER_VIEW } from "@/types/repose";
+
+export interface SkippedView {
+  id: string;
+  batch_id: string;
+  look_id: string;
+  shot_type: OutputShotType;
+  skipped_at: string;
+}
 
 export interface LookWithOutputs {
   lookId: string;
@@ -18,9 +26,10 @@ export interface LookWithOutputs {
 }
 
 export interface ViewSelectionStats {
-  byView: Record<OutputShotType, { selected: number; total: number; isComplete: boolean }>;
+  byView: Record<OutputShotType, { selected: number; total: number; isComplete: boolean; isSkipped: boolean }>;
   totalViews: number;
   completedViews: number;
+  skippedViews: number;
   isAllComplete: boolean;
 }
 
@@ -28,6 +37,81 @@ export function useReposeSelection(batchId: string | undefined) {
   const queryClient = useQueryClient();
   const { data: outputs, isLoading: outputsLoading, refetch: refetchOutputs } = useReposeOutputs(batchId);
   const { data: batchItems, isLoading: itemsLoading } = useReposeBatchItems(batchId);
+
+  // Fetch skipped views
+  const { data: skippedViews, isLoading: skippedLoading, refetch: refetchSkipped } = useQuery({
+    queryKey: ["repose-skipped-views", batchId],
+    queryFn: async () => {
+      if (!batchId) return [];
+      const { data, error } = await supabase
+        .from("repose_skipped_views")
+        .select("*")
+        .eq("batch_id", batchId);
+      if (error) throw error;
+      return (data || []) as SkippedView[];
+    },
+    enabled: !!batchId,
+  });
+
+  // Helper to check if a view is skipped
+  const isViewSkipped = useCallback((lookId: string, shotType: OutputShotType): boolean => {
+    return skippedViews?.some(sv => sv.look_id === lookId && sv.shot_type === shotType) || false;
+  }, [skippedViews]);
+
+  // Mutation to skip a view
+  const skipView = useMutation({
+    mutationFn: async ({ 
+      lookId, 
+      shotType 
+    }: { 
+      lookId: string; 
+      shotType: OutputShotType;
+    }) => {
+      const { error } = await supabase
+        .from("repose_skipped_views")
+        .insert({
+          batch_id: batchId,
+          look_id: lookId,
+          shot_type: shotType,
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: (_, { shotType }) => {
+      queryClient.invalidateQueries({ queryKey: ["repose-skipped-views", batchId] });
+      toast.success(`Skipped ${shotType} - marked as complete`);
+    },
+    onError: (error) => {
+      toast.error(`Failed to skip view: ${error.message}`);
+    },
+  });
+
+  // Mutation to undo skip
+  const undoSkipView = useMutation({
+    mutationFn: async ({ 
+      lookId, 
+      shotType 
+    }: { 
+      lookId: string; 
+      shotType: OutputShotType;
+    }) => {
+      const { error } = await supabase
+        .from("repose_skipped_views")
+        .delete()
+        .eq("batch_id", batchId)
+        .eq("look_id", lookId)
+        .eq("shot_type", shotType);
+
+      if (error) throw error;
+    },
+    onSuccess: (_, { shotType }) => {
+      queryClient.invalidateQueries({ queryKey: ["repose-skipped-views", batchId] });
+      toast.success(`Restored ${shotType} - selections required`);
+    },
+    onError: (error) => {
+      toast.error(`Failed to undo skip: ${error.message}`);
+    },
+  });
 
   // Mutation to set favorite rank
   const setFavoriteRank = useMutation({
@@ -173,9 +257,10 @@ export function useReposeSelection(batchId: string | undefined) {
           sourceUrl: item.source_url,
           outputsByView: {} as Record<OutputShotType, ReposeOutput[]>,
           selectionStats: {
-            byView: {} as Record<OutputShotType, { selected: number; total: number; isComplete: boolean }>,
+            byView: {} as Record<OutputShotType, { selected: number; total: number; isComplete: boolean; isSkipped: boolean }>,
             totalViews: 0,
             completedViews: 0,
+            skippedViews: 0,
             isAllComplete: false,
           },
         });
@@ -209,32 +294,37 @@ export function useReposeSelection(batchId: string | undefined) {
     for (const look of lookMap.values()) {
       let totalViews = 0;
       let completedViews = 0;
+      let skippedViewsCount = 0;
 
       for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
         const viewOutputs = look.outputsByView[shotType] || [];
         const completedOutputs = viewOutputs.filter(o => o.status === 'complete');
         const selectedCount = completedOutputs.filter(o => o.is_favorite).length;
+        const viewIsSkipped = isViewSkipped(look.lookId, shotType);
         
-        if (completedOutputs.length > 0) {
+        if (completedOutputs.length > 0 || viewIsSkipped) {
           totalViews++;
-          const isComplete = selectedCount >= MAX_FAVORITES_PER_VIEW;
+          const isComplete = selectedCount >= MAX_FAVORITES_PER_VIEW || viewIsSkipped;
           if (isComplete) completedViews++;
+          if (viewIsSkipped) skippedViewsCount++;
 
           look.selectionStats.byView[shotType] = {
             selected: selectedCount,
             total: completedOutputs.length,
             isComplete,
+            isSkipped: viewIsSkipped,
           };
         }
       }
 
       look.selectionStats.totalViews = totalViews;
       look.selectionStats.completedViews = completedViews;
+      look.selectionStats.skippedViews = skippedViewsCount;
       look.selectionStats.isAllComplete = totalViews > 0 && completedViews === totalViews;
     }
 
     return Array.from(lookMap.values());
-  }, [outputs, batchItems]);
+  }, [outputs, batchItems, isViewSkipped]);
 
   // Overall stats
   const overallStats = useMemo(() => {
@@ -288,18 +378,29 @@ export function useReposeSelection(batchId: string | undefined) {
     return outputs?.filter(o => o.is_favorite && o.result_url) || [];
   }, [outputs]);
 
+  // Refetch all data
+  const refetchAll = useCallback(() => {
+    refetchOutputs();
+    refetchSkipped();
+  }, [refetchOutputs, refetchSkipped]);
+
   return {
     outputs,
     batchItems,
     groupedByLook,
     overallStats,
-    isLoading: outputsLoading || itemsLoading,
+    skippedViews,
+    isLoading: outputsLoading || itemsLoading || skippedLoading,
     setFavoriteRank,
     swapRanks,
     clearViewSelections,
     getNextAvailableRank,
     isViewFull,
+    isViewSkipped,
+    skipView,
+    undoSkipView,
     getFavoritesForExport,
     refetchOutputs,
+    refetchAll,
   };
 }
