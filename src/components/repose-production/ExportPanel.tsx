@@ -51,11 +51,16 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
     const incomplete: LookWithOutputs[] = [];
 
     for (const look of groupedByLook) {
-      // Check all 4 shot types - a view is complete if it has 3 selections OR is skipped
+      // Check all 4 shot types - a view is complete if it has 3 selections, is skipped, or has no outputs
       let allComplete = true;
       for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
         const stats = look.selectionStats.byView[shotType];
-        const viewComplete = stats?.isComplete || stats?.isSkipped || (stats?.selected >= MAX_FAVORITES_PER_VIEW);
+        // View is complete if:
+        // 1. Has no outputs at all (stats undefined = never generated, nothing to export)
+        // 2. Is explicitly skipped
+        // 3. Has 3+ selections
+        const hasNoOutputs = !stats;
+        const viewComplete = hasNoOutputs || stats?.isSkipped || stats?.isComplete || (stats?.selected >= MAX_FAVORITES_PER_VIEW);
         if (!viewComplete) {
           allComplete = false;
           break;
@@ -694,17 +699,17 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
 
               {/* Incomplete Looks - Grey, Not Selectable */}
               {incompleteLooks.map((look) => {
-                // Count completed and skipped views
+                // Count completed and skipped views (views with no outputs don't count toward required)
                 let completedOrSkipped = 0;
                 let totalRequired = 0;
                 for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
                   const stats = look.selectionStats.byView[shotType];
-                  if (stats?.isSkipped) {
-                    // Skipped views don't count toward required
+                  // Views with no outputs or that are skipped don't count toward required
+                  if (!stats || stats.isSkipped) {
                     continue;
                   }
                   totalRequired++;
-                  if (stats?.isComplete || (stats?.selected >= MAX_FAVORITES_PER_VIEW)) {
+                  if (stats.isComplete || (stats.selected >= MAX_FAVORITES_PER_VIEW)) {
                     completedOrSkipped++;
                   }
                 }
