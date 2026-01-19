@@ -366,9 +366,67 @@ async function processOutput(
       }
 
       // Call the single generation function with imageSize
-      const { error } = await supabase.functions.invoke("generate-repose-single", {
+      const { data, error } = await supabase.functions.invoke("generate-repose-single", {
         body: { outputId, imageSize },
       });
+
+      // Handle 202 Accepted (AI succeeded, upload in progress)
+      if (data?.status === 'uploading' || (data?.success && !error)) {
+        console.log(`[process-repose-queue-4k] Output ${outputId} returned uploading status, waiting for completion`);
+        
+        // Wait a bit then check status
+        await new Promise((r) => setTimeout(r, 5000));
+        
+        const { data: outputCheck } = await supabase
+          .from("repose_outputs")
+          .select("status, result_url, temp_path")
+          .eq("id", outputId)
+          .single();
+        
+        if (outputCheck?.status === "complete" && outputCheck?.result_url) {
+          console.log(`[process-repose-queue-4k] Output ${outputId} completed via background upload`);
+          processedIds.add(outputId);
+          return { success: true };
+        }
+        
+        // If still uploading with temp_path, call complete-repose-upload
+        if (outputCheck?.status === "uploading" && outputCheck?.temp_path) {
+          console.log(`[process-repose-queue-4k] Output ${outputId} still uploading, invoking complete-repose-upload`);
+          
+          const { error: completeError } = await supabase.functions.invoke("complete-repose-upload", {
+            body: { outputId },
+          });
+          
+          if (completeError) {
+            console.error(`[process-repose-queue-4k] complete-repose-upload error for ${outputId}:`, completeError.message);
+            // Give it another chance on next iteration
+            if (attempt < MAX_RETRIES) {
+              await new Promise((r) => setTimeout(r, BASE_RETRY_DELAY_MS));
+              continue;
+            }
+          } else {
+            // Wait for completion
+            await new Promise((r) => setTimeout(r, 3000));
+            
+            const { data: finalCheck } = await supabase
+              .from("repose_outputs")
+              .select("status, result_url")
+              .eq("id", outputId)
+              .single();
+            
+            if (finalCheck?.status === "complete") {
+              console.log(`[process-repose-queue-4k] Output ${outputId} completed via complete-repose-upload`);
+              processedIds.add(outputId);
+              return { success: true };
+            }
+          }
+        }
+        
+        // If still not complete after attempts, continue to next retry
+        if (attempt < MAX_RETRIES) {
+          continue;
+        }
+      }
 
       if (error) {
         lastError = error;
@@ -381,7 +439,7 @@ async function processOutput(
         // Check if the output was actually completed despite the error (timeout during response)
         const { data: outputCheck } = await supabase
           .from("repose_outputs")
-          .select("status, result_url")
+          .select("status, result_url, temp_path")
           .eq("id", outputId)
           .single();
 
@@ -391,14 +449,37 @@ async function processOutput(
           return { success: true };
         }
 
-        // If stuck in 'uploading', reset to queued for retry (AI succeeded, upload failed)
-        if (outputCheck?.status === "uploading") {
-          console.log(`[process-repose-queue-4k] Output ${outputId} stuck in uploading, resetting to queued`);
-          await supabase
+        // If stuck in 'uploading' with temp_path, call complete-repose-upload
+        if (outputCheck?.status === "uploading" && outputCheck?.temp_path) {
+          console.log(`[process-repose-queue-4k] Output ${outputId} stuck in uploading with temp, calling complete-repose-upload`);
+          
+          await supabase.functions.invoke("complete-repose-upload", {
+            body: { outputId },
+          });
+          
+          // Wait and check
+          await new Promise((r) => setTimeout(r, 5000));
+          
+          const { data: afterComplete } = await supabase
             .from("repose_outputs")
-            .update({ status: "queued", error_message: "Upload timeout, retrying" })
-            .eq("id", outputId);
-          // Continue to next retry
+            .select("status, result_url")
+            .eq("id", outputId)
+            .single();
+          
+          if (afterComplete?.status === "complete") {
+            console.log(`[process-repose-queue-4k] Output ${outputId} completed after complete-repose-upload`);
+            processedIds.add(outputId);
+            return { success: true };
+          }
+          
+          // If still not complete, reset to queued
+          if (afterComplete?.status === "uploading") {
+            await supabase
+              .from("repose_outputs")
+              .update({ status: "queued", error_message: "Upload completion failed, retrying" })
+              .eq("id", outputId);
+          }
+          
           if (attempt < MAX_RETRIES) {
             await new Promise((r) => setTimeout(r, BASE_RETRY_DELAY_MS));
             continue;

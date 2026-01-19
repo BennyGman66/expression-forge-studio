@@ -2,6 +2,10 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+declare const EdgeRuntime: {
+  waitUntil(promise: Promise<unknown>): void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -43,7 +47,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Prom
   ]);
 }
 
-const AI_TIMEOUT_MS = 30000; // 30 second timeout for AI calls - leaves room for upload
+const AI_TIMEOUT_MS = 35000; // 35 second timeout for AI calls - leaves room for temp upload
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -168,7 +172,7 @@ The final image should look like the original photo, naturally repositioned in 3
     }
 
     // Call AI API with timeout protection
-    const response = await withTimeout(
+    const aiResponse = await withTimeout(
       fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -184,11 +188,11 @@ The final image should look like the original photo, naturally repositioned in 3
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     console.log(`[generate-repose-single] AI response received in ${elapsed}s`);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[generate-repose-single] AI API error:', response.status, errorText);
+    if (!aiResponse.ok) {
+      const errorText = await aiResponse.text();
+      console.error('[generate-repose-single] AI API error:', aiResponse.status, errorText);
       
-      if (response.status === 429) {
+      if (aiResponse.status === 429) {
         await supabase
           .from('repose_outputs')
           .update({ status: 'queued' })
@@ -199,10 +203,10 @@ The final image should look like the original photo, naturally repositioned in 3
         );
       }
       
-      throw new Error(`AI API error: ${response.status}`);
+      throw new Error(`AI API error: ${aiResponse.status}`);
     }
 
-    const aiResult = await response.json();
+    const aiResult = await aiResponse.json();
     
     // Check for embedded error in response (API sometimes returns 200 with error in body)
     const embeddedError = aiResult.choices?.[0]?.error;
@@ -260,58 +264,59 @@ The final image should look like the original photo, naturally repositioned in 3
     const imageFormat = base64Match[1];
     const base64Data = base64Match[2];
     
-    // Mark as uploading BEFORE starting the slow upload process
-    // This way if we timeout during upload, we know AI succeeded
-    await supabase
-      .from('repose_outputs')
-      .update({ status: 'uploading' })
-      .eq('id', outputId);
+    // For large images (4K), store base64 to temp storage and let a separate function upload
+    // This avoids timeout issues since 4K images can be 10-15MB
+    const is4K = selectedImageSize === '4K';
+    const tempPath = `temp/${outputId}.${imageFormat}.b64`;
     
-    console.log(`[generate-repose-single] Marked as uploading, starting storage upload...`);
-    
-    const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-    const fileName = `repose/${output.batch_id}/${outputId}_${Date.now()}.${imageFormat}`;
-    
-    const { error: uploadError } = await supabase.storage
-      .from('images')
-      .upload(fileName, imageBytes, {
-        contentType: `image/${imageFormat}`,
-        upsert: true,
-      });
-
-    if (uploadError) {
-      console.error('[generate-repose-single] Upload error:', uploadError);
-      // Reset to queued so it can be retried
-      await supabase
-        .from('repose_outputs')
-        .update({ status: 'queued', error_message: 'Upload failed, will retry' })
-        .eq('id', outputId);
-      throw new Error('Failed to upload image');
-    }
-
-    const { data: publicUrl } = supabase.storage
-      .from('images')
-      .getPublicUrl(fileName);
-
-    // Update output with result
+    // Mark as uploading with temp_path reference
     await supabase
       .from('repose_outputs')
       .update({ 
-        status: 'complete',
-        result_url: publicUrl.publicUrl,
-        error_message: null,
+        status: 'uploading',
+        temp_path: tempPath,
       })
       .eq('id', outputId);
-
-    console.log(`[generate-repose-single] Successfully generated: ${publicUrl.publicUrl}`);
-
-    return new Response(
+    
+    console.log(`[generate-repose-single] AI complete, marked as uploading (4K: ${is4K})`);
+    
+    // Store base64 to temp storage first (faster than decoding + uploading the final image)
+    const base64Blob = new Blob([base64Data], { type: 'text/plain' });
+    const { error: tempUploadError } = await supabase.storage
+      .from('images')
+      .upload(tempPath, base64Blob, {
+        contentType: 'text/plain',
+        upsert: true,
+      });
+    
+    if (tempUploadError) {
+      console.error('[generate-repose-single] Temp upload error:', tempUploadError);
+      // Reset to queued so it can be regenerated
+      await supabase
+        .from('repose_outputs')
+        .update({ status: 'queued', error_message: 'Temp upload failed, will retry', temp_path: null })
+        .eq('id', outputId);
+      throw new Error('Failed to upload temp data');
+    }
+    
+    console.log(`[generate-repose-single] Temp data stored (${Math.round(base64Data.length / 1024)}KB), returning 202`);
+    
+    // Return 202 Accepted immediately - upload will complete in background or via complete-repose-upload
+    const response = new Response(
       JSON.stringify({ 
         success: true, 
-        resultUrl: publicUrl.publicUrl,
+        status: 'uploading',
+        message: 'AI generation complete, upload in progress',
       }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
+    
+    // Try to complete the upload in background (may timeout for 4K, that's OK)
+    EdgeRuntime.waitUntil(
+      completeUploadInBackground(supabase, outputId, output.batch_id, base64Data, imageFormat, tempPath)
+    );
+    
+    return response;
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -335,16 +340,27 @@ The final image should look like the original photo, naturally repositioned in 3
         // Check if we were in 'uploading' status (AI succeeded but upload timed out)
         const { data: currentOutput } = await supabase
           .from('repose_outputs')
-          .select('status')
+          .select('status, temp_path')
           .eq('id', outputId)
           .single();
         
+        if (currentOutput?.status === 'uploading' && currentOutput?.temp_path) {
+          // AI succeeded, temp stored, just need to complete upload
+          // Leave in uploading status - the queue processor will call complete-repose-upload
+          console.log('[generate-repose-single] Timeout during upload, but temp data saved - will complete via separate function');
+          
+          return new Response(
+            JSON.stringify({ success: true, status: 'uploading', message: 'Upload will complete separately' }),
+            { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
         if (currentOutput?.status === 'uploading') {
-          // AI succeeded, upload failed/timed out - reset to queued for retry
-          console.log('[generate-repose-single] Upload timeout, resetting to queued for retry');
+          // AI succeeded but no temp_path - reset to queued for full retry
+          console.log('[generate-repose-single] Upload timeout with no temp data, resetting to queued');
           await supabase
             .from('repose_outputs')
-            .update({ status: 'queued', error_message: 'Upload timeout, will retry' })
+            .update({ status: 'queued', error_message: 'Upload timeout, will retry', temp_path: null })
             .eq('id', outputId);
           
           return new Response(
@@ -369,3 +385,66 @@ The final image should look like the original photo, naturally repositioned in 3
     );
   }
 });
+
+/**
+ * Attempts to complete the final image upload in the background.
+ * If this times out, the queue processor will call complete-repose-upload to finish.
+ */
+async function completeUploadInBackground(
+  supabase: any,
+  outputId: string,
+  batchId: string,
+  base64Data: string,
+  imageFormat: string,
+  tempPath: string
+): Promise<void> {
+  try {
+    console.log(`[generate-repose-single:bg] Starting background upload for ${outputId}`);
+    
+    // Decode base64 to bytes
+    const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+    const fileName = `repose/${batchId}/${outputId}_${Date.now()}.${imageFormat}`;
+    
+    console.log(`[generate-repose-single:bg] Decoded ${imageBytes.length} bytes, uploading to ${fileName}`);
+    
+    const { error: uploadError } = await supabase.storage
+      .from('images')
+      .upload(fileName, imageBytes, {
+        contentType: `image/${imageFormat}`,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error('[generate-repose-single:bg] Background upload error:', uploadError);
+      // Leave in 'uploading' status - queue processor will handle via complete-repose-upload
+      return;
+    }
+
+    const { data: publicUrl } = supabase.storage
+      .from('images')
+      .getPublicUrl(fileName);
+
+    // Update output with result
+    await supabase
+      .from('repose_outputs')
+      .update({ 
+        status: 'complete',
+        result_url: publicUrl.publicUrl,
+        error_message: null,
+        temp_path: null, // Clear temp reference
+      })
+      .eq('id', outputId);
+
+    console.log(`[generate-repose-single:bg] Background upload complete: ${publicUrl.publicUrl}`);
+    
+    // Clean up temp file
+    await supabase.storage
+      .from('images')
+      .remove([tempPath]);
+      
+    console.log(`[generate-repose-single:bg] Cleaned up temp file`);
+  } catch (error) {
+    console.error('[generate-repose-single:bg] Background upload failed:', error);
+    // Leave in 'uploading' status - queue processor will handle
+  }
+}
