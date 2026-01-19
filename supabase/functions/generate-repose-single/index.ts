@@ -159,7 +159,7 @@ The final image should look like the original photo, naturally repositioned in 3
             },
           ],
           modalities: ['image', 'text'],
-          size: '768x1024', // 3:4 portrait aspect ratio
+          aspect_ratio: '3:4', // Portrait aspect ratio - let model output at native resolution
         }),
       }),
       AI_TIMEOUT_MS,
