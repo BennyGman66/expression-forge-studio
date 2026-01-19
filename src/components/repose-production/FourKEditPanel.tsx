@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { 
@@ -74,6 +75,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
   const [renderingIds, setRenderingIds] = useState<Set<string>>(new Set());
   const [selectedShotTypes, setSelectedShotTypes] = useState<Set<string>>(new Set());
   const [selectedRanks, setSelectedRanks] = useState<Set<number>>(new Set());
+  const [skuSearch, setSkuSearch] = useState('');
 
   // Toggle shot type filter
   const toggleShotType = (type: string) => {
@@ -101,7 +103,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     });
   };
 
-  // Filter favorites by selected shot types and ranks
+  // Filter favorites by selected shot types, ranks, and SKU search
   const filteredFavorites = useMemo(() => {
     let result = favorites;
     if (selectedShotTypes.size > 0) {
@@ -110,8 +112,15 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     if (selectedRanks.size > 0) {
       result = result.filter((f) => selectedRanks.has(f.favorite_rank));
     }
+    if (skuSearch.trim()) {
+      const search = skuSearch.trim().toLowerCase();
+      result = result.filter((f) => {
+        const sku = f.look_code || extractSKU(f.source_url);
+        return sku.toLowerCase().includes(search);
+      });
+    }
     return result;
-  }, [favorites, selectedShotTypes, selectedRanks]);
+  }, [favorites, selectedShotTypes, selectedRanks, skuSearch]);
 
   // Fetch all favorites for this batch
   const fetchFavorites = useCallback(async () => {
@@ -383,6 +392,27 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           
           {/* Filter buttons */}
           <div className="flex flex-col gap-2">
+            {/* SKU search */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground w-10">SKU:</span>
+              <Input
+                placeholder="Search by SKU..."
+                value={skuSearch}
+                onChange={(e) => setSkuSearch(e.target.value)}
+                className="h-7 text-xs w-48"
+              />
+              {skuSearch && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 text-xs px-2"
+                  onClick={() => setSkuSearch('')}
+                >
+                  ✕
+                </Button>
+              )}
+            </div>
+            
             {/* Shot type filter */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground w-10">Shot:</span>
