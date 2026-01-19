@@ -17,14 +17,14 @@ const OUTPUT_CONCURRENCY = 1;
 
 // Retry settings for failed generations
 const MAX_RETRIES = 3;
-const BASE_RETRY_DELAY_MS = 3000;
-const RATE_LIMIT_DELAY_MS = 10000;
+const BASE_RETRY_DELAY_MS = 5000; // 5 second base delay between retries
+const RATE_LIMIT_DELAY_MS = 15000; // 15 second delay for rate limit errors
 
 // Heartbeat logging interval
 const LOG_INTERVAL_MS = 10 * 1000;
 
-// Stale output threshold (2 minutes without progress)
-const STALE_THRESHOLD_MS = 2 * 60 * 1000;
+// Stale output threshold - 45 seconds (generation takes ~20s, so 45s means something is stuck)
+const STALE_THRESHOLD_MS = 45 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -353,21 +353,31 @@ async function processOutput(
           errorMsg
         );
 
-        // Retry on rate limit and gateway errors
-        if (
-          errorMsg.includes("503") ||
-          errorMsg.includes("504") ||
-          errorMsg.includes("502") ||
-          errorMsg.includes("429") ||
-          errorMsg.includes("RESOURCE_EXHAUSTED") ||
-          errorMsg.includes("Rate limit") ||
-          errorMsg.includes("Service Unavailable") ||
-          errorMsg.includes("Gateway Timeout") ||
-          errorMsg.includes("Too Many Requests")
-        ) {
+        // All errors are retryable for 4K - just try again with backoff
+        // The generate-repose-single function handles rate limits by requeuing
+        if (attempt < MAX_RETRIES) {
+          // Check if this looks like a rate limit error for logging
+          const isRateLimited =
+            errorMsg.includes("503") ||
+            errorMsg.includes("504") ||
+            errorMsg.includes("502") ||
+            errorMsg.includes("429") ||
+            errorMsg.includes("RESOURCE_EXHAUSTED") ||
+            errorMsg.includes("Rate limit") ||
+            errorMsg.includes("Service Unavailable") ||
+            errorMsg.includes("Gateway Timeout") ||
+            errorMsg.includes("Too Many Requests") ||
+            errorMsg.includes("non-2xx"); // Edge function failures might be rate limits
+
+          const delayMs = isRateLimited
+            ? RATE_LIMIT_DELAY_MS * (attempt + 1)
+            : BASE_RETRY_DELAY_MS * (attempt + 1);
+          
+          console.log(`[4k-queue] Error on attempt ${attempt + 1}/${MAX_RETRIES + 1}, waiting ${delayMs}ms: ${errorMsg.slice(0, 100)}`);
+          await new Promise((r) => setTimeout(r, delayMs));
           continue;
         }
-        // Other errors, don't retry
+        // All retries exhausted
         break;
       }
 

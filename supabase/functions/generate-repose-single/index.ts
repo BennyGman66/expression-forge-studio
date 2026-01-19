@@ -203,6 +203,33 @@ The final image should look like the original photo, naturally repositioned in 3
     }
 
     const aiResult = await response.json();
+    
+    // Check for embedded error in response (API sometimes returns 200 with error in body)
+    const embeddedError = aiResult.choices?.[0]?.error;
+    if (embeddedError) {
+      const errorCode = embeddedError.code;
+      const rawError = typeof embeddedError.metadata?.raw === 'string' 
+        ? embeddedError.metadata.raw 
+        : JSON.stringify(embeddedError.metadata?.raw || '');
+      const errorMessage = embeddedError.message || rawError || 'Unknown embedded error';
+      
+      console.error('[generate-repose-single] Embedded error detected:', errorCode, errorMessage.slice(0, 300));
+      
+      // Rate limit - requeue for retry
+      if (errorCode === 429 || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('429')) {
+        await supabase
+          .from('repose_outputs')
+          .update({ status: 'queued' })
+          .eq('id', outputId);
+        return new Response(
+          JSON.stringify({ error: 'Rate limited (embedded)', retryable: true }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      throw new Error(`Embedded error ${errorCode}: ${errorMessage.slice(0, 200)}`);
+    }
+    
     const generatedImageUrl = aiResult.choices?.[0]?.message?.images?.[0]?.image_url?.url;
 
     if (!generatedImageUrl) {
