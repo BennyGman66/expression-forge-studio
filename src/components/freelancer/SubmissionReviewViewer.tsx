@@ -9,7 +9,7 @@ import {
   useReviewThreads, 
   useAssetAnnotations 
 } from '@/hooks/useReviewSystem';
-import { SubmissionAsset, ImageAnnotation } from '@/types/review';
+import type { SubmissionAsset, ImageAnnotation } from '@/types/review';
 import { CheckCircle, AlertTriangle, Clock, Upload, X, FileImage } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
