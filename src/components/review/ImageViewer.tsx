@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Button } from '@/components/ui/button';
 import { ZoomIn, ZoomOut, Maximize2, Eye, EyeOff, Target } from 'lucide-react';
-import { ImageAnnotation, AnnotationRect } from '@/types/review';
+import type { ImageAnnotation, AnnotationRect } from '@/types/review';
 import { cn } from '@/lib/utils';
 import {
   Tooltip,

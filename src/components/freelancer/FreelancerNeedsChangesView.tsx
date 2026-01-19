@@ -14,7 +14,7 @@ import {
   useAssetAnnotations,
   useAddComment,
 } from '@/hooks/useReviewSystem';
-import { SubmissionAsset, ImageAnnotation, ReviewThread } from '@/types/review';
+import type { SubmissionAsset, ImageAnnotation, ReviewThread } from '@/types/review';
 import { 
   CheckCircle, 
   AlertTriangle, 
