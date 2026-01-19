@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Download, CheckCircle2, Circle, AlertCircle, Lock, Check, Images } from "lucide-react";
 import { useReposeBatch, useMarkLooksExported } from "@/hooks/useReposeBatches";
 import { useReposeSelection, LookWithOutputs } from "@/hooks/useReposeSelection";
@@ -44,6 +45,7 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState<string>("");
+  const [upscaleMultiplier, setUpscaleMultiplier] = useState<number>(2); // Default to 2x
 
   // Determine which looks are export-ready (all views either have 3/3 selections OR are skipped)
   const { readyLooks, incompleteLooks } = useMemo(() => {
@@ -470,7 +472,16 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
           // Download each favorite image
           for (const output of favorites) {
             try {
-              const response = await fetch(output.result_url!);
+              // Apply upscaling if multiplier > 1
+              let imageUrl = output.result_url!;
+              if (upscaleMultiplier > 1) {
+                // Use wsrv.nl for high-quality upscaling
+                const targetWidth = 768 * upscaleMultiplier;
+                const targetHeight = 1024 * upscaleMultiplier;
+                imageUrl = `https://wsrv.nl/?url=${encodeURIComponent(output.result_url!)}&w=${targetWidth}&h=${targetHeight}&fit=contain&output=png`;
+              }
+              
+              const response = await fetch(imageUrl);
               if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
               const blob = await response.blob();
               
@@ -505,7 +516,8 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       URL.revokeObjectURL(url);
 
       const assetCount = looks.length * 4 * 3;
-      toast.success(`Exported ${assetCount} individual assets from ${looks.length} looks`);
+      const resLabel = upscaleMultiplier === 1 ? 'original' : `${upscaleMultiplier}x`;
+      toast.success(`Exported ${assetCount} assets at ${resLabel} resolution from ${looks.length} looks`);
     } catch (error) {
       console.error("Asset export failed:", error);
       toast.error(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -514,7 +526,7 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       setExportProgress(0);
       setExportStatus("");
     }
-  }, []);
+  }, [upscaleMultiplier]);
 
   if (batchLoading || isLoading) {
     return (
@@ -598,6 +610,21 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
           
           {/* Separator */}
           <div className="w-px h-6 bg-border" />
+          
+          {/* Resolution Selector for Assets */}
+          <Select
+            value={upscaleMultiplier.toString()}
+            onValueChange={(val) => setUpscaleMultiplier(parseInt(val))}
+          >
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1">Original</SelectItem>
+              <SelectItem value="2">2× Upscale</SelectItem>
+              <SelectItem value="4">4× Upscale</SelectItem>
+            </SelectContent>
+          </Select>
           
           {/* Export Individual Assets Buttons */}
           <Button
