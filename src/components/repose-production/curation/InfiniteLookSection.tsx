@@ -10,12 +10,23 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { ALL_OUTPUT_SHOT_TYPES, OutputShotType, OUTPUT_SHOT_LABELS } from "@/types/shot-types";
 import type { ReposeOutput } from "@/types/repose";
 import type { LookWithOutputs } from "@/hooks/useReposeSelection";
 import { ShotTypeBlock } from "./ShotTypeBlock";
 import { cn } from "@/lib/utils";
-import { Check, RotateCw, Loader2, AlertCircle, X, ChevronDown } from "lucide-react";
+import { Check, RotateCw, Loader2, AlertCircle, X, ChevronDown, Trash2 } from "lucide-react";
 import { getImageUrl } from "@/lib/imageUtils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -236,6 +247,27 @@ export function InfiniteLookSection({
     }
   }, [allOutputs, onRefresh]);
 
+  // Clear all failed outputs for this look
+  const handleClearFailed = useCallback(async () => {
+    const failedOutputIds = allOutputs.filter(o => o.status === 'failed').map(o => o.id);
+    if (failedOutputIds.length === 0) return;
+
+    try {
+      const { error } = await supabase
+        .from("repose_outputs")
+        .delete()
+        .in("id", failedOutputIds);
+
+      if (error) throw error;
+
+      toast.success(`Cleared ${failedOutputIds.length} failed outputs`);
+      onRefresh();
+    } catch (error) {
+      console.error("Clear failed error:", error);
+      toast.error("Failed to clear failed outputs");
+    }
+  }, [allOutputs, onRefresh]);
+
   return (
     <Card className={cn(
       "overflow-hidden transition-colors",
@@ -284,10 +316,45 @@ export function InfiniteLookSection({
             )}
             
             {hasFailed && (
-              <Badge variant="outline" className="gap-1.5 text-destructive border-destructive/30 cursor-pointer hover:bg-destructive/10" onClick={handleRetryAllFailed}>
-                <AlertCircle className="w-3 h-3" />
-                {failedCount} failed - Click to retry
-              </Badge>
+              <div className="flex items-center gap-1">
+                <Badge 
+                  variant="outline" 
+                  className="gap-1.5 text-destructive border-destructive/30 cursor-pointer hover:bg-destructive/10" 
+                  onClick={handleRetryAllFailed}
+                >
+                  <AlertCircle className="w-3 h-3" />
+                  {failedCount} failed - Retry
+                </Badge>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-6 w-6 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Clear failed outputs?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently delete {failedCount} failed output{failedCount !== 1 ? 's' : ''} for {look.lookCode}. 
+                        This cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction 
+                        onClick={handleClearFailed}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Clear {failedCount} Failed
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
             )}
             
             {hasNoOutputs && (
