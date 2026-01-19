@@ -45,17 +45,18 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState<string>("");
 
-  // Determine which looks are export-ready (all 4 views have 3/3 selections)
+  // Determine which looks are export-ready (all views either have 3/3 selections OR are skipped)
   const { readyLooks, incompleteLooks } = useMemo(() => {
     const ready: LookWithOutputs[] = [];
     const incomplete: LookWithOutputs[] = [];
 
     for (const look of groupedByLook) {
-      // Check all 4 shot types have 3 selections
+      // Check all 4 shot types - a view is complete if it has 3 selections OR is skipped
       let allComplete = true;
       for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
         const stats = look.selectionStats.byView[shotType];
-        if (!stats || stats.selected < MAX_FAVORITES_PER_VIEW) {
+        const viewComplete = stats?.isComplete || stats?.isSkipped || (stats?.selected >= MAX_FAVORITES_PER_VIEW);
+        if (!viewComplete) {
           allComplete = false;
           break;
         }
@@ -446,6 +447,12 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
         if (!lookFolder) continue;
 
         for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
+          // Skip exporting assets for skipped shot types
+          const viewStats = look.selectionStats.byView[shotType];
+          if (viewStats?.isSkipped) {
+            continue;
+          }
+          
           const assetName = SHOT_TYPE_ASSET_NAMES[shotType];
           setExportStatus(`Downloading ${lookCode} ${assetName}...`);
 
@@ -687,7 +694,21 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
 
               {/* Incomplete Looks - Grey, Not Selectable */}
               {incompleteLooks.map((look) => {
-                const completedViews = look.selectionStats.completedViews;
+                // Count completed and skipped views
+                let completedOrSkipped = 0;
+                let totalRequired = 0;
+                for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
+                  const stats = look.selectionStats.byView[shotType];
+                  if (stats?.isSkipped) {
+                    // Skipped views don't count toward required
+                    continue;
+                  }
+                  totalRequired++;
+                  if (stats?.isComplete || (stats?.selected >= MAX_FAVORITES_PER_VIEW)) {
+                    completedOrSkipped++;
+                  }
+                }
+                
                 return (
                   <div
                     key={look.lookId}
@@ -698,7 +719,7 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
                     </div>
                     <span className="text-sm text-muted-foreground truncate flex-1">{look.lookCode}</span>
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground">
-                      {completedViews}/4
+                      {completedOrSkipped}/{totalRequired}
                     </Badge>
                   </div>
                 );
