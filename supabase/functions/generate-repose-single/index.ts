@@ -45,6 +45,31 @@ function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Prom
 
 const AI_TIMEOUT_MS = 55000; // 55 second timeout for AI calls
 
+/**
+ * Converts an image URL to greyscale by fetching, processing, and returning as base64.
+ * This ensures the AI only sees pose/position, not clothing colors.
+ */
+async function convertToGreyscale(imageUrl: string): Promise<string> {
+  try {
+    // Use wsrv.nl proxy to convert to greyscale
+    // The 'filt=greyscale' parameter converts the image to greyscale
+    const greyscaleUrl = `https://wsrv.nl/?url=${encodeURIComponent(imageUrl)}&filt=greyscale&output=png`;
+    
+    const response = await fetch(greyscaleUrl);
+    if (!response.ok) {
+      console.warn(`[generate-repose-single] Greyscale conversion failed, using original: ${response.status}`);
+      return imageUrl;
+    }
+    
+    const imageBuffer = await response.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
+    return `data:image/png;base64,${base64}`;
+  } catch (error) {
+    console.warn(`[generate-repose-single] Greyscale conversion error, using original:`, error);
+    return imageUrl;
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -112,8 +137,20 @@ serve(async (req) => {
     console.log(`[generate-repose-single] Pose: ${poseUrl}`);
     console.log(`[generate-repose-single] Shot Type: ${shotType}`);
 
+    // Convert pose image to greyscale to prevent outfit confusion
+    console.log(`[generate-repose-single] Converting pose to greyscale...`);
+    const greyscalePoseUrl = await convertToGreyscale(poseUrl);
+    const isGreyscaleConverted = greyscalePoseUrl.startsWith('data:');
+    console.log(`[generate-repose-single] Greyscale conversion: ${isGreyscaleConverted ? 'success' : 'fallback to original'}`);
+
     // Generate the reposed image using AI
-    const prompt = `Use the provided greyscale reference image as a strict pose, camera, and framing template.
+    const prompt = `Use the provided greyscale reference image as a strict pose, camera, and framing template ONLY.
+
+**CRITICAL OUTFIT PRESERVATION:**
+- The clothing, colors, fabric textures, logos, and outfit details MUST be taken EXCLUSIVELY from the INPUT PHOTO.
+- COMPLETELY IGNORE any clothing, colors, or outfit visible in the greyscale reference.
+- The greyscale reference is ONLY for: body pose, limb positioning, camera angle, and image cropping.
+- If the reference appears to show different clothing, DISREGARD IT - preserve the INPUT PHOTO outfit exactly.
 
 **OUTPUT FORMAT: Generate a 3:4 portrait aspect ratio image (768x1024 pixels).**
 
@@ -134,7 +171,7 @@ Do not alter the subject's identity, facial features, hairstyle, body proportion
 
 Do not stylise or reinterpret the image.
 
-The final image should look like the original photo, naturally repositioned in 3:4 portrait format and cropped identically to the reference image.`;
+The final image should look like the original photo with its ORIGINAL OUTFIT, naturally repositioned in 3:4 portrait format and cropped identically to the reference image.`;
 
     // Call AI API with timeout protection
     const response = await withTimeout(
@@ -151,10 +188,10 @@ The final image should look like the original photo, naturally repositioned in 3
               role: 'user',
               content: [
                 { type: 'text', text: prompt },
-                { type: 'text', text: 'INPUT PHOTO (subject to repose):' },
+                { type: 'text', text: 'INPUT PHOTO (subject to repose - preserve this outfit exactly):' },
                 { type: 'image_url', image_url: { url: sourceUrl } },
-                { type: 'text', text: 'GREYSCALE REFERENCE (pose, camera, and framing template):' },
-                { type: 'image_url', image_url: { url: poseUrl } },
+                { type: 'text', text: 'GREYSCALE REFERENCE (pose and framing ONLY - ignore any clothing visible):' },
+                { type: 'image_url', image_url: { url: greyscalePoseUrl } },
               ],
             },
           ],
