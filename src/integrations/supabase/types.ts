@@ -2987,6 +2987,7 @@ export type Database = {
           shot_type: string | null
           slot: string | null
           status: string
+          temp_path: string | null
         }
         Insert: {
           attempt_index?: number | null
@@ -3005,6 +3006,7 @@ export type Database = {
           shot_type?: string | null
           slot?: string | null
           status?: string
+          temp_path?: string | null
         }
         Update: {
           attempt_index?: number | null
@@ -3023,6 +3025,7 @@ export type Database = {
           shot_type?: string | null
           slot?: string | null
           status?: string
+          temp_path?: string | null
         }
         Relationships: [
           {
