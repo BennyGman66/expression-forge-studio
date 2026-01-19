@@ -5,11 +5,12 @@ import { ProjectSelectPanel } from "@/components/repose-production/ProjectSelect
 import { BatchSetupPanel } from "@/components/repose-production/BatchSetupPanel";
 import { ReviewCurationPanel } from "@/components/repose-production/ReviewCurationPanel";
 import { ExportPanel } from "@/components/repose-production/ExportPanel";
+import { FourKEditPanel } from "@/components/repose-production/FourKEditPanel";
 import { useReposeBatch, useReposeOutputs } from "@/hooks/useReposeBatches";
-import { FolderOpen, Settings, ClipboardList, Download } from "lucide-react";
+import { FolderOpen, Settings, ClipboardList, Download, Sparkles } from "lucide-react";
 
 // Generate tab is now merged into Setup
-const VALID_TABS = ["select", "setup", "review", "export"];
+const VALID_TABS = ["select", "setup", "review", "export", "4k-edit"];
 
 export default function ReposeProduction() {
   const { batchId } = useParams<{ batchId: string }>();
@@ -66,6 +67,10 @@ export default function ReposeProduction() {
                 <Download className="w-4 h-4" />
                 Export
               </TabsTrigger>
+              <TabsTrigger value="4k-edit" className="gap-2" disabled={!hasCompletedOutputs}>
+                <Sparkles className="w-4 h-4" />
+                4K Edit
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="select">
@@ -86,6 +91,10 @@ export default function ReposeProduction() {
 
             <TabsContent value="export">
               <ExportPanel batchId={batchId} />
+            </TabsContent>
+
+            <TabsContent value="4k-edit">
+              <FourKEditPanel batchId={batchId} />
             </TabsContent>
           </Tabs>
         </div>
