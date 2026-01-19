@@ -266,14 +266,14 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
 
       const resetCount = resetData?.length || 0;
       
-      // Get queued output IDs
-      const { data: queuedOutputs } = await supabase
+      // Get count of queued outputs (don't fetch all IDs - can be huge)
+      const { count: queuedCount, error: countError } = await supabase
         .from("repose_outputs")
-        .select("id")
+        .select("id", { count: 'exact', head: true })
         .eq("batch_id", batchId)
         .eq("status", "queued");
 
-      if (!queuedOutputs?.length) {
+      if (countError || !queuedCount) {
         toast.info("No queued outputs to resume");
         return;
       }
@@ -283,7 +283,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
         .from("pipeline_jobs")
         .insert({
           type: "REPOSE_GENERATION",
-          title: `Resume 4K queue (${queuedOutputs.length} outputs)`,
+          title: `Resume 4K queue (${queuedCount} outputs)`,
           status: "RUNNING",
           origin_route: `/repose-production/batch/${batchId}?tab=4k-edit`,
           origin_context: {
@@ -294,26 +294,27 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           },
           progress_done: 0,
           progress_failed: 0,
-          progress_total: queuedOutputs.length,
+          progress_total: queuedCount,
         })
         .select()
         .single();
 
       if (jobError) throw jobError;
 
-      // Invoke the queue processor
+      // Invoke the queue processor WITHOUT outputIds - let it process all queued outputs
+      // This avoids Supabase's ~500 item limit on .in() queries
       const { error: invokeError } = await supabase.functions.invoke("process-repose-queue-4k", {
         body: {
           batchId,
           pipelineJobId: job.id,
           imageSize: "4K",
-          outputIds: queuedOutputs.map((o: any) => o.id),
+          // Don't pass outputIds - the queue will process all queued outputs for this batch
         },
       });
 
       if (invokeError) throw invokeError;
 
-      toast.success(`Resumed queue: ${resetCount} reset, ${queuedOutputs.length} queued`);
+      toast.success(`Resumed queue: ${resetCount} reset, ${queuedCount} queued`);
       fetchActiveJob();
       fetchOutputs();
     } catch (error) {
