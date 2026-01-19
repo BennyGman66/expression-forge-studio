@@ -21,6 +21,9 @@ interface InfiniteLookSectionProps {
   onOpenLightbox: (outputId: string) => void;
   getNextAvailableRank: (shotType: OutputShotType) => 1 | 2 | 3 | null;
   isViewFull: (shotType: OutputShotType) => boolean;
+  isViewSkipped: (shotType: OutputShotType) => boolean;
+  onSkipView: (shotType: OutputShotType) => void;
+  onUndoSkipView: (shotType: OutputShotType) => void;
   onRefresh: () => void;
 }
 
@@ -32,6 +35,9 @@ export function InfiniteLookSection({
   onOpenLightbox,
   getNextAvailableRank,
   isViewFull,
+  isViewSkipped,
+  onSkipView,
+  onUndoSkipView,
   onRefresh,
 }: InfiniteLookSectionProps) {
   const [rerenderCount, setRerenderCount] = useState<string>("5");
@@ -256,6 +262,9 @@ export function InfiniteLookSection({
             >
               {isComplete && <Check className="w-3 h-3" />}
               {look.selectionStats.completedViews} / {look.selectionStats.totalViews} complete
+              {look.selectionStats.skippedViews > 0 && (
+                <span className="text-xs opacity-70">({look.selectionStats.skippedViews} skipped)</span>
+              )}
             </Badge>
           </div>
         </div>
@@ -304,6 +313,9 @@ export function InfiniteLookSection({
                 getNextAvailableRank={() => getNextAvailableRank(shotType)}
                 isViewFull={isViewFull(shotType)}
                 onRefresh={onRefresh}
+                isSkipped={isViewSkipped(shotType)}
+                onSkip={() => onSkipView(shotType)}
+                onUndoSkip={() => onUndoSkipView(shotType)}
               />
             );
           })

@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { ChevronDown, ChevronRight, Check, Circle, RotateCw, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Check, Circle, RotateCw, Loader2, SkipForward, Undo } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { MAX_FAVORITES_PER_VIEW } from "@/types/repose";
 import { OutputTile } from "./OutputTile";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { getImageUrl } from "@/lib/imageUtils";
 
 interface ShotTypeBlockProps {
   shotType: OutputShotType;
@@ -24,6 +25,9 @@ interface ShotTypeBlockProps {
   getNextAvailableRank: () => 1 | 2 | 3 | null;
   isViewFull: boolean;
   onRefresh: () => void;
+  isSkipped?: boolean;
+  onSkip?: () => void;
+  onUndoSkip?: () => void;
 }
 
 export function ShotTypeBlock({
@@ -38,6 +42,9 @@ export function ShotTypeBlock({
   getNextAvailableRank,
   isViewFull,
   onRefresh,
+  isSkipped = false,
+  onSkip,
+  onUndoSkip,
 }: ShotTypeBlockProps) {
   // Auto-collapse completed blocks
   const [isOpen, setIsOpen] = useState(!stats.isComplete);
@@ -53,6 +60,7 @@ export function ShotTypeBlock({
 
   // Status styling
   const getStatusStyle = () => {
+    if (isSkipped) return { bg: "bg-muted/30", text: "text-muted-foreground", border: "border-muted" };
     if (stats.isComplete) return { bg: "bg-primary/10", text: "text-primary", border: "border-primary/30" };
     if (stats.selected > 0) return { bg: "bg-amber-500/10", text: "text-amber-500", border: "border-amber-500/30" };
     return { bg: "bg-muted/50", text: "text-muted-foreground", border: "border-border" };
@@ -216,12 +224,12 @@ export function ShotTypeBlock({
             <span className="font-medium">{OUTPUT_SHOT_LABELS[shotType]}</span>
             
             {/* Collapsed summary - show selected thumbnails */}
-            {!isOpen && stats.isComplete && selectedOutputs.length > 0 && (
+            {!isOpen && stats.isComplete && selectedOutputs.length > 0 && !isSkipped && (
               <div className="flex items-center gap-1 ml-2">
                 {selectedOutputs.slice(0, 3).map((output, idx) => (
                   <div key={output.id} className="w-8 h-8 rounded overflow-hidden border border-primary/30">
                     <img 
-                      src={output.result_url || ''} 
+                      src={getImageUrl(output.result_url, 'tiny')} 
                       alt={`Selected ${idx + 1}`}
                       className="w-full h-full object-cover"
                     />
@@ -229,11 +237,19 @@ export function ShotTypeBlock({
                 ))}
               </div>
             )}
+            
+            {/* Skipped indicator in collapsed state */}
+            {!isOpen && isSkipped && (
+              <Badge variant="secondary" className="ml-2 gap-1 text-muted-foreground">
+                <SkipForward className="w-3 h-3" />
+                Skipped
+              </Badge>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
             {/* Pending indicator */}
-            {pendingOutputs.length > 0 && (
+            {pendingOutputs.length > 0 && !isSkipped && (
               <Badge variant="outline" className="gap-1.5 text-blue-600 border-blue-300">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 {pendingOutputs.length} rendering
@@ -241,35 +257,79 @@ export function ShotTypeBlock({
             )}
             
             {/* Failed indicator */}
-            {failedOutputs.length > 0 && (
+            {failedOutputs.length > 0 && !isSkipped && (
               <Badge variant="outline" className="gap-1.5 text-destructive border-destructive/30">
                 {failedOutputs.length} failed
               </Badge>
             )}
 
+            {/* Skip button - only show when not already skipped and has handler */}
+            {!isSkipped && onSkip && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSkip();
+                }}
+                className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <SkipForward className="w-3 h-3 mr-1" />
+                Skip
+              </Button>
+            )}
+
             {/* Status Badge */}
-            <Badge
-              variant="outline"
-              className={cn(
-                "gap-1.5",
-                statusStyle.text,
-                statusStyle.border
-              )}
-            >
-              {stats.isComplete ? (
-                <Check className="w-3 h-3" />
-              ) : (
-                <Circle className="w-2 h-2 fill-current" />
-              )}
-              {stats.selected} / {MAX_FAVORITES_PER_VIEW}
-            </Badge>
+            {isSkipped ? (
+              <Badge
+                variant="secondary"
+                className="gap-1.5 text-muted-foreground"
+              >
+                <SkipForward className="w-3 h-3" />
+                Skipped
+              </Badge>
+            ) : (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "gap-1.5",
+                  statusStyle.text,
+                  statusStyle.border
+                )}
+              >
+                {stats.isComplete ? (
+                  <Check className="w-3 h-3" />
+                ) : (
+                  <Circle className="w-2 h-2 fill-current" />
+                )}
+                {stats.selected} / {MAX_FAVORITES_PER_VIEW}
+              </Badge>
+            )}
           </div>
         </Button>
       </CollapsibleTrigger>
 
       <CollapsibleContent>
         <div className="p-4 bg-background">
-          {completedOutputs.length === 0 && pendingOutputs.length === 0 ? (
+          {/* Skipped state */}
+          {isSkipped ? (
+            <div className="py-6 text-center">
+              <p className="text-sm text-muted-foreground mb-3">
+                This view has been skipped and will be marked as complete.
+              </p>
+              {onUndoSkip && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={onUndoSkip}
+                  className="gap-1.5"
+                >
+                  <Undo className="w-3.5 h-3.5" />
+                  Undo Skip
+                </Button>
+              )}
+            </div>
+          ) : completedOutputs.length === 0 && pendingOutputs.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">
               No outputs for this view yet
             </p>
