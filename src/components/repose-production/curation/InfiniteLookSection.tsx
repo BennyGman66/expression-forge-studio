@@ -49,7 +49,7 @@ export function InfiniteLookSection({
 }: InfiniteLookSectionProps) {
   const [rerenderCount, setRerenderCount] = useState<string>("5");
   const [isRerendering, setIsRerendering] = useState(false);
-  const [selectedShotTypes, setSelectedShotTypes] = useState<OutputShotType[]>([...ALL_OUTPUT_SHOT_TYPES]);
+  const [selectedShotTypes, setSelectedShotTypes] = useState<OutputShotType[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const toggleShotType = (shotType: OutputShotType) => {
@@ -324,11 +324,36 @@ export function InfiniteLookSection({
                     ) : (
                       <RotateCw className="w-3.5 h-3.5" />
                     )}
-                    Re-render{!allSelected && ` (${selectedShotTypes.length})`}
+                    {selectedShotTypes.length === 0 
+                      ? "Select shots..." 
+                      : allSelected 
+                        ? "Re-render All" 
+                        : `Re-render (${selectedShotTypes.length})`}
                     <ChevronDown className="w-3 h-3 ml-0.5" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
+                  <div className="flex items-center justify-between px-2 py-1.5 border-b">
+                    <span className="text-xs font-medium text-muted-foreground">Shot Types</span>
+                    <div className="flex gap-1">
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-6 px-2 text-xs"
+                        onClick={() => setSelectedShotTypes([...ALL_OUTPUT_SHOT_TYPES])}
+                      >
+                        All
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-6 px-2 text-xs"
+                        onClick={() => setSelectedShotTypes([])}
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  </div>
                   <div className="p-2 space-y-2">
                     {ALL_OUTPUT_SHOT_TYPES.map((shotType) => (
                       <label 
@@ -356,7 +381,11 @@ export function InfiniteLookSection({
                       ) : (
                         <RotateCw className="w-3.5 h-3.5" />
                       )}
-                      Re-render {allSelected ? "All" : `${selectedShotTypes.length} Selected`}
+                      {selectedShotTypes.length === 0 
+                        ? "Select shots to re-render" 
+                        : allSelected 
+                          ? "Re-render All" 
+                          : `Re-render ${selectedShotTypes.length} Selected`}
                     </Button>
                   </div>
                 </DropdownMenuContent>
