@@ -20,6 +20,7 @@ interface ShotTypeBlockProps {
   batchId: string;
   batchItemId: string;
   lookId: string;
+  sourceUrl?: string; // Source image used for this shot type
   onSelectOutput: (output: ReposeOutput, rank: 1 | 2 | 3 | null) => void;
   onOpenLightbox: (outputId: string) => void;
   getNextAvailableRank: () => 1 | 2 | 3 | null;
@@ -37,6 +38,7 @@ export function ShotTypeBlock({
   batchId,
   batchItemId,
   lookId,
+  sourceUrl,
   onSelectOutput,
   onOpenLightbox,
   getNextAvailableRank,
@@ -221,6 +223,18 @@ export function ShotTypeBlock({
             ) : (
               <ChevronRight className="w-4 h-4" />
             )}
+            
+            {/* Source thumbnail for this shot type */}
+            {sourceUrl && (
+              <div className="w-8 h-8 rounded overflow-hidden border border-border flex-shrink-0 bg-muted">
+                <img 
+                  src={getImageUrl(sourceUrl, 'tiny')} 
+                  alt="Source" 
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            )}
+            
             <span className="font-medium">{OUTPUT_SHOT_LABELS[shotType]}</span>
             
             {/* Collapsed summary - show selected thumbnails */}

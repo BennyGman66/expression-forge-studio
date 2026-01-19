@@ -21,6 +21,7 @@ export interface LookWithOutputs {
   batchItemIds: string[]; // Multiple batch items per look (one per shot type)
   batchItemId: string; // Primary batch item ID for backwards compatibility
   sourceUrl: string;
+  sourceUrlsByView: Partial<Record<OutputShotType, string>>; // Source URL per shot type
   outputsByView: Record<OutputShotType, ReposeOutput[]>;
   selectionStats: ViewSelectionStats;
   exportedAt: string | null; // When this look was last exported
@@ -249,13 +250,29 @@ export function useReposeSelection(batchId: string | undefined) {
         lookCode = `Look ${lookId.slice(0, 6)}`;
       }
       
+      // Determine which shot types this batch item provides based on assigned_view
+      const assignedView = item.assigned_view?.toLowerCase();
+      const itemSourceUrl = item.source_url;
+      
       if (!lookMap.has(lookId)) {
+        const sourceUrlsByView: Partial<Record<OutputShotType, string>> = {};
+        
+        // Map assigned_view to shot types
+        if (assignedView === 'front') {
+          sourceUrlsByView.FRONT_FULL = itemSourceUrl;
+          sourceUrlsByView.FRONT_CROPPED = itemSourceUrl;
+          sourceUrlsByView.DETAIL = itemSourceUrl;
+        } else if (assignedView === 'back') {
+          sourceUrlsByView.BACK_FULL = itemSourceUrl;
+        }
+        
         lookMap.set(lookId, {
           lookId,
           lookCode,
           batchItemIds: [item.id],
           batchItemId: item.id,
           sourceUrl: item.source_url,
+          sourceUrlsByView,
           outputsByView: {} as Record<OutputShotType, ReposeOutput[]>,
           selectionStats: {
             byView: {} as Record<OutputShotType, { selected: number; total: number; isComplete: boolean; isSkipped: boolean }>,
@@ -275,6 +292,14 @@ export function useReposeSelection(batchId: string | undefined) {
         // Add additional batch item ID to existing look
         if (!existingLook.batchItemIds.includes(item.id)) {
           existingLook.batchItemIds.push(item.id);
+        }
+        // Add source URLs for this batch item's shot types
+        if (assignedView === 'front') {
+          existingLook.sourceUrlsByView.FRONT_FULL = itemSourceUrl;
+          existingLook.sourceUrlsByView.FRONT_CROPPED = itemSourceUrl;
+          existingLook.sourceUrlsByView.DETAIL = itemSourceUrl;
+        } else if (assignedView === 'back') {
+          existingLook.sourceUrlsByView.BACK_FULL = itemSourceUrl;
         }
       }
     }
