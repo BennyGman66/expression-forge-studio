@@ -353,6 +353,7 @@ export function InfiniteLookSection({
                 batchId={batchId}
                 batchItemId={look.batchItemId}
                 lookId={look.lookId}
+                sourceUrl={look.sourceUrlsByView?.[shotType]}
                 onSelectOutput={onSelectOutput}
                 onOpenLightbox={onOpenLightbox}
                 getNextAvailableRank={() => getNextAvailableRank(shotType)}
