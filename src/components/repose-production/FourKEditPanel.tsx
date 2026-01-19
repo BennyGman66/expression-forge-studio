@@ -306,7 +306,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
       const { data, error } = await supabase.functions.invoke("generate-repose-single", {
         body: {
           outputId: newOutput.id,
-          model: "imagen-3.0-generate-002",
+          model: "google/gemini-3-pro-image-preview",
           imageSize: "4K",
         },
       });
