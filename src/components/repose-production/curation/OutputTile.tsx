@@ -50,8 +50,8 @@ export const OutputTile = memo(function OutputTile({
     <div
       onClick={handleImageClick}
       className={cn(
-        "relative w-36 h-36 rounded-lg overflow-hidden cursor-pointer transition-all group",
-        "border-2 bg-muted",
+        "relative aspect-[3/4] rounded-lg overflow-hidden cursor-pointer transition-all group",
+        "border-2 bg-muted/50",
         isSelected 
           ? "border-primary ring-2 ring-primary/30" 
           : "border-transparent hover:border-primary/50"
@@ -77,7 +77,7 @@ export const OutputTile = memo(function OutputTile({
           src={thumbnailUrl}
           alt={`Output ${output.attempt_index}`}
           className={cn(
-            "w-full h-full object-cover transition-opacity duration-200",
+            "w-full h-full object-contain transition-opacity duration-200",
             isLoading ? "opacity-0" : "opacity-100"
           )}
           loading="lazy"
