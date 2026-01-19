@@ -2,20 +2,17 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { 
   Loader2, 
-  Wand2, 
   Check, 
   X, 
-  Clock, 
   RefreshCw,
-  AlertTriangle,
   ImageIcon,
-  Sparkles
+  Sparkles,
+  Zap
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getImageUrl } from "@/lib/imageUtils";
@@ -24,127 +21,184 @@ interface FourKEditPanelProps {
   batchId: string | undefined;
 }
 
-interface OutputItem {
+interface FavoriteOutput {
   id: string;
   batch_item_id: string;
   shot_type: string;
   status: string;
   result_url: string | null;
-  error_message: string | null;
-  created_at: string;
-  look_id?: string;
+  pose_url: string | null;
+  favorite_rank: number;
+  source_url?: string | null;
   look_code?: string;
+  // 4K version info
+  fourK_output_id?: string;
+  fourK_status?: string;
+  fourK_result_url?: string | null;
+  fourK_error?: string | null;
 }
 
-interface JobInfo {
-  id: string;
-  status: string;
-  progress_done: number;
-  progress_failed: number;
-  progress_total: number;
+// Extract SKU from source URL filename
+function extractSKU(sourceUrl: string | null | undefined): string {
+  if (!sourceUrl) return "Unknown";
+  try {
+    const filename = sourceUrl.split("/").pop() || "";
+    // Try to extract SKU pattern (e.g., "MW02234" or similar)
+    const match = filename.match(/([A-Z]{2}\d{5,})/i);
+    if (match) return match[1].toUpperCase();
+    // Fall back to first part of filename
+    const cleanName = filename.replace(/\.(png|jpg|jpeg|webp)$/i, "");
+    return cleanName.slice(0, 12) || "Unknown";
+  } catch {
+    return "Unknown";
+  }
 }
 
-const SHOT_TYPES = [
-  { id: "FRONT_FULL", label: "Full Front" },
-  { id: "FRONT_CROPPED", label: "Cropped Front" },
-  { id: "DETAIL", label: "Detail" },
-  { id: "BACK_FULL", label: "Back Full" },
-];
+const SHOT_TYPE_LABELS: Record<string, string> = {
+  FRONT_FULL: "Full Front",
+  FRONT_CROPPED: "Cropped",
+  DETAIL: "Detail",
+  BACK_FULL: "Back",
+};
 
 export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
-  const [selectedShotTypes, setSelectedShotTypes] = useState<string[]>([]);
-  const [isRendering, setIsRendering] = useState(false);
-  const [outputs, setOutputs] = useState<OutputItem[]>([]);
-  const [activeJob, setActiveJob] = useState<JobInfo | null>(null);
-  const [stalledCount, setStalledCount] = useState(0);
+  const [favorites, setFavorites] = useState<FavoriteOutput[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [renderingIds, setRenderingIds] = useState<Set<string>>(new Set());
 
-  // Fetch recent 4K outputs for this batch
-  const fetchOutputs = useCallback(async () => {
+  // Fetch all favorites for this batch
+  const fetchFavorites = useCallback(async () => {
     if (!batchId) return;
 
-    // Get outputs created in the last hour (likely from 4K re-renders)
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    
-    const { data, error } = await supabase
-      .from("repose_outputs")
-      .select(`
-        id,
-        batch_item_id,
-        shot_type,
-        status,
-        result_url,
-        error_message,
-        created_at,
-        repose_batch_items!batch_item_id(look_id)
-      `)
-      .eq("batch_id", batchId)
-      .gte("created_at", oneHourAgo)
-      .order("created_at", { ascending: false })
-      .limit(200);
+    try {
+      // Get all favorited outputs with their batch item info
+      const { data: favData, error: favError } = await supabase
+        .from("repose_outputs")
+        .select(`
+          id,
+          batch_item_id,
+          shot_type,
+          status,
+          result_url,
+          pose_url,
+          favorite_rank
+        `)
+        .eq("batch_id", batchId)
+        .eq("is_favorite", true)
+        .eq("status", "complete")
+        .not("result_url", "is", null)
+        .order("favorite_rank", { ascending: true });
 
-    if (error) {
-      console.error("Error fetching outputs:", error);
-      return;
+      if (favError) {
+        console.error("Error fetching favorites:", favError);
+        return;
+      }
+
+      // Get batch items with source URLs and look IDs
+      const batchItemIds = [...new Set((favData || []).map((f) => f.batch_item_id))];
+      
+      let batchItemInfo: Record<string, { source_url: string | null; look_id: string | null }> = {};
+      let lookCodes: Record<string, string> = {};
+      
+      if (batchItemIds.length > 0) {
+        const { data: itemsData } = await supabase
+          .from("repose_batch_items")
+          .select("id, source_url, look_id")
+          .in("id", batchItemIds);
+        
+        if (itemsData) {
+          itemsData.forEach((i) => {
+            batchItemInfo[i.id] = { source_url: i.source_url, look_id: i.look_id };
+          });
+          
+          const lookIds = [...new Set(itemsData.map((i) => i.look_id).filter(Boolean))] as string[];
+          if (lookIds.length > 0) {
+            // Fetch look codes - cast to any to bypass type inference issues with 'looks' table
+            const { data: looksData } = await (supabase as any)
+              .from("looks")
+              .select("id, look_code")
+              .in("id", lookIds);
+            
+            if (looksData) {
+              const lookIdToCode: Record<string, string> = {};
+              looksData.forEach((l) => { 
+                lookIdToCode[l.id] = l.look_code; 
+              });
+              itemsData.forEach((i) => {
+                if (i.look_id && lookIdToCode[i.look_id]) {
+                  lookCodes[i.id] = lookIdToCode[i.look_id];
+                }
+              });
+            }
+          }
+        }
+      }
+
+      // Check for existing 4K versions of these favorites (by matching batch_item + shot_type + pose_url)
+      const favoriteIds = (favData || []).map((f) => f.id);
+      let fourKVersions: Record<string, { id: string; status: string; result_url: string | null; error_message: string | null }> = {};
+      
+      if (favoriteIds.length > 0) {
+        // Find 4K outputs that reference these favorites (via matching batch_item + shot_type + pose_url, created after the original)
+        const { data: fourKData } = await supabase
+          .from("repose_outputs")
+          .select("id, batch_item_id, shot_type, pose_url, status, result_url, error_message, created_at")
+          .eq("batch_id", batchId)
+          .in("status", ["queued", "running", "uploading", "failed", "complete"])
+          .eq("is_favorite", false); // 4K versions are not favorites
+
+        if (fourKData) {
+          // Match by batch_item_id + shot_type + pose_url - find latest 4K attempt for each favorite
+          favData?.forEach((fav) => {
+            const matching4K = fourKData
+              .filter((fourK) => 
+                fourK.batch_item_id === fav.batch_item_id &&
+                fourK.shot_type === fav.shot_type &&
+                fourK.pose_url === fav.pose_url &&
+                fourK.id !== fav.id // Not the same output
+              )
+              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+            if (matching4K) {
+              fourKVersions[fav.id] = {
+                id: matching4K.id,
+                status: matching4K.status,
+                result_url: matching4K.result_url,
+                error_message: matching4K.error_message,
+              };
+            }
+          });
+        }
+      }
+
+      // Combine favorites with look codes and 4K status
+      const enriched: FavoriteOutput[] = (favData || []).map((f) => ({
+        ...f,
+        source_url: batchItemInfo[f.batch_item_id]?.source_url,
+        look_code: lookCodes[f.batch_item_id],
+        fourK_output_id: fourKVersions[f.id]?.id,
+        fourK_status: fourKVersions[f.id]?.status,
+        fourK_result_url: fourKVersions[f.id]?.result_url,
+        fourK_error: fourKVersions[f.id]?.error_message,
+      }));
+
+      setFavorites(enriched);
+    } finally {
+      setIsLoading(false);
     }
-
-    const enriched = (data || []).map((o: any) => ({
-      ...o,
-      look_id: o.repose_batch_items?.look_id,
-    }));
-
-    setOutputs(enriched);
-
-    // Count stalled outputs (running for > 2 minutes)
-    const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-    const stalled = enriched.filter(
-      (o: OutputItem) => o.status === "running" && o.created_at < twoMinAgo
-    ).length;
-    setStalledCount(stalled);
   }, [batchId]);
 
-  // Fetch active job
-  const fetchActiveJob = useCallback(async () => {
-    if (!batchId) return;
-
-    const { data } = await supabase
-      .from("pipeline_jobs")
-      .select("id, status, progress_done, progress_failed, progress_total")
-      .eq("type", "REPOSE_GENERATION")
-      .ilike("origin_context", `%${batchId}%`)
-      .ilike("origin_context", `%is4K%`)
-      .in("status", ["RUNNING", "QUEUED"])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (data) {
-      setActiveJob(data);
-      setIsRendering(true);
-    } else {
-      setActiveJob(null);
-      setIsRendering(false);
-    }
-  }, [batchId]);
-
-  // Initial fetch and polling
+  // Initial fetch
   useEffect(() => {
-    fetchOutputs();
-    fetchActiveJob();
+    fetchFavorites();
+  }, [fetchFavorites]);
 
-    const interval = setInterval(() => {
-      fetchOutputs();
-      fetchActiveJob();
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [fetchOutputs, fetchActiveJob]);
-
-  // Realtime subscription for new outputs
+  // Realtime subscription for updates
   useEffect(() => {
     if (!batchId) return;
 
     const channel = supabase
-      .channel(`4k-feed-${batchId}`)
+      .channel(`4k-favorites-${batchId}`)
       .on(
         "postgres_changes",
         {
@@ -153,9 +207,8 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           table: "repose_outputs",
           filter: `batch_id=eq.${batchId}`,
         },
-        (payload) => {
-          console.log("[4K Feed] Realtime update:", payload.eventType);
-          fetchOutputs();
+        () => {
+          fetchFavorites();
         }
       )
       .subscribe();
@@ -163,189 +216,99 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [batchId, fetchOutputs]);
+  }, [batchId, fetchFavorites]);
 
-  // Toggle shot type selection
-  const toggleShotType = (shotType: string) => {
-    setSelectedShotTypes((prev) =>
-      prev.includes(shotType)
-        ? prev.filter((t) => t !== shotType)
-        : [...prev, shotType]
-    );
-  };
-
-  // Start 4K re-render
-  const handleStartRender = async () => {
+  // Trigger individual 4K render
+  const handleRender4K = async (favorite: FavoriteOutput) => {
     if (!batchId) return;
-
-    if (selectedShotTypes.length === 0) {
-      toast.error("Please select at least one shot type");
-      return;
-    }
-
-    setIsRendering(true);
-    toast.info("Queuing 4K re-renders...");
-
+    
+    // Prevent double-click
+    if (renderingIds.has(favorite.id)) return;
+    
+    setRenderingIds((prev) => new Set(prev).add(favorite.id));
+    
     try {
-      const { data, error } = await supabase.functions.invoke("rerender-favorites-4k", {
+      // Create a new output record for the 4K version
+      const { data: newOutput, error: insertError } = await supabase
+        .from("repose_outputs")
+        .insert({
+          batch_id: batchId,
+          batch_item_id: favorite.batch_item_id,
+          shot_type: favorite.shot_type,
+          pose_url: favorite.pose_url,
+          status: "queued",
+          is_favorite: false, // 4K version isn't a favorite yet
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      toast.info("Starting 4K render...");
+
+      // Call generate-repose-single directly with 4K size
+      const { data, error } = await supabase.functions.invoke("generate-repose-single", {
         body: {
-          batchId,
-          shotTypes: selectedShotTypes,
+          outputId: newOutput.id,
+          model: "imagen-3.0-generate-002",
           imageSize: "4K",
         },
       });
 
       if (error) throw error;
 
-      toast.success(`Queued ${data.queuedCount} outputs for 4K rendering`);
-      fetchActiveJob();
-      fetchOutputs();
-    } catch (error) {
-      console.error("Error starting 4K render:", error);
-      toast.error("Failed to start 4K rendering");
-      setIsRendering(false);
-    }
-  };
-
-  // Cancel active job
-  const handleCancelJob = async () => {
-    if (!activeJob) return;
-
-    try {
-      await supabase
-        .from("pipeline_jobs")
-        .update({ status: "CANCELED" })
-        .eq("id", activeJob.id);
-
-      toast.info("4K rendering cancelled");
-      setIsRendering(false);
-      setActiveJob(null);
-    } catch (error) {
-      console.error("Error cancelling job:", error);
-      toast.error("Failed to cancel job");
-    }
-  };
-
-  // Cleanup stalled outputs
-  const handleCleanupStalled = async () => {
-    if (!batchId) return;
-
-    const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-
-    try {
-      await supabase
-        .from("repose_outputs")
-        .update({ status: "failed", error_message: "Marked as stalled by user" })
-        .eq("batch_id", batchId)
-        .eq("status", "running")
-        .lt("created_at", twoMinAgo);
-
-      toast.success("Stalled outputs marked as failed");
-      fetchOutputs();
-    } catch (error) {
-      console.error("Error cleaning up stalled:", error);
-      toast.error("Failed to cleanup stalled outputs");
-    }
-  };
-
-  // Resume stalled queue - reset running outputs and re-invoke processor
-  const handleResumeQueue = async () => {
-    if (!batchId) return;
-
-    const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-
-    try {
-      // Reset stale running outputs back to queued
-      const { data: resetData } = await supabase
-        .from("repose_outputs")
-        .update({ status: "queued" })
-        .eq("batch_id", batchId)
-        .eq("status", "running")
-        .lt("created_at", twoMinAgo)
-        .select("id");
-
-      const resetCount = resetData?.length || 0;
-      
-      // Get count of queued outputs (don't fetch all IDs - can be huge)
-      const { count: queuedCount, error: countError } = await supabase
-        .from("repose_outputs")
-        .select("id", { count: 'exact', head: true })
-        .eq("batch_id", batchId)
-        .eq("status", "queued");
-
-      if (countError || !queuedCount) {
-        toast.info("No queued outputs to resume");
-        return;
+      if (data?.status === "uploading") {
+        toast.success("4K render started - processing in background");
+      } else if (data?.error) {
+        toast.error(`Render failed: ${data.error}`);
       }
 
-      // Create a new pipeline job
-      const { data: job, error: jobError } = await supabase
-        .from("pipeline_jobs")
-        .insert({
-          type: "REPOSE_GENERATION",
-          title: `Resume 4K queue (${queuedCount} outputs)`,
-          status: "RUNNING",
-          origin_route: `/repose-production/batch/${batchId}?tab=4k-edit`,
-          origin_context: {
-            batchId,
-            isRerender: true,
-            is4K: true,
-            isResume: true,
-          },
-          progress_done: 0,
-          progress_failed: 0,
-          progress_total: queuedCount,
-        })
-        .select()
-        .single();
-
-      if (jobError) throw jobError;
-
-      // Invoke the queue processor WITHOUT outputIds - let it process all queued outputs
-      // This avoids Supabase's ~500 item limit on .in() queries
-      const { error: invokeError } = await supabase.functions.invoke("process-repose-queue-4k", {
-        body: {
-          batchId,
-          pipelineJobId: job.id,
-          imageSize: "4K",
-          // Don't pass outputIds - the queue will process all queued outputs for this batch
-        },
-      });
-
-      if (invokeError) throw invokeError;
-
-      toast.success(`Resumed queue: ${resetCount} reset, ${queuedCount} queued`);
-      fetchActiveJob();
-      fetchOutputs();
+      // Refresh to show the new 4K output
+      fetchFavorites();
     } catch (error) {
-      console.error("Error resuming queue:", error);
-      toast.error("Failed to resume queue");
+      console.error("Error starting 4K render:", error);
+      toast.error("Failed to start 4K render");
+    } finally {
+      setRenderingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(favorite.id);
+        return next;
+      });
     }
   };
 
-  // Compute stats
+  // Stats
   const stats = useMemo(() => {
-    const complete = outputs.filter((o) => o.status === "complete").length;
-    const running = outputs.filter((o) => o.status === "running").length;
-    const queued = outputs.filter((o) => o.status === "queued").length;
-    const failed = outputs.filter((o) => o.status === "failed").length;
-    return { complete, running, queued, failed, total: outputs.length };
-  }, [outputs]);
+    const total = favorites.length;
+    const with4K = favorites.filter((f) => f.fourK_status === "complete").length;
+    const rendering = favorites.filter((f) => f.fourK_status === "running" || f.fourK_status === "uploading" || f.fourK_status === "queued").length;
+    const failed = favorites.filter((f) => f.fourK_status === "failed").length;
+    return { total, with4K, rendering, failed };
+  }, [favorites]);
 
-  // Get completed outputs for display
-  const completedOutputs = useMemo(
-    () => outputs.filter((o) => o.status === "complete" && o.result_url),
-    [outputs]
-  );
+  // Group by look code for easier browsing
+  const groupedByLook = useMemo(() => {
+    const groups: Record<string, FavoriteOutput[]> = {};
+    favorites.forEach((f) => {
+      const key = f.look_code || "Unknown";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(f);
+    });
+    // Sort groups by look code
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+  }, [favorites]);
 
-  const runningOutputs = useMemo(
-    () => outputs.filter((o) => o.status === "running" || o.status === "queued"),
-    [outputs]
-  );
+  if (!batchId) {
+    return (
+      <div className="flex items-center justify-center h-64 text-muted-foreground">
+        Select a batch first
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full gap-4">
-      {/* Header with controls */}
+      {/* Header */}
       <Card>
         <CardHeader className="py-4">
           <div className="flex items-center justify-between">
@@ -354,152 +317,84 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
               4K Re-render
             </CardTitle>
             
-            {activeJob && (
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                  <span>
-                    {activeJob.progress_done}/{activeJob.progress_total}
-                  </span>
-                  {activeJob.progress_failed > 0 && (
-                    <Badge variant="destructive" className="text-xs">
-                      {activeJob.progress_failed} failed
-                    </Badge>
-                  )}
-                </div>
-                <Button variant="outline" size="sm" onClick={handleCancelJob}>
-                  Cancel
-                </Button>
-              </div>
-            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fetchFavorites}
+              className="gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Refresh
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="pt-0">
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Shot type selection */}
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-muted-foreground">Shot Types:</span>
-              {SHOT_TYPES.map((type) => (
-                <label
-                  key={type.id}
-                  className="flex items-center gap-2 cursor-pointer"
-                >
-                  <Checkbox
-                    checked={selectedShotTypes.includes(type.id)}
-                    onCheckedChange={() => toggleShotType(type.id)}
-                    disabled={isRendering}
-                  />
-                  <span className="text-sm">{type.label}</span>
-                </label>
-              ))}
-            </div>
-
-            <div className="flex-1" />
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-2">
-              {stalledCount > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCleanupStalled}
-                  className="gap-2 text-amber-600 border-amber-200 hover:bg-amber-50"
-                >
-                  <AlertTriangle className="w-4 h-4" />
-                  Clean {stalledCount} Stalled
-                </Button>
+          <p className="text-sm text-muted-foreground mb-3">
+            Click any favorite to render it in 4K resolution. Each tile shows the original 1K render.
+          </p>
+          
+          {/* Stats bar */}
+          {stats.total > 0 && (
+            <div className="flex items-center gap-4">
+              <Badge variant="outline" className="gap-1.5">
+                <ImageIcon className="w-3 h-3" />
+                {stats.total} Favorites
+              </Badge>
+              {stats.with4K > 0 && (
+                <Badge variant="outline" className="gap-1.5 text-green-600 border-green-200">
+                  <Check className="w-3 h-3" />
+                  {stats.with4K} in 4K
+                </Badge>
               )}
-
-              {/* Resume button - shown when queue is stalled */}
-              {stats.queued > 0 && !activeJob && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleResumeQueue}
-                  className="gap-2"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  Resume Queue ({stats.queued})
-                </Button>
+              {stats.rendering > 0 && (
+                <Badge variant="outline" className="gap-1.5 text-blue-600 border-blue-200">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {stats.rendering} Rendering
+                </Badge>
               )}
-              
-              <Button
-                onClick={handleStartRender}
-                disabled={isRendering || selectedShotTypes.length === 0}
-                className="gap-2"
-              >
-                {isRendering ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Wand2 className="w-4 h-4" />
-                )}
-                Re-render @ 4K
-              </Button>
+              {stats.failed > 0 && (
+                <Badge variant="destructive" className="gap-1.5">
+                  <X className="w-3 h-3" />
+                  {stats.failed} Failed
+                </Badge>
+              )}
             </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Status bar */}
-      {stats.total > 0 && (
-        <div className="flex items-center gap-4 px-4 py-2 rounded-lg bg-muted/50">
-          <Badge variant="outline" className="gap-1.5">
-            <Check className="w-3 h-3 text-green-500" />
-            {stats.complete} Complete
-          </Badge>
-          {stats.running > 0 && (
-            <Badge variant="outline" className="gap-1.5">
-              <Loader2 className="w-3 h-3 animate-spin text-blue-500" />
-              {stats.running} Generating
-            </Badge>
-          )}
-          {stats.queued > 0 && (
-            <Badge variant="outline" className="gap-1.5">
-              <Clock className="w-3 h-3 text-muted-foreground" />
-              {stats.queued} Queued
-            </Badge>
-          )}
-          {stats.failed > 0 && (
-            <Badge variant="destructive" className="gap-1.5">
-              <X className="w-3 h-3" />
-              {stats.failed} Failed
-            </Badge>
-          )}
-          <div className="flex-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              fetchOutputs();
-              fetchActiveJob();
-            }}
-            className="gap-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
-          </Button>
-        </div>
-      )}
-
-      {/* Live generation feed */}
+      {/* Favorites grid */}
       <div className="flex-1 min-h-0">
         <ScrollArea className="h-full">
-          {outputs.length === 0 ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : favorites.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
               <ImageIcon className="w-12 h-12 mb-4 opacity-50" />
-              <p className="text-lg font-medium">No 4K renders yet</p>
-              <p className="text-sm">Select shot types and click "Re-render @ 4K" to start</p>
+              <p className="text-lg font-medium">No favorites found</p>
+              <p className="text-sm">Mark some outputs as favorites in the Review tab first</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              {/* Queued/Running outputs first */}
-              {runningOutputs.map((output) => (
-                <OutputTile key={output.id} output={output} />
-              ))}
-              
-              {/* Completed outputs */}
-              {completedOutputs.map((output) => (
-                <OutputTile key={output.id} output={output} />
+            <div className="space-y-6 p-4">
+              {groupedByLook.map(([lookCode, lookFavorites]) => (
+                <div key={lookCode}>
+                  <h3 className="text-sm font-medium mb-2 text-muted-foreground flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-muted">{lookCode}</span>
+                    <span className="text-xs">({lookFavorites.length} favorites)</span>
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                    {lookFavorites.map((fav) => (
+                      <FavoriteTile
+                        key={fav.id}
+                        favorite={fav}
+                        onRender={() => handleRender4K(fav)}
+                        isRendering={renderingIds.has(fav.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -509,119 +404,129 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
   );
 }
 
-// Individual output tile component
-function OutputTile({ output }: { output: OutputItem }) {
-  const [isLoading, setIsLoading] = useState(true);
+// Individual favorite tile component
+interface FavoriteTileProps {
+  favorite: FavoriteOutput;
+  onRender: () => void;
+  isRendering: boolean;
+}
+
+function FavoriteTile({ favorite, onRender, isRendering }: FavoriteTileProps) {
+  const [isImgLoading, setIsImgLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
-  const isComplete = output.status === "complete" && output.result_url;
-  const isRunning = output.status === "running";
-  const isQueued = output.status === "queued";
-  const isFailed = output.status === "failed";
+  const thumbnailUrl = favorite.result_url ? getImageUrl(favorite.result_url, "thumb") : null;
+  const sku = extractSKU(favorite.source_url);
+  const shotLabel = SHOT_TYPE_LABELS[favorite.shot_type] || favorite.shot_type;
 
-  // Check if stalled (running for > 2 minutes)
-  const isStalled = isRunning && new Date(output.created_at) < new Date(Date.now() - 2 * 60 * 1000);
+  // Determine 4K status
+  const has4K = favorite.fourK_status === "complete";
+  const is4KRendering = favorite.fourK_status === "running" || favorite.fourK_status === "uploading" || favorite.fourK_status === "queued" || isRendering;
+  const is4KFailed = favorite.fourK_status === "failed";
 
-  const thumbnailUrl = output.result_url ? getImageUrl(output.result_url, "thumb") : null;
+  const handleClick = () => {
+    if (!has4K && !is4KRendering) {
+      onRender();
+    }
+  };
 
   return (
     <div
+      onClick={handleClick}
       className={cn(
-        "relative aspect-[3/4] rounded-lg overflow-hidden border-2",
+        "relative aspect-[3/4] rounded-lg overflow-hidden border-2 cursor-pointer group",
         "transition-all bg-muted/50",
-        isComplete && "border-green-500/50",
-        isRunning && !isStalled && "border-blue-500/50",
-        isStalled && "border-amber-500/50",
-        isQueued && "border-muted-foreground/30",
-        isFailed && "border-destructive/50"
+        has4K && "border-green-500/50 ring-2 ring-green-500/20",
+        is4KRendering && "border-blue-500/50",
+        is4KFailed && "border-destructive/50",
+        !has4K && !is4KRendering && !is4KFailed && "border-muted-foreground/30 hover:border-purple-400 hover:ring-2 hover:ring-purple-400/20"
       )}
     >
       {/* Loading state */}
-      {isComplete && isLoading && !hasError && (
+      {isImgLoading && !hasError && (
         <div className="absolute inset-0 flex items-center justify-center bg-muted">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
         </div>
       )}
 
-      {/* Completed image */}
-      {isComplete && thumbnailUrl && (
+      {/* Thumbnail image */}
+      {thumbnailUrl && (
         <img
           src={thumbnailUrl}
-          alt="4K output"
+          alt={`${sku} - ${shotLabel}`}
           className={cn(
             "w-full h-full object-cover transition-opacity",
-            isLoading ? "opacity-0" : "opacity-100"
+            isImgLoading ? "opacity-0" : "opacity-100"
           )}
           loading="lazy"
-          onLoad={() => setIsLoading(false)}
+          onLoad={() => setIsImgLoading(false)}
           onError={() => {
-            setIsLoading(false);
+            setIsImgLoading(false);
             setHasError(true);
           }}
         />
       )}
 
-      {/* Generating state */}
-      {isRunning && !isStalled && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted">
+      {/* 4K rendering overlay */}
+      {is4KRendering && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80">
           <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-          <span className="text-xs font-medium text-blue-500">Generating...</span>
+          <span className="text-xs font-medium text-blue-500">Rendering 4K...</span>
         </div>
       )}
 
-      {/* Stalled state */}
-      {isStalled && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted">
-          <AlertTriangle className="w-8 h-8 text-amber-500" />
-          <span className="text-xs font-medium text-amber-500">Stalled</span>
-        </div>
-      )}
-
-      {/* Queued state */}
-      {isQueued && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted">
-          <Clock className="w-8 h-8 text-muted-foreground" />
-          <span className="text-xs font-medium text-muted-foreground">Queued</span>
-        </div>
-      )}
-
-      {/* Failed state */}
-      {isFailed && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted">
+      {/* 4K failed overlay */}
+      {is4KFailed && !is4KRendering && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80">
           <X className="w-8 h-8 text-destructive" />
-          <span className="text-xs font-medium text-destructive">Failed</span>
-          {output.error_message && (
+          <span className="text-xs font-medium text-destructive">4K Failed</span>
+          {favorite.fourK_error && (
             <span className="text-[10px] text-destructive/70 px-2 text-center line-clamp-2">
-              {output.error_message}
+              {favorite.fourK_error}
             </span>
           )}
+          <span className="text-[10px] text-muted-foreground">Click to retry</span>
         </div>
       )}
 
-      {/* 4K badge for completed */}
-      {isComplete && (
-        <Badge className="absolute top-1 right-1 bg-purple-600 text-white text-[10px] px-1.5 py-0.5">
+      {/* Hover overlay for items without 4K */}
+      {!has4K && !is4KRendering && !is4KFailed && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Zap className="w-8 h-8 text-purple-500" />
+          <span className="text-xs font-medium text-purple-500">Click to render 4K</span>
+        </div>
+      )}
+
+      {/* 4K complete badge */}
+      {has4K && (
+        <Badge className="absolute top-1 right-1 bg-green-600 text-white text-[10px] px-1.5 py-0.5 gap-1">
+          <Check className="w-2.5 h-2.5" />
           4K
         </Badge>
       )}
 
+      {/* Rank badge */}
+      <Badge
+        variant="secondary"
+        className="absolute top-1 left-1 text-[10px] px-1.5 py-0.5 bg-background/80 font-bold"
+      >
+        #{favorite.favorite_rank}
+      </Badge>
+
       {/* Shot type badge */}
       <Badge
         variant="secondary"
-        className="absolute bottom-1 left-1 text-[10px] px-1.5 py-0.5 bg-background/80"
+        className="absolute bottom-6 left-1 text-[10px] px-1.5 py-0.5 bg-background/80"
       >
-        {output.shot_type?.replace("_", " ")}
+        {shotLabel}
       </Badge>
 
-      {/* Look code if available */}
-      {output.look_code && (
-        <Badge
-          variant="outline"
-          className="absolute top-1 left-1 text-[10px] px-1.5 py-0.5 bg-background/80"
-        >
-          {output.look_code}
-        </Badge>
-      )}
+      {/* SKU badge at bottom */}
+      <div className="absolute bottom-0 inset-x-0 bg-background/90 py-1 px-1.5 text-center">
+        <span className="text-[10px] font-mono font-medium truncate block">
+          {sku}
+        </span>
+      </div>
     </div>
   );
 }
