@@ -12,7 +12,8 @@ import {
   RefreshCw,
   ImageIcon,
   Sparkles,
-  Zap
+  Zap,
+  Download
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getImageUrl } from "@/lib/imageUtils";
@@ -61,11 +62,18 @@ const SHOT_TYPE_LABELS: Record<string, string> = {
   BACK_FULL: "Back",
 };
 
+const RANK_LABELS: Record<number, string> = {
+  1: "1st",
+  2: "2nd",
+  3: "3rd",
+};
+
 export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
   const [favorites, setFavorites] = useState<FavoriteOutput[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [renderingIds, setRenderingIds] = useState<Set<string>>(new Set());
   const [selectedShotTypes, setSelectedShotTypes] = useState<Set<string>>(new Set());
+  const [selectedRanks, setSelectedRanks] = useState<Set<number>>(new Set());
 
   // Toggle shot type filter
   const toggleShotType = (type: string) => {
@@ -80,11 +88,30 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     });
   };
 
-  // Filter favorites by selected shot types
+  // Toggle rank filter
+  const toggleRank = (rank: number) => {
+    setSelectedRanks((prev) => {
+      const next = new Set(prev);
+      if (next.has(rank)) {
+        next.delete(rank);
+      } else {
+        next.add(rank);
+      }
+      return next;
+    });
+  };
+
+  // Filter favorites by selected shot types and ranks
   const filteredFavorites = useMemo(() => {
-    if (selectedShotTypes.size === 0) return favorites;
-    return favorites.filter((f) => selectedShotTypes.has(f.shot_type));
-  }, [favorites, selectedShotTypes]);
+    let result = favorites;
+    if (selectedShotTypes.size > 0) {
+      result = result.filter((f) => selectedShotTypes.has(f.shot_type));
+    }
+    if (selectedRanks.size > 0) {
+      result = result.filter((f) => selectedRanks.has(f.favorite_rank));
+    }
+    return result;
+  }, [favorites, selectedShotTypes, selectedRanks]);
 
   // Fetch all favorites for this batch
   const fetchFavorites = useCallback(async () => {
@@ -354,30 +381,59 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
             Click any favorite to render it in 4K resolution. Each tile shows the original 1K render.
           </p>
           
-          {/* Shot type filter buttons */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground">Filter:</span>
-            {Object.entries(SHOT_TYPE_LABELS).map(([type, label]) => (
-              <Button
-                key={type}
-                variant={selectedShotTypes.has(type) ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => toggleShotType(type)}
-              >
-                {label}
-              </Button>
-            ))}
-            {selectedShotTypes.size > 0 && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-7 text-xs"
-                onClick={() => setSelectedShotTypes(new Set())}
-              >
-                Clear
-              </Button>
-            )}
+          {/* Filter buttons */}
+          <div className="flex flex-col gap-2">
+            {/* Shot type filter */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground w-10">Shot:</span>
+              {Object.entries(SHOT_TYPE_LABELS).map(([type, label]) => (
+                <Button
+                  key={type}
+                  variant={selectedShotTypes.has(type) ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => toggleShotType(type)}
+                >
+                  {label}
+                </Button>
+              ))}
+              {selectedShotTypes.size > 0 && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 text-xs"
+                  onClick={() => setSelectedShotTypes(new Set())}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            
+            {/* Rank filter */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground w-10">Rank:</span>
+              {[1, 2, 3].map((rank) => (
+                <Button
+                  key={rank}
+                  variant={selectedRanks.has(rank) ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => toggleRank(rank)}
+                >
+                  #{rank}
+                </Button>
+              ))}
+              {selectedRanks.size > 0 && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-7 text-xs"
+                  onClick={() => setSelectedRanks(new Set())}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Stats bar */}
@@ -466,7 +522,7 @@ function FavoriteTile({ favorite, onRender, isRendering }: FavoriteTileProps) {
   const [hasError, setHasError] = useState(false);
 
   const thumbnailUrl = favorite.result_url ? getImageUrl(favorite.result_url, "thumb") : null;
-  const sku = extractSKU(favorite.source_url);
+  const sku = favorite.look_code || extractSKU(favorite.source_url);
   const shotLabel = SHOT_TYPE_LABELS[favorite.shot_type] || favorite.shot_type;
 
   // Determine 4K status
@@ -477,6 +533,41 @@ function FavoriteTile({ favorite, onRender, isRendering }: FavoriteTileProps) {
   const handleClick = () => {
     if (!has4K && !is4KRendering) {
       onRender();
+    }
+  };
+
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering render
+    
+    // Use 4K URL if available, otherwise original
+    const downloadUrl = favorite.fourK_result_url || favorite.result_url;
+    if (!downloadUrl) {
+      toast.error("No image available to download");
+      return;
+    }
+    
+    try {
+      const response = await fetch(downloadUrl);
+      const blob = await response.blob();
+      
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      
+      // Build filename: SKU_ShotType_Rank.png
+      const shotLabelClean = shotLabel.replace(/\s+/g, "_");
+      const rankSuffix = RANK_LABELS[favorite.favorite_rank] || `${favorite.favorite_rank}`;
+      link.download = `${sku}_${shotLabelClean}_${rankSuffix}.png`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success("Download started");
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error("Download failed");
     }
   };
 
@@ -562,6 +653,17 @@ function FavoriteTile({ favorite, onRender, isRendering }: FavoriteTileProps) {
       >
         #{favorite.favorite_rank}
       </Badge>
+
+      {/* Download button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute top-1 right-10 h-6 w-6 bg-background/80 hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={handleDownload}
+        title={`Download ${has4K ? "4K" : "original"} image`}
+      >
+        <Download className="w-3.5 h-3.5" />
+      </Button>
 
       {/* Shot type badge */}
       <Badge
