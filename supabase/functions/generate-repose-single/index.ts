@@ -1,3 +1,4 @@
+// Version: 2026-01-19-v2 - Added temp storage for 4K uploads
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -186,7 +187,7 @@ The final image should look like the original photo, naturally repositioned in 3
     );
     
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    console.log(`[generate-repose-single] AI response received in ${elapsed}s`);
+    console.log(`[generate-repose-single] AI response received in ${elapsed}s, reading body...`);
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
@@ -206,7 +207,20 @@ The final image should look like the original photo, naturally repositioned in 3
       throw new Error(`AI API error: ${aiResponse.status}`);
     }
 
-    const aiResult = await aiResponse.json();
+    // Read response body as text first (more reliable for large payloads)
+    console.log(`[generate-repose-single] Reading response text...`);
+    const responseText = await aiResponse.text();
+    console.log(`[generate-repose-single] Got ${Math.round(responseText.length / 1024)}KB response, parsing JSON...`);
+    
+    let aiResult;
+    try {
+      aiResult = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('[generate-repose-single] JSON parse error, response length:', responseText.length, 'first 500 chars:', responseText.slice(0, 500));
+      throw new Error(`Failed to parse AI response: ${parseError}`);
+    }
+    
+    console.log(`[generate-repose-single] JSON parsed successfully`);
     
     // Check for embedded error in response (API sometimes returns 200 with error in body)
     const embeddedError = aiResult.choices?.[0]?.error;
@@ -255,14 +269,19 @@ The final image should look like the original photo, naturally repositioned in 3
       throw new Error('No image generated');
     }
 
+    console.log(`[generate-repose-single] Got image URL, length: ${generatedImageUrl.length} chars`);
+
     // Extract base64 data and upload to storage
     const base64Match = generatedImageUrl.match(/^data:image\/(\w+);base64,(.+)$/);
     if (!base64Match) {
+      console.error('[generate-repose-single] Invalid image format, URL starts with:', generatedImageUrl.slice(0, 100));
       throw new Error('Invalid image data format');
     }
 
     const imageFormat = base64Match[1];
     const base64Data = base64Match[2];
+    
+    console.log(`[generate-repose-single] Extracted base64: format=${imageFormat}, size=${Math.round(base64Data.length / 1024)}KB`);
     
     // For large images (4K), store base64 to temp storage and let a separate function upload
     // This avoids timeout issues since 4K images can be 10-15MB
