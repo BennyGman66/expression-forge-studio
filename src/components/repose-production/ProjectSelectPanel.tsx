@@ -71,8 +71,25 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
   const handleCreateBatch = async () => {
     if (!selectedProjectId || selectedLookIds.size === 0) return;
 
-    // Get look_source_images for selected looks (these have clean, sanitized URLs)
     const selectedLookIdsArray = Array.from(selectedLookIds);
+
+    // PRIORITY 1: Get AI Apply outputs (selected post-face-application images)
+    const { data: aiApplyOutputs } = await supabase
+      .from('ai_apply_outputs')
+      .select('look_id, view, stored_url')
+      .in('look_id', selectedLookIdsArray)
+      .eq('is_selected', true);
+
+    // Create a map: look_id -> view -> stored_url (from AI Apply)
+    const aiApplyMap = new Map<string, Map<string, string>>();
+    aiApplyOutputs?.forEach(output => {
+      if (!aiApplyMap.has(output.look_id)) {
+        aiApplyMap.set(output.look_id, new Map());
+      }
+      aiApplyMap.get(output.look_id)!.set(output.view.toLowerCase(), output.stored_url);
+    });
+
+    // PRIORITY 2: Get look_source_images as fallback (clean, sanitized URLs)
     const { data: sourceImages } = await supabase
       .from('look_source_images')
       .select('look_id, view, source_url')
@@ -87,7 +104,15 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
       sourceImageMap.get(img.look_id)!.set(img.view.toLowerCase(), img.source_url);
     });
 
-    // Collect all outputs from selected looks, preferring look_source_images URLs
+    // Validate URL is not from face-crops bucket (a common error pattern)
+    const isValidSourceUrl = (url: string): boolean => {
+      if (!url) return false;
+      // Reject face-crops bucket URLs (these are cropped heads, not full outfits)
+      if (url.includes('/face-crops/') || url.includes('face-crops%2F')) return false;
+      return true;
+    };
+
+    // Collect all outputs from selected looks with proper URL priority
     const outputs: Array<{ look_id: string; view: string; source_output_id: string; source_url: string }> = [];
     
     approvedLooks?.filter(l => selectedLookIds.has(l.id)).forEach(look => {
@@ -101,14 +126,24 @@ export function ProjectSelectPanel({ onBatchCreated }: ProjectSelectPanelProps) 
           else if (labelLower.includes('side')) viewType = 'side';
           else if (labelLower.includes('detail')) viewType = 'detail';
           
-          // Prefer clean URL from look_source_images, fallback to job_outputs.file_url
-          const cleanUrl = sourceImageMap.get(look.id)?.get(viewType);
+          // Priority order: AI Apply output > look_source_images > job_outputs.file_url
+          const aiApplyUrl = aiApplyMap.get(look.id)?.get(viewType);
+          const sourceUrl = sourceImageMap.get(look.id)?.get(viewType);
+          
+          let finalUrl = output.file_url; // Default fallback
+          if (aiApplyUrl && isValidSourceUrl(aiApplyUrl)) {
+            finalUrl = aiApplyUrl;
+          } else if (sourceUrl && isValidSourceUrl(sourceUrl)) {
+            finalUrl = sourceUrl;
+          } else if (!isValidSourceUrl(output.file_url)) {
+            console.warn(`[ProjectSelectPanel] Invalid source URL for look ${look.id}, view ${viewType}: ${output.file_url}`);
+          }
           
           outputs.push({
             look_id: look.id,
             view: output.label || 'unknown',
             source_output_id: output.id,
-            source_url: cleanUrl || output.file_url,
+            source_url: finalUrl,
           });
         }
       });
