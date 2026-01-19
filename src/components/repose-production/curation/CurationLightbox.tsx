@@ -4,7 +4,7 @@ import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { ChevronLeft, ChevronRight, X, Star } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, Star, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { OUTPUT_SHOT_LABELS, OutputShotType } from "@/types/shot-types";
 import { getImageUrl } from "@/lib/imageUtils";
@@ -57,6 +57,29 @@ export function CurationLightbox({
     }
   }, [currentImage, onToggleSelection]);
 
+  const handleDownload = useCallback(async () => {
+    if (!currentImage) return;
+    
+    try {
+      const response = await fetch(currentImage.url);
+      const blob = await response.blob();
+      
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      const shotLabel = OUTPUT_SHOT_LABELS[currentImage.shotType].replace(/\s+/g, '_');
+      link.download = `${shotLabel}_${currentIndex + 1}.png`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download failed:', error);
+    }
+  }, [currentImage, currentIndex]);
+
   // Scroll filmstrip to keep current image visible
   useEffect(() => {
     if (filmstripRef.current && isOpen) {
@@ -87,6 +110,11 @@ export function CurationLightbox({
           e.preventDefault();
           handleToggle();
           break;
+        case "d":
+        case "D":
+          e.preventDefault();
+          handleDownload();
+          break;
         case "1":
         case "2":
         case "3":
@@ -100,7 +128,7 @@ export function CurationLightbox({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, handlePrevious, handleNext, handleToggle, onClose, currentImage]);
+  }, [isOpen, handlePrevious, handleNext, handleToggle, handleDownload, onClose, currentImage]);
 
   const isSelected = currentImage?.output.is_favorite;
   const rank = currentImage?.output.favorite_rank;
@@ -134,6 +162,15 @@ export function CurationLightbox({
               <span className="text-sm text-white/70">
                 {currentIndex + 1} / {images.length}
               </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-white hover:bg-white/10"
+                onClick={handleDownload}
+                title="Download image (D)"
+              >
+                <Download className="w-5 h-5" />
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"
@@ -199,7 +236,7 @@ export function CurationLightbox({
               }
             </Button>
             <span className="text-xs text-white/50">
-              Space = toggle • ← → = navigate
+              Space = toggle • ← → = navigate • D = download
             </span>
           </div>
 
