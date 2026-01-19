@@ -134,3 +134,6 @@ verify_jwt = false
 
 [functions.rerender-favorites-4k]
 verify_jwt = false
+
+[functions.process-repose-queue-4k]
+verify_jwt = false
