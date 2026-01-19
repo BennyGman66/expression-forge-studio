@@ -23,6 +23,7 @@ interface LightboxImage {
   url: string;
   shotType: OutputShotType;
   output: ReposeOutput;
+  lookCode: string;
 }
 
 export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPanelProps) {
@@ -90,6 +91,7 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
             url: output.result_url,
             shotType,
             output,
+            lookCode: look.lookCode,
           });
         }
       }

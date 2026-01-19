@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { OUTPUT_SHOT_LABELS, OutputShotType } from "@/types/shot-types";
 import { getImageUrl } from "@/lib/imageUtils";
 import type { ReposeOutput } from "@/types/repose";
+import { toast } from "sonner";
 
 interface CurationLightboxProps {
   isOpen: boolean;
@@ -18,6 +19,7 @@ interface CurationLightboxProps {
     url: string;
     shotType: OutputShotType;
     output: ReposeOutput;
+    lookCode: string;
   }>;
   currentIndex: number;
   onNavigate: (index: number) => void;
@@ -61,6 +63,7 @@ export function CurationLightbox({
     if (!currentImage) return;
     
     try {
+      // Use the original full-resolution URL for highest quality
       const response = await fetch(currentImage.url);
       const blob = await response.blob();
       
@@ -68,17 +71,25 @@ export function CurationLightbox({
       const link = document.createElement('a');
       link.href = url;
       
+      // Build filename: SKU_ShotType_Rank.png
+      const sku = currentImage.lookCode || 'Unknown';
       const shotLabel = OUTPUT_SHOT_LABELS[currentImage.shotType].replace(/\s+/g, '_');
-      link.download = `${shotLabel}_${currentIndex + 1}.png`;
+      const rank = currentImage.output.favorite_rank;
+      const rankSuffix = rank ? `_${RANK_LABELS[rank]}` : '';
+      
+      link.download = `${sku}_${shotLabel}${rankSuffix}.png`;
       
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
+      
+      toast.success('Download started');
     } catch (error) {
       console.error('Download failed:', error);
+      toast.error('Download failed');
     }
-  }, [currentImage, currentIndex]);
+  }, [currentImage]);
 
   // Scroll filmstrip to keep current image visible
   useEffect(() => {
