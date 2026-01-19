@@ -12,12 +12,13 @@ const corsHeaders = {
 // Time limit for each worker invocation (50 seconds - Deno kills at ~60-90s)
 const MAX_PROCESSING_TIME_MS = 50 * 1000;
 
-// Lower concurrency for 4K - larger images take longer
-const OUTPUT_CONCURRENCY = 2;
+// Single output at a time for 4K to avoid rate limits
+const OUTPUT_CONCURRENCY = 1;
 
 // Retry settings for failed generations
-const MAX_RETRIES = 2;
-const RETRY_DELAY_MS = 3000;
+const MAX_RETRIES = 3;
+const BASE_RETRY_DELAY_MS = 3000;
+const RATE_LIMIT_DELAY_MS = 10000;
 
 // Heartbeat logging interval
 const LOG_INTERVAL_MS = 10 * 1000;
@@ -257,8 +258,22 @@ async function processQueueBackground(
 
       console.log(`[process-repose-queue-4k] Batch complete: ${batchSuccess} success, ${batchFail} failed`);
 
-      // Small delay between batches
-      await new Promise((r) => setTimeout(r, 1000));
+      // Longer delay between batches for rate limit safety
+      await new Promise((r) => setTimeout(r, 3000));
+
+      // Periodically reset stale running outputs during processing
+      const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
+      const { data: resetStale } = await supabase
+        .from("repose_outputs")
+        .update({ status: "queued" })
+        .eq("batch_id", batchId)
+        .eq("status", "running")
+        .lt("created_at", staleThreshold)
+        .select("id");
+
+      if (resetStale?.length) {
+        console.log(`[process-repose-queue-4k] Reset ${resetStale.length} stale outputs during processing`);
+      }
     }
 
     // Final stats
@@ -311,8 +326,18 @@ async function processOutput(
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       if (attempt > 0) {
-        console.log(`[process-repose-queue-4k] Retry ${attempt} for output ${outputId}`);
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+        // Check if this is a rate limit error - use longer delay
+        const isRateLimited = 
+          lastError?.message?.includes("429") ||
+          lastError?.message?.includes("RESOURCE_EXHAUSTED") ||
+          lastError?.message?.includes("Rate limit");
+        
+        const delayMs = isRateLimited 
+          ? RATE_LIMIT_DELAY_MS * (attempt + 1)  // Exponential backoff for rate limits
+          : BASE_RETRY_DELAY_MS * attempt;
+        
+        console.log(`[process-repose-queue-4k] Retry ${attempt} for output ${outputId}, waiting ${delayMs}ms`);
+        await new Promise((r) => setTimeout(r, delayMs));
       }
 
       // Call the single generation function with imageSize
@@ -322,17 +347,23 @@ async function processOutput(
 
       if (error) {
         lastError = error;
+        const errorMsg = error.message || JSON.stringify(error);
         console.error(
           `[process-repose-queue-4k] Generation attempt ${attempt + 1} failed for ${outputId}:`,
-          error.message || error
+          errorMsg
         );
 
-        // Retry on 503/504 errors
+        // Retry on rate limit and gateway errors
         if (
-          error.message?.includes("503") ||
-          error.message?.includes("504") ||
-          error.message?.includes("Service Unavailable") ||
-          error.message?.includes("Gateway Timeout")
+          errorMsg.includes("503") ||
+          errorMsg.includes("504") ||
+          errorMsg.includes("502") ||
+          errorMsg.includes("429") ||
+          errorMsg.includes("RESOURCE_EXHAUSTED") ||
+          errorMsg.includes("Rate limit") ||
+          errorMsg.includes("Service Unavailable") ||
+          errorMsg.includes("Gateway Timeout") ||
+          errorMsg.includes("Too Many Requests")
         ) {
           continue;
         }
@@ -344,9 +375,10 @@ async function processOutput(
       return { success: true };
     } catch (err) {
       lastError = err as Error;
+      const errorMsg = (err as Error).message || "Unknown error";
       console.error(
         `[process-repose-queue-4k] Error attempt ${attempt + 1} for ${outputId}:`,
-        (err as Error).message
+        errorMsg
       );
 
       // Retry on network errors
@@ -356,13 +388,15 @@ async function processOutput(
     }
   }
 
-  // All retries exhausted
-  console.error(`[process-repose-queue-4k] All retries failed for ${outputId}`);
+  // All retries exhausted - save the error message
+  const errorMessage = lastError?.message || "Unknown error after retries";
+  console.error(`[process-repose-queue-4k] All retries failed for ${outputId}: ${errorMessage}`);
+  
   await supabase
     .from("repose_outputs")
     .update({
       status: "failed",
-      error_message: lastError?.message || "Unknown error after retries",
+      error_message: errorMessage,
     })
     .eq("id", outputId);
 

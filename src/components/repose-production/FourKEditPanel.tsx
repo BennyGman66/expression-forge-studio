@@ -248,6 +248,80 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     }
   };
 
+  // Resume stalled queue - reset running outputs and re-invoke processor
+  const handleResumeQueue = async () => {
+    if (!batchId) return;
+
+    const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+
+    try {
+      // Reset stale running outputs back to queued
+      const { data: resetData } = await supabase
+        .from("repose_outputs")
+        .update({ status: "queued" })
+        .eq("batch_id", batchId)
+        .eq("status", "running")
+        .lt("created_at", twoMinAgo)
+        .select("id");
+
+      const resetCount = resetData?.length || 0;
+      
+      // Get queued output IDs
+      const { data: queuedOutputs } = await supabase
+        .from("repose_outputs")
+        .select("id")
+        .eq("batch_id", batchId)
+        .eq("status", "queued");
+
+      if (!queuedOutputs?.length) {
+        toast.info("No queued outputs to resume");
+        return;
+      }
+
+      // Create a new pipeline job
+      const { data: job, error: jobError } = await supabase
+        .from("pipeline_jobs")
+        .insert({
+          type: "REPOSE_GENERATION",
+          title: `Resume 4K queue (${queuedOutputs.length} outputs)`,
+          status: "RUNNING",
+          origin_route: `/repose-production/batch/${batchId}?tab=4k-edit`,
+          origin_context: {
+            batchId,
+            isRerender: true,
+            is4K: true,
+            isResume: true,
+          },
+          progress_done: 0,
+          progress_failed: 0,
+          progress_total: queuedOutputs.length,
+        })
+        .select()
+        .single();
+
+      if (jobError) throw jobError;
+
+      // Invoke the queue processor
+      const { error: invokeError } = await supabase.functions.invoke("process-repose-queue-4k", {
+        body: {
+          batchId,
+          pipelineJobId: job.id,
+          imageSize: "4K",
+          outputIds: queuedOutputs.map((o: any) => o.id),
+        },
+      });
+
+      if (invokeError) throw invokeError;
+
+      toast.success(`Resumed queue: ${resetCount} reset, ${queuedOutputs.length} queued`);
+      fetchActiveJob();
+      fetchOutputs();
+    } catch (error) {
+      console.error("Error resuming queue:", error);
+      toast.error("Failed to resume queue");
+    }
+  };
+
   // Compute stats
   const stats = useMemo(() => {
     const complete = outputs.filter((o) => o.status === "complete").length;
@@ -332,6 +406,19 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
                 >
                   <AlertTriangle className="w-4 h-4" />
                   Clean {stalledCount} Stalled
+                </Button>
+              )}
+
+              {/* Resume button - shown when queue is stalled */}
+              {stats.queued > 0 && !activeJob && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResumeQueue}
+                  className="gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Resume Queue ({stats.queued})
                 </Button>
               )}
               
