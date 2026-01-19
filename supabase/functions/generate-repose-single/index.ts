@@ -54,8 +54,11 @@ serve(async (req) => {
   const startTime = Date.now();
 
   try {
-    const { outputId, model } = await req.json();
+    const { outputId, model, imageSize } = await req.json();
     const selectedModel = model || 'google/gemini-3-pro-image-preview';
+    // imageSize can be '1K', '2K', or '4K' - defaults to standard resolution
+    const selectedImageSize = imageSize || null;
+    
     if (!outputId) {
       return new Response(
         JSON.stringify({ error: 'Missing outputId' }),
@@ -63,7 +66,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[generate-repose-single] Starting output ${outputId}, model: ${selectedModel}`);
+    console.log(`[generate-repose-single] Starting output ${outputId}, model: ${selectedModel}, imageSize: ${selectedImageSize || 'default'}`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -136,6 +139,34 @@ Do not stylise or reinterpret the image.
 
 The final image should look like the original photo, naturally repositioned in 3:4 portrait format and cropped identically to the reference image.`;
 
+    // Build request body with optional image_config for higher resolution
+    const requestBody: Record<string, unknown> = {
+      model: selectedModel,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'text', text: 'INPUT PHOTO (subject to repose):' },
+            { type: 'image_url', image_url: { url: sourceUrl } },
+            { type: 'text', text: 'GREYSCALE REFERENCE (pose, camera, and framing template):' },
+            { type: 'image_url', image_url: { url: poseUrl } },
+          ],
+        },
+      ],
+      modalities: ['image', 'text'],
+      aspect_ratio: '3:4', // Portrait aspect ratio
+    };
+    
+    // Add image_config with image_size if specified (1K, 2K, or 4K)
+    if (selectedImageSize) {
+      requestBody.image_config = {
+        aspect_ratio: '3:4',
+        image_size: selectedImageSize,
+      };
+      console.log(`[generate-repose-single] Using image_config with size: ${selectedImageSize}`);
+    }
+
     // Call AI API with timeout protection
     const response = await withTimeout(
       fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -144,23 +175,7 @@ The final image should look like the original photo, naturally repositioned in 3
           'Authorization': `Bearer ${lovableApiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: prompt },
-                { type: 'text', text: 'INPUT PHOTO (subject to repose):' },
-                { type: 'image_url', image_url: { url: sourceUrl } },
-                { type: 'text', text: 'GREYSCALE REFERENCE (pose, camera, and framing template):' },
-                { type: 'image_url', image_url: { url: poseUrl } },
-              ],
-            },
-          ],
-          modalities: ['image', 'text'],
-          aspect_ratio: '3:4', // Portrait aspect ratio - let model output at native resolution
-        }),
+        body: JSON.stringify(requestBody),
       }),
       AI_TIMEOUT_MS,
       `AI generation timed out after ${AI_TIMEOUT_MS / 1000}s`

@@ -131,3 +131,6 @@ verify_jwt = false
 
 [functions.detect-view-type]
 verify_jwt = false
+
+[functions.rerender-favorites-4k]
+verify_jwt = false
