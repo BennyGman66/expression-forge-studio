@@ -65,6 +65,26 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
   const [favorites, setFavorites] = useState<FavoriteOutput[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [renderingIds, setRenderingIds] = useState<Set<string>>(new Set());
+  const [selectedShotTypes, setSelectedShotTypes] = useState<Set<string>>(new Set());
+
+  // Toggle shot type filter
+  const toggleShotType = (type: string) => {
+    setSelectedShotTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  };
+
+  // Filter favorites by selected shot types
+  const filteredFavorites = useMemo(() => {
+    if (selectedShotTypes.size === 0) return favorites;
+    return favorites.filter((f) => selectedShotTypes.has(f.shot_type));
+  }, [favorites, selectedShotTypes]);
 
   // Fetch all favorites for this batch
   const fetchFavorites = useCallback(async () => {
@@ -277,26 +297,27 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     }
   };
 
-  // Stats
+  // Stats - based on filtered favorites
   const stats = useMemo(() => {
-    const total = favorites.length;
-    const with4K = favorites.filter((f) => f.fourK_status === "complete").length;
-    const rendering = favorites.filter((f) => f.fourK_status === "running" || f.fourK_status === "uploading" || f.fourK_status === "queued").length;
-    const failed = favorites.filter((f) => f.fourK_status === "failed").length;
-    return { total, with4K, rendering, failed };
-  }, [favorites]);
+    const total = filteredFavorites.length;
+    const allTotal = favorites.length;
+    const with4K = filteredFavorites.filter((f) => f.fourK_status === "complete").length;
+    const rendering = filteredFavorites.filter((f) => f.fourK_status === "running" || f.fourK_status === "uploading" || f.fourK_status === "queued").length;
+    const failed = filteredFavorites.filter((f) => f.fourK_status === "failed").length;
+    return { total, allTotal, with4K, rendering, failed };
+  }, [favorites, filteredFavorites]);
 
-  // Group by look code for easier browsing
+  // Group by look code for easier browsing (using filtered favorites)
   const groupedByLook = useMemo(() => {
     const groups: Record<string, FavoriteOutput[]> = {};
-    favorites.forEach((f) => {
-      const key = f.look_code || "Unknown";
+    filteredFavorites.forEach((f) => {
+      const key = f.look_code || extractSKU(f.source_url);
       if (!groups[key]) groups[key] = [];
       groups[key].push(f);
     });
     // Sort groups by look code
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-  }, [favorites]);
+  }, [filteredFavorites]);
 
   if (!batchId) {
     return (
@@ -333,12 +354,41 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
             Click any favorite to render it in 4K resolution. Each tile shows the original 1K render.
           </p>
           
+          {/* Shot type filter buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-muted-foreground">Filter:</span>
+            {Object.entries(SHOT_TYPE_LABELS).map(([type, label]) => (
+              <Button
+                key={type}
+                variant={selectedShotTypes.has(type) ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => toggleShotType(type)}
+              >
+                {label}
+              </Button>
+            ))}
+            {selectedShotTypes.size > 0 && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-7 text-xs"
+                onClick={() => setSelectedShotTypes(new Set())}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+
           {/* Stats bar */}
-          {stats.total > 0 && (
-            <div className="flex items-center gap-4">
+          {stats.allTotal > 0 && (
+            <div className="flex items-center gap-4 mt-3">
               <Badge variant="outline" className="gap-1.5">
                 <ImageIcon className="w-3 h-3" />
-                {stats.total} Favorites
+                {selectedShotTypes.size > 0 
+                  ? `${stats.total} of ${stats.allTotal} Favorites`
+                  : `${stats.total} Favorites`
+                }
               </Badge>
               {stats.with4K > 0 && (
                 <Badge variant="outline" className="gap-1.5 text-green-600 border-green-200">
