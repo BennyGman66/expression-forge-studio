@@ -1,4 +1,4 @@
-// Version: 2026-01-19-v4 - Read full response body before 202 to prevent truncation
+// Version: 2026-01-19-v5 - Add timeout to body reading to prevent worker termination
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -208,9 +208,38 @@ The final image should look like the original photo, naturally repositioned in 3
     }
 
     // Read response body BEFORE returning - this ensures we get the full 4K payload
-    // Reading ~10-15MB takes ~5-10s but keeps us well under the 60s timeout
-    const responseText = await aiResponse.text();
-    console.log(`[generate-repose-single] Got ${Math.round(responseText.length / 1024)}KB response in ${elapsed}s`);
+    // Calculate remaining time budget for body reading (need to stay under 60s total)
+    const elapsedMs = Date.now() - startTime;
+    const bodyTimeoutMs = Math.max(55000 - elapsedMs, 15000); // At least 15s, max leaves 5s buffer
+    console.log(`[generate-repose-single] Starting body read with ${Math.round(bodyTimeoutMs/1000)}s timeout...`);
+    
+    let responseText: string;
+    try {
+      responseText = await withTimeout(
+        aiResponse.text(),
+        bodyTimeoutMs,
+        `Response body read timed out after ${Math.round(bodyTimeoutMs/1000)}s`
+      );
+    } catch (bodyError) {
+      const errorMsg = bodyError instanceof Error ? bodyError.message : 'Unknown body read error';
+      console.error(`[generate-repose-single] Body read failed: ${errorMsg}`);
+      
+      // If we timeout reading the body, AI likely succeeded - requeue for retry
+      if (errorMsg.includes('timed out')) {
+        await supabase
+          .from('repose_outputs')
+          .update({ status: 'queued' })
+          .eq('id', outputId);
+        return new Response(
+          JSON.stringify({ error: 'Body read timeout, will retry', status: 'queued' }),
+          { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      throw bodyError;
+    }
+    
+    const totalElapsedAfterBody = Math.round((Date.now() - startTime) / 1000);
+    console.log(`[generate-repose-single] Got ${Math.round(responseText.length / 1024)}KB response in ${totalElapsedAfterBody}s`);
     
     // Parse JSON to verify response is complete and valid
     let aiResult;
