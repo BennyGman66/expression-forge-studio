@@ -3,12 +3,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { ALL_OUTPUT_SHOT_TYPES, OutputShotType, OUTPUT_SHOT_LABELS } from "@/types/shot-types";
 import type { ReposeOutput } from "@/types/repose";
 import type { LookWithOutputs } from "@/hooks/useReposeSelection";
 import { ShotTypeBlock } from "./ShotTypeBlock";
 import { cn } from "@/lib/utils";
-import { Check, RotateCw, Loader2, AlertCircle, X } from "lucide-react";
+import { Check, RotateCw, Loader2, AlertCircle, X, ChevronDown } from "lucide-react";
 import { getImageUrl } from "@/lib/imageUtils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -42,6 +49,18 @@ export function InfiniteLookSection({
 }: InfiniteLookSectionProps) {
   const [rerenderCount, setRerenderCount] = useState<string>("5");
   const [isRerendering, setIsRerendering] = useState(false);
+  const [selectedShotTypes, setSelectedShotTypes] = useState<OutputShotType[]>([...ALL_OUTPUT_SHOT_TYPES]);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  const toggleShotType = (shotType: OutputShotType) => {
+    setSelectedShotTypes(prev => 
+      prev.includes(shotType) 
+        ? prev.filter(st => st !== shotType)
+        : [...prev, shotType]
+    );
+  };
+
+  const allSelected = selectedShotTypes.length === ALL_OUTPUT_SHOT_TYPES.length;
 
   // Get shot types that have outputs (completed or pending)
   const activeShots = ALL_OUTPUT_SHOT_TYPES.filter(shotType => {
@@ -61,12 +80,17 @@ export function InfiniteLookSection({
 
   const isComplete = look.selectionStats.isAllComplete;
 
-  // Re-render all views for this look
-  const handleRerenderAll = useCallback(async () => {
+  // Re-render selected shot types for this look
+  const handleRerenderSelected = useCallback(async () => {
     const count = parseInt(rerenderCount);
     if (isNaN(count) || count < 1) return;
+    if (selectedShotTypes.length === 0) {
+      toast.error("Please select at least one shot type");
+      return;
+    }
 
     setIsRerendering(true);
+    setDropdownOpen(false);
     try {
       // Get batch config
       const { data: batch } = await supabase
@@ -77,21 +101,26 @@ export function InfiniteLookSection({
 
       if (!batch) throw new Error("Batch not found");
 
+      const shotTypesLabel = allSelected 
+        ? "all views" 
+        : selectedShotTypes.map(st => OUTPUT_SHOT_LABELS[st]).join(", ");
+
       // Create pipeline job for re-render
       const { data: pipelineJob, error: jobError } = await supabase
         .from("pipeline_jobs")
         .insert({
           type: "REPOSE_GENERATION",
           status: "QUEUED",
-          title: `Re-render All: ${look.lookCode}`,
+          title: `Re-render ${shotTypesLabel}: ${look.lookCode}`,
           origin_route: `/repose-production/batch/${batchId}?tab=review`,
           origin_context: {
             batchId,
             model: (batch.config_json as any)?.model || "google/gemini-3-pro-image-preview",
             isRerender: true,
             lookId: look.lookId,
+            shotTypes: selectedShotTypes,
           },
-          progress_total: count,
+          progress_total: count * selectedShotTypes.length,
           progress_done: 0,
           supports_pause: true,
         })
@@ -100,7 +129,7 @@ export function InfiniteLookSection({
 
       if (jobError) throw jobError;
 
-      // Create new runs for re-rendering all views - INCLUDE brand_id
+      // Create new runs for re-rendering selected views - INCLUDE brand_id and shotTypes
       const runs = [];
       for (let i = 0; i < count; i++) {
         runs.push({
@@ -113,6 +142,7 @@ export function InfiniteLookSection({
             ...(batch.config_json as any),
             brand_id: batch.brand_id,
             isRerender: true,
+            shotTypes: selectedShotTypes, // Pass selected shot types to backend
           },
         });
       }
@@ -134,7 +164,7 @@ export function InfiniteLookSection({
 
       if (invokeError) throw invokeError;
 
-      toast.success(`Queued ${count} re-renders for all views`);
+      toast.success(`Queued ${count} re-renders for ${shotTypesLabel}`);
       setTimeout(onRefresh, 1000);
     } catch (error) {
       console.error("Re-render error:", error);
@@ -142,7 +172,7 @@ export function InfiniteLookSection({
     } finally {
       setIsRerendering(false);
     }
-  }, [batchId, look.lookId, look.lookCode, rerenderCount, onRefresh]);
+  }, [batchId, look.lookId, look.lookCode, rerenderCount, selectedShotTypes, allSelected, onRefresh]);
 
   // Cancel all pending outputs for this look
   const handleCancelPending = useCallback(async (e: React.MouseEvent) => {
@@ -267,7 +297,7 @@ export function InfiniteLookSection({
               </Badge>
             )}
 
-            {/* Re-render All Controls */}
+            {/* Re-render Controls with Shot Type Selection */}
             <div className="flex items-center gap-2 border-l pl-3 ml-2">
               <Select value={rerenderCount} onValueChange={setRerenderCount}>
                 <SelectTrigger className="w-16 h-8 text-xs">
@@ -281,20 +311,56 @@ export function InfiniteLookSection({
                 </SelectContent>
               </Select>
               
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={handleRerenderAll}
-                disabled={isRerendering}
-                className="gap-1.5"
-              >
-                {isRerendering ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <RotateCw className="w-3.5 h-3.5" />
-                )}
-                Re-render All
-              </Button>
+              <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    disabled={isRerendering}
+                    className="gap-1.5"
+                  >
+                    {isRerendering ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <RotateCw className="w-3.5 h-3.5" />
+                    )}
+                    Re-render{!allSelected && ` (${selectedShotTypes.length})`}
+                    <ChevronDown className="w-3 h-3 ml-0.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <div className="p-2 space-y-2">
+                    {ALL_OUTPUT_SHOT_TYPES.map((shotType) => (
+                      <label 
+                        key={shotType}
+                        className="flex items-center gap-2 cursor-pointer hover:bg-accent rounded px-2 py-1.5"
+                      >
+                        <Checkbox
+                          checked={selectedShotTypes.includes(shotType)}
+                          onCheckedChange={() => toggleShotType(shotType)}
+                        />
+                        <span className="text-sm">{OUTPUT_SHOT_LABELS[shotType]}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <DropdownMenuSeparator />
+                  <div className="p-2">
+                    <Button 
+                      size="sm" 
+                      className="w-full gap-1.5"
+                      onClick={handleRerenderSelected}
+                      disabled={selectedShotTypes.length === 0 || isRerendering}
+                    >
+                      {isRerendering ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RotateCw className="w-3.5 h-3.5" />
+                      )}
+                      Re-render {allSelected ? "All" : `${selectedShotTypes.length} Selected`}
+                    </Button>
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             
             {/* Status Badge */}
@@ -325,7 +391,7 @@ export function InfiniteLookSection({
             <Button 
               variant="default" 
               size="sm"
-              onClick={handleRerenderAll}
+              onClick={handleRerenderSelected}
               disabled={isRerendering}
               className="gap-1.5"
             >
