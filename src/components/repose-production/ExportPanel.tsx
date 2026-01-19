@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Download, CheckCircle2, Circle, AlertCircle, Lock, Check } from "lucide-react";
+import { Download, CheckCircle2, Circle, AlertCircle, Lock, Check, Images } from "lucide-react";
 import { useReposeBatch, useMarkLooksExported } from "@/hooks/useReposeBatches";
 import { useReposeSelection, LookWithOutputs } from "@/hooks/useReposeSelection";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
@@ -19,10 +19,18 @@ interface ExportPanelProps {
   batchId: string | undefined;
 }
 
-// Map shot types to file suffixes
+// Map shot types to file suffixes for slides
 const SHOT_TYPE_SUFFIXES: Record<OutputShotType, string> = {
   FRONT_FULL: 'front',
   FRONT_CROPPED: 'crop_front',
+  DETAIL: 'detail',
+  BACK_FULL: 'back',
+};
+
+// Map shot types to asset naming (matching slide numbering)
+const SHOT_TYPE_ASSET_NAMES: Record<OutputShotType, string> = {
+  FRONT_FULL: 'full_front',
+  FRONT_CROPPED: 'cropped_front',
   DETAIL: 'detail',
   BACK_FULL: 'back',
 };
@@ -250,6 +258,7 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
     });
   }, []);
 
+
   // Export all ready looks
   const handleExportAllReady = useCallback(async () => {
     if (readyLooks.length === 0) {
@@ -414,6 +423,87 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
     }
   }, [looksToExport, createSlide]);
 
+  // Export individual assets (not slides) - downloads each selected image separately
+  const handleExportAssets = useCallback(async (looks: LookWithOutputs[]) => {
+    if (looks.length === 0) {
+      toast.error("No looks to export");
+      return;
+    }
+
+    setIsExporting(true);
+    setExportProgress(0);
+    setExportStatus("Preparing asset export...");
+
+    try {
+      const zip = new JSZip();
+      // Total assets = looks × 4 shot types × 3 favorites
+      const totalAssets = looks.length * 4 * 3;
+      let processed = 0;
+
+      for (const look of looks) {
+        const lookCode = look.lookCode.replace(/\s+/g, '_').toUpperCase();
+        const lookFolder = zip.folder(lookCode);
+        if (!lookFolder) continue;
+
+        for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
+          const assetName = SHOT_TYPE_ASSET_NAMES[shotType];
+          setExportStatus(`Downloading ${lookCode} ${assetName}...`);
+
+          const viewOutputs = look.outputsByView[shotType] || [];
+          const favorites = viewOutputs
+            .filter(o => o.is_favorite && o.result_url && o.favorite_rank)
+            .sort((a, b) => (a.favorite_rank || 0) - (b.favorite_rank || 0))
+            .slice(0, 3);
+
+          // Download each favorite image
+          for (const output of favorites) {
+            try {
+              const response = await fetch(output.result_url!);
+              if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
+              const blob = await response.blob();
+              
+              // Naming: SKU_full_front_1.png, SKU_full_front_2.png, etc.
+              const filename = `${lookCode}_${assetName}_${output.favorite_rank}.png`;
+              lookFolder.file(filename, blob);
+            } catch (e) {
+              console.warn(`Failed to download image:`, output.result_url, e);
+            }
+
+            processed++;
+            setExportProgress((processed / totalAssets) * 100);
+          }
+        }
+      }
+
+      setExportStatus("Generating ZIP file...");
+      const zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+        compressionOptions: { level: 6 }
+      });
+
+      // Download
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `repose_assets_${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      const assetCount = looks.length * 4 * 3;
+      toast.success(`Exported ${assetCount} individual assets from ${looks.length} looks`);
+    } catch (error) {
+      console.error("Asset export failed:", error);
+      toast.error(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsExporting(false);
+      setExportProgress(0);
+      setExportStatus("");
+    }
+  }, []);
+
   if (batchLoading || isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -474,6 +564,8 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
               Clear ({selectedLookIds.size})
             </Button>
           )}
+          
+          {/* Export Slides Buttons */}
           <Button
             variant="secondary"
             onClick={handleExportSelected}
@@ -481,7 +573,7 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
             className="gap-2"
           >
             <Download className="w-4 h-4" />
-            Export Selected ({selectedReady.length})
+            Export Slides ({selectedReady.length})
           </Button>
           <Button
             onClick={handleExportAllReady}
@@ -489,7 +581,30 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
             className="gap-2"
           >
             <Download className="w-4 h-4" />
-            Export All Ready ({readyLooks.length})
+            Export All Slides ({readyLooks.length})
+          </Button>
+          
+          {/* Separator */}
+          <div className="w-px h-6 bg-border" />
+          
+          {/* Export Individual Assets Buttons */}
+          <Button
+            variant="outline"
+            onClick={() => handleExportAssets(looksToExport)}
+            disabled={selectedReady.length === 0 || isExporting}
+            className="gap-2"
+          >
+            <Images className="w-4 h-4" />
+            Export Assets ({selectedReady.length})
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => handleExportAssets(readyLooks)}
+            disabled={readyLooks.length === 0 || isExporting}
+            className="gap-2"
+          >
+            <Images className="w-4 h-4" />
+            Export All Assets ({readyLooks.length})
           </Button>
         </div>
       </div>
