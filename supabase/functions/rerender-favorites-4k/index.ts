@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { batchId, lookIds, imageSize = "4K" } = await req.json();
+    const { batchId, lookIds, shotTypes, imageSize = "4K" } = await req.json();
 
     if (!batchId) {
       return new Response(
@@ -21,7 +21,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[rerender-favorites-4k] Starting for batch ${batchId}, ${lookIds?.length || 'all'} looks, size: ${imageSize}`);
+    console.log(`[rerender-favorites-4k] Starting for batch ${batchId}, ${lookIds?.length || 'all'} looks, shotTypes: ${shotTypes?.join(',') || 'all'}, size: ${imageSize}`);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -72,6 +72,11 @@ serve(async (req) => {
         const batchItemIds = batchItems.map(bi => bi.id);
         favoritesQuery = favoritesQuery.in("batch_item_id", batchItemIds);
       }
+    }
+
+    // Filter by shot types if provided
+    if (shotTypes && shotTypes.length > 0) {
+      favoritesQuery = favoritesQuery.in("shot_type", shotTypes);
     }
 
     const { data: favorites, error: favError } = await favoritesQuery;

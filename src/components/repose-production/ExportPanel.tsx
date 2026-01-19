@@ -5,7 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download, CheckCircle2, Circle, AlertCircle, Lock, Check, Images, RotateCw } from "lucide-react";
+import { Download, CheckCircle2, Circle, AlertCircle, Lock, Check, Images, RotateCw, ChevronDown } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useReposeBatch, useMarkLooksExported } from "@/hooks/useReposeBatches";
 import { useReposeSelection, LookWithOutputs } from "@/hooks/useReposeSelection";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
@@ -48,6 +50,7 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState<string>("");
   const [upscaleMultiplier, setUpscaleMultiplier] = useState<number>(2); // Default to 2x
+  const [selectedShotTypes, setSelectedShotTypes] = useState<Set<OutputShotType>>(new Set(ALL_OUTPUT_SHOT_TYPES));
 
   // Determine which looks are export-ready (all views either have 3/3 selections OR are skipped)
   const { readyLooks, incompleteLooks } = useMemo(() => {
@@ -530,20 +533,34 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
     }
   }, [upscaleMultiplier]);
 
-  // Count total favorites for selected looks (for 4K re-render button)
+  // Count total favorites for selected looks and shot types (for 4K re-render button)
   const selectedFavoriteCount = useMemo(() => {
-    if (selectedLookIds.size === 0) return 0;
+    if (selectedLookIds.size === 0 || selectedShotTypes.size === 0) return 0;
     let count = 0;
     for (const look of readyLooks) {
       if (selectedLookIds.has(look.lookId)) {
         for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
+          if (!selectedShotTypes.has(shotType)) continue;
           const viewOutputs = look.outputsByView[shotType] || [];
           count += viewOutputs.filter(o => o.is_favorite && o.result_url).length;
         }
       }
     }
     return count;
-  }, [selectedLookIds, readyLooks]);
+  }, [selectedLookIds, readyLooks, selectedShotTypes]);
+
+  // Toggle shot type selection
+  const toggleShotType = useCallback((shotType: OutputShotType) => {
+    setSelectedShotTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(shotType)) {
+        next.delete(shotType);
+      } else {
+        next.add(shotType);
+      }
+      return next;
+    });
+  }, []);
 
   // Re-render selected favorites at 4K resolution
   const handleRerender4K = useCallback(async () => {
@@ -551,16 +568,23 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
       toast.error("No looks selected");
       return;
     }
+    
+    if (selectedShotTypes.size === 0) {
+      toast.error("No shot types selected");
+      return;
+    }
 
     setIsRerendering(true);
     
     try {
       const lookIds = Array.from(selectedLookIds);
+      const shotTypes = Array.from(selectedShotTypes);
       
       const { data, error } = await supabase.functions.invoke("rerender-favorites-4k", {
         body: {
           batchId,
           lookIds,
+          shotTypes,
           imageSize: "4K",
         },
       });
@@ -569,14 +593,14 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
         throw error;
       }
 
-      toast.success(`Started re-rendering ${data.count} favorites at 4K resolution`);
+      toast.success(`Started re-rendering ${data.count} favorites at 4K`);
     } catch (error) {
       console.error("Re-render failed:", error);
       toast.error(`Re-render failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsRerendering(false);
     }
-  }, [batchId, selectedLookIds]);
+  }, [batchId, selectedLookIds, selectedShotTypes]);
 
   if (batchLoading || isLoading) {
     return (
@@ -699,11 +723,55 @@ export function ExportPanel({ batchId }: ExportPanelProps) {
           {/* Separator */}
           <div className="w-px h-6 bg-border" />
           
+          {/* Shot Type Selector for 4K Re-render */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1">
+                Shot Types ({selectedShotTypes.size}/{ALL_OUTPUT_SHOT_TYPES.length})
+                <ChevronDown className="w-3 h-3" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-2" align="end">
+              <div className="space-y-2">
+                {ALL_OUTPUT_SHOT_TYPES.map((shotType) => (
+                  <label
+                    key={shotType}
+                    className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1"
+                  >
+                    <Checkbox
+                      checked={selectedShotTypes.has(shotType)}
+                      onCheckedChange={() => toggleShotType(shotType)}
+                    />
+                    <span className="text-sm">{OUTPUT_SHOT_LABELS[shotType]}</span>
+                  </label>
+                ))}
+                <div className="border-t pt-2 mt-2 flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex-1 h-7 text-xs"
+                    onClick={() => setSelectedShotTypes(new Set(ALL_OUTPUT_SHOT_TYPES))}
+                  >
+                    All
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex-1 h-7 text-xs"
+                    onClick={() => setSelectedShotTypes(new Set())}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+          
           {/* Re-render at 4K Button */}
           <Button
             variant="secondary"
             onClick={handleRerender4K}
-            disabled={selectedLookIds.size === 0 || isRerendering || isExporting}
+            disabled={selectedLookIds.size === 0 || selectedShotTypes.size === 0 || isRerendering || isExporting}
             className="gap-2"
           >
             <RotateCw className={cn("w-4 h-4", isRerendering && "animate-spin")} />
