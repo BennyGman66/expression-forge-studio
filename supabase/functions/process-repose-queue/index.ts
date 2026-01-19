@@ -454,6 +454,12 @@ async function processRun(
     const posesPerType = (run.config_snapshot as any)?.posesPerShotType || 2;
     const outputsToCreate: any[] = [];
 
+    // Get shot type filter from config_snapshot (for selective re-renders)
+    const configShotTypes = (run.config_snapshot as any)?.shotTypes as string[] | undefined;
+    if (configShotTypes?.length) {
+      console.log(`[process-repose-queue] Using selective shot types from config: ${configShotTypes.join(", ")}`);
+    }
+
     for (const item of lookItemsWithMapping) {
       const view = (item.view || "").toLowerCase();
       const sourceUrl = (item.source_url || "").toLowerCase();
@@ -482,6 +488,15 @@ async function processRun(
           console.log(`[process-repose-queue] No view detected for "${view}", defaulting to FRONT views`);
           shotTypes = ["FRONT_FULL", "FRONT_CROPPED", "DETAIL"];
         }
+      }
+
+      // Apply selective shot type filter if specified in config
+      if (configShotTypes?.length) {
+        const filteredShotTypes = shotTypes.filter(st => configShotTypes.includes(st));
+        if (filteredShotTypes.length !== shotTypes.length) {
+          console.log(`[process-repose-queue] Filtered shot types for item ${item.id}: ${shotTypes.join(",")} → ${filteredShotTypes.join(",")}`);
+        }
+        shotTypes = filteredShotTypes;
       }
 
       for (const shotType of shotTypes) {
