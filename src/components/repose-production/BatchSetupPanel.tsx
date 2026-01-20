@@ -96,16 +96,19 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
   const { createJob, updateProgress, setStatus } = usePipelineJobs();
 
   // Fetch active pipeline job for this batch from database (survives page reload)
+  // Only consider jobs updated within the last hour as potentially active
   const { data: activePipelineJob, refetch: refetchActivePipelineJob } = useQuery({
     queryKey: ["active-repose-job", batchId],
     queryFn: async () => {
       if (!batchId) return null;
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from("pipeline_jobs")
-        .select("id, status")
+        .select("id, status, updated_at")
         .eq("type", "REPOSE_GENERATION")
         .contains("origin_context", { batchId })
         .in("status", ["RUNNING", "QUEUED"])
+        .gte("updated_at", oneHourAgo)
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
@@ -114,6 +117,28 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     enabled: !!batchId,
     refetchInterval: 5000,
   });
+
+  // Clean up stale pipeline jobs on mount
+  useEffect(() => {
+    if (!batchId) return;
+    
+    const cleanupStaleJobs = async () => {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      
+      await supabase
+        .from('pipeline_jobs')
+        .update({ 
+          status: 'FAILED', 
+          completed_at: new Date().toISOString() 
+        })
+        .eq('type', 'REPOSE_GENERATION')
+        .contains('origin_context', { batchId })
+        .in('status', ['RUNNING', 'QUEUED'])
+        .lt('updated_at', oneHourAgo);
+    };
+    
+    cleanupStaleJobs();
+  }, [batchId]);
 
   // Local state
   const [selectedBrandId, setSelectedBrandId] = useState<string>("");
@@ -627,28 +652,57 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
     }
   };
 
-  // Stop generation - sets job to paused and cancels queued runs
+  // Stop generation - cancels ALL active jobs for this batch and queued runs
   const handleStopGeneration = async () => {
-    // Use active job from database (survives page reload), fallback to ref
-    const jobId = activePipelineJob?.id || pipelineJobIdRef.current;
-    
-    if (!jobId) {
-      toast.error('No active job found to stop');
-      return;
-    }
+    if (!batchId) return;
     
     try {
-      // Pause the pipeline job
-      await setStatus(jobId, 'PAUSED');
+      // Cancel ALL running/queued pipeline jobs for this batch (not just one)
+      const { data: activeJobs, error: fetchError } = await supabase
+        .from('pipeline_jobs')
+        .select('id')
+        .eq('type', 'REPOSE_GENERATION')
+        .contains('origin_context', { batchId })
+        .in('status', ['RUNNING', 'QUEUED']);
       
-      // Also update any running/queued runs to failed so they don't continue
-      await supabase
+      if (fetchError) throw fetchError;
+      
+      if (activeJobs && activeJobs.length > 0) {
+        // Update all active jobs to CANCELED
+        const { error: updateError } = await supabase
+          .from('pipeline_jobs')
+          .update({ 
+            status: 'CANCELED', 
+            completed_at: new Date().toISOString() 
+          })
+          .in('id', activeJobs.map(j => j.id));
+        
+        if (updateError) throw updateError;
+        
+        console.log(`Stopped ${activeJobs.length} pipeline job(s)`);
+      }
+      
+      // Also update any running/queued runs to failed
+      const { data: updatedRuns } = await supabase
         .from('repose_runs')
         .update({ status: 'failed', error_message: 'Cancelled by user' })
         .eq('batch_id', batchId)
-        .in('status', ['queued', 'running']);
+        .in('status', ['queued', 'running'])
+        .select('id');
       
-      toast.success('Generation stopped');
+      const runCount = updatedRuns?.length || 0;
+      const jobCount = activeJobs?.length || 0;
+      
+      if (jobCount > 0 || runCount > 0) {
+        toast.success(`Stopped ${jobCount} job(s) and ${runCount} run(s)`);
+      } else {
+        toast.info('No active generation to stop');
+      }
+      
+      // Force immediate state update
+      setIsGenerating(false);
+      pipelineJobIdRef.current = null;
+      
       refetchRuns();
       refetchActivePipelineJob();
     } catch (error) {
