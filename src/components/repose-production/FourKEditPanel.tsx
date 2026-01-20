@@ -331,6 +331,26 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
                 </Button>
               </div>
               
+              {/* Reset stuck renders */}
+              {favorites.filter(f => f.status === 'running').length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    const stuckIds = favorites.filter(f => f.status === 'running').map(f => f.id);
+                    await supabase
+                      .from('repose_outputs')
+                      .update({ status: 'complete', error_message: null })
+                      .in('id', stuckIds);
+                    toast.success(`Reset ${stuckIds.length} stuck render(s)`);
+                    fetchFavorites();
+                  }}
+                  className="gap-2 text-orange-600"
+                >
+                  Reset {favorites.filter(f => f.status === 'running').length} Stuck
+                </Button>
+              )}
+              
               <Button
                 variant="ghost"
                 size="sm"

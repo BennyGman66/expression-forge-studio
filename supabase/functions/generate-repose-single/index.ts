@@ -143,13 +143,15 @@ The final image should look like the original photo, naturally repositioned in 3
       modalities: ["image", "text"],
     };
 
-    // Add image_config for higher resolutions
+    // Add image_config for higher resolutions - use JPEG to reduce response size
     if (imageSize && imageSize !== "1K") {
       requestBody.image_config = { 
         aspect_ratio: "3:4",
         image_size: imageSize,
+        output_format: "jpeg",
+        output_quality: 95,
       };
-      console.log(`[generate-repose-single] Requesting ${imageSize} resolution`);
+      console.log(`[generate-repose-single] Requesting ${imageSize} resolution as JPEG`);
     }
 
     // Call AI with long timeout
@@ -302,7 +304,9 @@ The final image should look like the original photo, naturally repositioned in 3
       );
     }
 
-    const [, imageFormat, base64Data] = base64Match;
+    const [, rawFormat, base64Data] = base64Match;
+    // Use jpg extension for JPEG format requests
+    const imageFormat = (imageSize && imageSize !== "1K") ? "jpg" : rawFormat;
     const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
     
     console.log(`[generate-repose-single] Got ${imageFormat} image, ${Math.round(binaryData.length / 1024)}KB`);
