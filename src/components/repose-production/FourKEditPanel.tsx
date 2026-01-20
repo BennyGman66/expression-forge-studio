@@ -689,7 +689,7 @@ function FavoriteTile({ favorite, onRerender, isRendering, selectedResolution }:
           variant="ghost"
           size="sm"
           className={cn(
-            "absolute top-1 right-1 h-5 w-5 p-0 text-[10px] font-bold rounded transition-all z-10",
+            "absolute bottom-1 right-1 h-5 w-5 p-0 text-[10px] font-bold rounded transition-all z-10",
             showPose 
               ? "bg-purple-500 text-white hover:bg-purple-600" 
               : "bg-background/80 hover:bg-background opacity-0 group-hover:opacity-100"

@@ -156,8 +156,6 @@ The final image should look like the original photo, naturally repositioned in 3
           imageConfig: {
             aspectRatio: "3:4",
             imageSize: imageSize,
-            outputMimeType: "image/jpeg",
-            outputCompressionQuality: 95,
           }
         } : {})
       }
