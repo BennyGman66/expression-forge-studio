@@ -265,13 +265,17 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     if (selectedRanks.size > 0) {
       result = result.filter((f) => selectedRanks.has(f.favorite_rank));
     }
-    if (skuSearch.trim()) {
-      const search = skuSearch.trim().toLowerCase();
-      result = result.filter((f) => {
-        const sku = f.look_code || extractSKU(f.source_url);
-        return sku.toLowerCase().includes(search);
-      });
-    }
+  if (skuSearch.trim()) {
+    const searchTerms = skuSearch
+      .split(',')
+      .map(term => term.trim().toLowerCase())
+      .filter(term => term.length > 0);
+    
+    result = result.filter((f) => {
+      const sku = (f.look_code || extractSKU(f.source_url)).toLowerCase();
+      return searchTerms.some(term => sku.includes(term));
+    });
+  }
     return result;
   }, [favorites, selectedShotTypes, selectedRanks, skuSearch]);
 
@@ -504,7 +508,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground w-10">SKU:</span>
                 <Input
-                  placeholder="Search by SKU..."
+                  placeholder="Search SKUs (comma-separated)..."
                   value={skuSearch}
                   onChange={(e) => setSkuSearch(e.target.value)}
                   className="h-7 text-xs w-48"
