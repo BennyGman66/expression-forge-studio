@@ -1,4 +1,4 @@
-// Version: 2026-01-20-v8 - Maximized timeouts: 300s AI call, 350s body read to use full 400s platform limit
+// Version: 2026-01-20-v10 - Background task architecture for 4K renders to avoid 150s platform timeout
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -7,6 +7,34 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Track current output for shutdown handler
+let currentOutputId: string | null = null;
+
+// Shutdown handler - mark in-progress outputs as queued for retry
+addEventListener('beforeunload', async () => {
+  if (!currentOutputId) return;
+  
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    console.log(`[generate-repose-single] Worker shutdown, requeueing output ${currentOutputId}`);
+    
+    await supabase
+      .from('repose_outputs')
+      .update({ 
+        status: 'queued',
+        error_message: 'Worker shutdown - will retry',
+        started_running_at: null,
+      })
+      .eq('id', currentOutputId)
+      .in('status', ['running']);
+  } catch (e) {
+    console.error('[generate-repose-single] Shutdown handler error:', e);
+  }
+});
 
 /**
  * Fixes broken storage URLs that contain unencoded hash (#) characters.
@@ -44,7 +72,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Prom
   ]);
 }
 
-const AI_TIMEOUT_MS = 300000; // 300 second (5 min) timeout for AI calls - 4K renders need time
+// Conservative timeouts to stay under 150s platform limit
+const AI_TIMEOUT_MS = 90000; // 90s for AI call - most complete in 20-40s
+const BODY_TIMEOUT_MS = 45000; // 45s for body read - should be enough for streaming
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -67,6 +97,9 @@ serve(async (req) => {
       );
     }
 
+    // Track for shutdown handler
+    currentOutputId = outputId;
+    
     console.log(`[generate-repose-single] Starting output ${outputId}, model: ${selectedModel}, imageSize: ${selectedImageSize || 'default'}`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -207,18 +240,15 @@ The final image should look like the original photo, naturally repositioned in 3
       throw new Error(`AI API error: ${aiResponse.status}`);
     }
 
-    // Read response body BEFORE returning - this ensures we get the full 4K payload
-    // Calculate remaining time budget for body reading (need to stay under 60s total)
-    const elapsedMs = Date.now() - startTime;
-    const bodyTimeoutMs = Math.max(350000 - elapsedMs, 60000); // Up to 350s for large 4K body reads, 50s margin
-    console.log(`[generate-repose-single] Starting body read with ${Math.round(bodyTimeoutMs/1000)}s timeout...`);
+    // Read response body with conservative timeout - must complete before 150s platform limit
+    console.log(`[generate-repose-single] Starting body read with ${Math.round(BODY_TIMEOUT_MS/1000)}s timeout...`);
     
     let responseText: string;
     try {
       responseText = await withTimeout(
         aiResponse.text(),
-        bodyTimeoutMs,
-        `Response body read timed out after ${Math.round(bodyTimeoutMs/1000)}s`
+        BODY_TIMEOUT_MS,
+        `Response body read timed out after ${Math.round(BODY_TIMEOUT_MS/1000)}s`
       );
     } catch (bodyError) {
       const errorMsg = bodyError instanceof Error ? bodyError.message : 'Unknown body read error';
@@ -365,6 +395,9 @@ The final image should look like the original photo, naturally repositioned in 3
 
       console.log(`[generate-repose-single] Saved ${base64SizeKB}KB to temp in ${Math.round((Date.now() - startTime) / 1000)}s, returning 202`);
 
+      // Clear tracking - phase 1 complete, phase 2 handled by complete-repose-upload
+      currentOutputId = null;
+
       // Return 202 - the queue processor will call complete-repose-upload
       return new Response(
         JSON.stringify({ 
@@ -417,6 +450,9 @@ The final image should look like the original photo, naturally repositioned in 3
       .eq('id', outputId);
 
     console.log(`[generate-repose-single] Direct upload complete: ${publicUrl.publicUrl}`);
+    
+    // Clear tracking - we're done
+    currentOutputId = null;
     
     return new Response(
       JSON.stringify({ 
