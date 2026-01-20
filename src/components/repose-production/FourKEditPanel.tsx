@@ -22,8 +22,10 @@ import {
   ChevronDown,
   ChevronRight,
   AlertCircle,
-  RotateCcw
+  RotateCcw,
+  Plus
 } from "lucide-react";
+import { ClayPosePickerDialog } from "./ClayPosePickerDialog";
 import { cn } from "@/lib/utils";
 import { getImageUrl } from "@/lib/imageUtils";
 import { useFourKQueue } from "@/hooks/useFourKQueue";
@@ -87,6 +89,10 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isQueueOpen, setIsQueueOpen] = useState(true);
+  
+  // Pose picker state
+  const [posePickerOpen, setPosePickerOpen] = useState(false);
+  const [selectedFavoriteForPose, setSelectedFavoriteForPose] = useState<FavoriteOutput | null>(null);
 
   // Fetch favorites callback
   const fetchFavorites = useCallback(async () => {
@@ -345,6 +351,66 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
         return next;
       });
     }
+  };
+
+  // Handle changing pose and re-rendering
+  const handleChangePose = async (poseId: string, poseUrl: string, resolution: '2K' | '4K') => {
+    if (!selectedFavoriteForPose) return;
+    
+    const favoriteId = selectedFavoriteForPose.id;
+    setRenderingIds((prev) => new Set(prev).add(favoriteId));
+    setPosePickerOpen(false);
+    
+    try {
+      // Update the output's pose reference
+      const { error: updateError } = await supabase
+        .from("repose_outputs")
+        .update({ 
+          pose_id: poseId, 
+          pose_url: poseUrl,
+          status: "queued",
+          requested_resolution: resolution
+        })
+        .eq("id", favoriteId);
+
+      if (updateError) throw updateError;
+
+      toast.info(`Swapping pose and re-rendering at ${resolution}...`);
+
+      // Trigger re-render with new pose
+      const { data, error } = await supabase.functions.invoke("generate-repose-single", {
+        body: {
+          outputId: favoriteId,
+          imageSize: resolution,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.error) {
+        toast.error(`Re-render failed: ${data.error}`);
+      } else {
+        toast.success(`Pose changed, ${resolution} render started`);
+      }
+
+      fetchFavorites();
+    } catch (error) {
+      console.error("Error changing pose:", error);
+      toast.error("Failed to change pose and re-render");
+    } finally {
+      setRenderingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(favoriteId);
+        return next;
+      });
+      setSelectedFavoriteForPose(null);
+    }
+  };
+
+  // Open pose picker for a specific favorite
+  const openPosePicker = (favorite: FavoriteOutput) => {
+    setSelectedFavoriteForPose(favorite);
+    setPosePickerOpen(true);
   };
 
   // Stats - based on filtered favorites
@@ -643,6 +709,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
                           isSelectMode={isSelectMode}
                           isSelected={selectedIds.has(fav.id)}
                           onToggleSelect={() => toggleSelection(fav.id)}
+                          onOpenPosePicker={() => openPosePicker(fav)}
                         />
                       ))}
                     </div>
@@ -767,6 +834,18 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           </Collapsible>
         </Card>
       )}
+      
+      {/* Pose Picker Dialog */}
+      <ClayPosePickerDialog
+        isOpen={posePickerOpen}
+        onClose={() => {
+          setPosePickerOpen(false);
+          setSelectedFavoriteForPose(null);
+        }}
+        onSelectAndRerender={handleChangePose}
+        currentShotType={selectedFavoriteForPose?.shot_type || 'FRONT_FULL'}
+        batchId={batchId}
+      />
     </div>
   );
 }
@@ -780,6 +859,7 @@ interface FavoriteTileProps {
   isSelectMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: () => void;
+  onOpenPosePicker?: () => void;
 }
 
 function FavoriteTile({ 
@@ -789,7 +869,8 @@ function FavoriteTile({
   selectedResolution,
   isSelectMode = false,
   isSelected = false,
-  onToggleSelect
+  onToggleSelect,
+  onOpenPosePicker
 }: FavoriteTileProps) {
   const [isImgLoading, setIsImgLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -991,6 +1072,22 @@ function FavoriteTile({
       >
         {shotLabel}
       </Badge>
+
+      {/* Change Pose button */}
+      {!isSelectMode && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute bottom-6 left-[70px] h-5 w-5 p-0 rounded-full bg-background/80 hover:bg-primary hover:text-primary-foreground opacity-0 group-hover:opacity-100 transition-all z-30"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenPosePicker?.();
+          }}
+          title="Change pose reference"
+        >
+          <Plus className="w-3 h-3" />
+        </Button>
+      )}
 
       {/* SKU badge at bottom */}
       <div className="absolute bottom-0 inset-x-0 bg-background/90 py-1 px-1.5 text-center">
