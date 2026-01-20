@@ -2987,6 +2987,7 @@ export type Database = {
           selected_at: string | null
           shot_type: string | null
           slot: string | null
+          started_running_at: string | null
           status: string
           temp_path: string | null
         }
@@ -3007,6 +3008,7 @@ export type Database = {
           selected_at?: string | null
           shot_type?: string | null
           slot?: string | null
+          started_running_at?: string | null
           status?: string
           temp_path?: string | null
         }
@@ -3027,6 +3029,7 @@ export type Database = {
           selected_at?: string | null
           shot_type?: string | null
           slot?: string | null
+          started_running_at?: string | null
           status?: string
           temp_path?: string | null
         }
