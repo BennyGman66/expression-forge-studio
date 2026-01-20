@@ -292,6 +292,28 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
     });
   }, []);
 
+  // Handle unskip image - persist to database
+  const handleUnskipImage = useCallback(async (imageId: string) => {
+    console.log("handleUnskipImage called with imageId:", imageId);
+    setSkippedImageIds(prev => {
+      const next = new Set(prev);
+      next.delete(imageId);
+      return next;
+    });
+    
+    // Persist to database
+    const { error } = await supabase
+      .from("look_source_images")
+      .update({ is_skipped: false })
+      .eq("id", imageId);
+    
+    if (error) {
+      console.error("Error updating is_skipped:", error);
+    } else {
+      console.log("Successfully unskipped image:", imageId);
+    }
+  }, []);
+
   // Drag handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveDragId(event.active.id as string);
@@ -466,6 +488,7 @@ export function FaceMatchLayout({ projectId, selectedLookIds, onContinue }: Face
               onClearPairing={handleClearPairing}
               onApplyAutoMatches={handleApplyAutoMatches}
               onSkipImage={handleSkipImage}
+              onUnskipImage={handleUnskipImage}
               onCropComplete={handleCropComplete}
               dragOverSlotId={dragOverSlotId}
             />

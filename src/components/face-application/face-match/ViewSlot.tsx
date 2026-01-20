@@ -19,6 +19,7 @@ interface ViewSlotProps {
   onClearPairing: () => void;
   onCropClick: () => void;
   onSkip?: () => void;
+  onUnskip?: () => void;
   isOver?: boolean;
   isSkipped?: boolean;
 }
@@ -29,6 +30,7 @@ export function ViewSlot({
   onClearPairing,
   onCropClick,
   onSkip,
+  onUnskip,
   isOver,
   isSkipped = false,
 }: ViewSlotProps) {
@@ -54,9 +56,19 @@ export function ViewSlot({
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
             {viewLabel}
           </span>
-          <div className="flex items-center gap-1 text-emerald-600">
-            <SkipForward className="h-3 w-3" />
-            <span className="text-xs font-medium">Skipped</span>
+          <div className="flex items-center gap-2">
+            {onUnskip && (
+              <button
+                onClick={onUnskip}
+                className="text-xs text-primary hover:text-primary/80 font-medium"
+              >
+                Unskip
+              </button>
+            )}
+            <div className="flex items-center gap-1 text-emerald-600">
+              <SkipForward className="h-3 w-3" />
+              <span className="text-xs font-medium">Skipped</span>
+            </div>
           </div>
         </div>
 
