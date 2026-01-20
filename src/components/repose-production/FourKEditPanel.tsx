@@ -166,10 +166,10 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           const lookIds = [...new Set(itemsData.map((i) => i.look_id).filter(Boolean))] as string[];
           if (lookIds.length > 0) {
             // Fetch look codes
-            const { data: looksData } = await (supabase as any)
-              .from("looks")
-              .select("id, look_code")
-              .in("id", lookIds);
+      const { data: looksData } = await (supabase as any)
+        .from("talent_looks")
+        .select("id, look_code")
+        .in("id", lookIds);
             
             if (looksData) {
               const lookIdToCode: Record<string, string> = {};
