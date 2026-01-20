@@ -1,4 +1,4 @@
-// Version: 2026-01-20-v15 - Crash-proof logging for large JSON responses
+// Version: 2026-01-20-v16 - Direct Google Gemini API for reliable 4K renders
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -21,6 +21,30 @@ function fixBrokenStorageUrl(url: string | null | undefined): string {
   filename = filename.replace(/%2523/g, '%23');
   filename = filename.replace(/#/g, '%23');
   return basePath + filename;
+}
+
+// Fetch image and convert to base64
+async function fetchAsBase64(url: string): Promise<{ data: string; mimeType: string }> {
+  console.log(`[generate-repose-single] Fetching image: ${url.slice(0, 80)}...`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status}`);
+  }
+  const contentType = response.headers.get('content-type') || 'image/jpeg';
+  const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  
+  // Convert to base64 in chunks to avoid stack overflow on large images
+  let binary = '';
+  const chunkSize = 32768;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  const base64 = btoa(binary);
+  
+  console.log(`[generate-repose-single] Image fetched: ${Math.round(buffer.byteLength / 1024)}KB, type: ${contentType}`);
+  return { data: base64, mimeType: contentType.split(';')[0] };
 }
 
 // Track active generation for wall clock limit handling
@@ -53,7 +77,7 @@ async function processGeneration(
   outputId: string,
   supabaseUrl: string,
   supabaseKey: string,
-  lovableApiKey: string,
+  geminiApiKey: string,
   sourceUrl: string,
   poseUrl: string,
   imageSize: string | null,
@@ -65,6 +89,31 @@ async function processGeneration(
 
   try {
     console.log(`[generate-repose-single] Background task started for ${outputId}`);
+    console.log(`[generate-repose-single] Using direct Google Gemini API`);
+
+    // Fetch images and convert to base64
+    console.log(`[generate-repose-single] Fetching source and pose images...`);
+    const fetchStart = Date.now();
+    
+    let sourceImage: { data: string; mimeType: string };
+    let poseImage: { data: string; mimeType: string };
+    
+    try {
+      [sourceImage, poseImage] = await Promise.all([
+        fetchAsBase64(sourceUrl),
+        fetchAsBase64(poseUrl)
+      ]);
+    } catch (fetchError) {
+      console.error("[generate-repose-single] Failed to fetch images:", fetchError);
+      await supabase
+        .from("repose_outputs")
+        .update({ status: "failed", error_message: `Image fetch failed: ${fetchError}` })
+        .eq("id", outputId);
+      activeOutputId = null;
+      return;
+    }
+    
+    console.log(`[generate-repose-single] Images fetched in ${Math.round((Date.now() - fetchStart) / 1000)}s`);
 
     // Build prompt
     const prompt = `Use the provided greyscale reference image as a strict pose, camera, and framing template.
@@ -90,48 +139,47 @@ Do not stylise or reinterpret the image.
 
 The final image should look like the original photo, naturally repositioned in 3:4 portrait format and cropped identically to the reference image.`;
 
-    // Build request body
-    const requestBody: Record<string, unknown> = {
-      model: "google/gemini-3-pro-image-preview",
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            { type: "text", text: "INPUT PHOTO (subject to repose):" },
-            { type: "image_url", image_url: { url: sourceUrl } },
-            { type: "text", text: "GREYSCALE REFERENCE (pose, camera, and framing template):" },
-            { type: "image_url", image_url: { url: poseUrl } },
-          ],
-        },
-      ],
-      modalities: ["image", "text"],
+    // Build Google Gemini API request
+    const requestBody = {
+      contents: [{
+        parts: [
+          { text: prompt },
+          { text: "INPUT PHOTO (subject to repose):" },
+          { inlineData: { mimeType: sourceImage.mimeType, data: sourceImage.data } },
+          { text: "GREYSCALE REFERENCE (pose, camera, and framing template):" },
+          { inlineData: { mimeType: poseImage.mimeType, data: poseImage.data } },
+        ]
+      }],
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"],
+        ...(imageSize && imageSize !== "1K" ? {
+          imageConfig: {
+            aspectRatio: "3:4",
+            imageSize: imageSize,
+            outputMimeType: "image/jpeg",
+            outputCompressionQuality: 95,
+          }
+        } : {})
+      }
     };
 
-    // Add image_config for higher resolutions - use JPEG to reduce response size
     if (imageSize && imageSize !== "1K") {
-      requestBody.image_config = { 
-        aspect_ratio: "3:4",
-        image_size: imageSize,
-        output_format: "jpeg",
-        output_quality: 95,
-      };
-      console.log(`[generate-repose-single] Requesting ${imageSize} resolution as JPEG`);
-      console.log(`[generate-repose-single] image_config: ${JSON.stringify(requestBody.image_config)}`);
+      console.log(`[generate-repose-single] Requesting ${imageSize} resolution`);
+      console.log(`[generate-repose-single] imageConfig: ${JSON.stringify(requestBody.generationConfig)}`);
     }
 
-    // Call AI with long timeout
+    // Call Google Gemini API directly
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
 
-    console.log("[generate-repose-single] Calling AI API...");
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=${geminiApiKey}`;
+    console.log("[generate-repose-single] Calling Google Gemini API directly...");
 
     let aiResponse: Response;
     try {
-      aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      aiResponse = await fetch(apiUrl, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${lovableApiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(requestBody),
@@ -157,11 +205,11 @@ The final image should look like the original photo, naturally repositioned in 3
 
     clearTimeout(timeoutId);
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    console.log(`[generate-repose-single] AI responded in ${elapsed}s with status ${aiResponse.status}`);
+    console.log(`[generate-repose-single] Gemini responded in ${elapsed}s with status ${aiResponse.status}`);
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
-      console.error("[generate-repose-single] AI error:", aiResponse.status, errorText);
+      console.error("[generate-repose-single] Gemini error:", aiResponse.status, errorText.slice(0, 500));
       
       // Rate limit - requeue for retry
       if (aiResponse.status === 429) {
@@ -175,34 +223,32 @@ The final image should look like the original photo, naturally repositioned in 3
       
       await supabase
         .from("repose_outputs")
-        .update({ status: "failed", error_message: `AI error ${aiResponse.status}: ${errorText.slice(0, 200)}` })
+        .update({ status: "failed", error_message: `Gemini error ${aiResponse.status}: ${errorText.slice(0, 200)}` })
         .eq("id", outputId);
       
       activeOutputId = null;
       return;
     }
 
-    // Parse response - with crash-proof logging for large payloads
+    // Parse response
     console.log(`[generate-repose-single] Starting response body fetch...`);
     console.log(`[generate-repose-single] Response headers content-length: ${aiResponse.headers.get('content-length') || 'unknown'}`);
     
     let aiResult;
     try {
-      // Use text() first for visibility into payload size before parsing
       const responseText = await aiResponse.text();
       console.log(`[generate-repose-single] Response text fetched: ${responseText.length} chars (${Math.round(responseText.length / 1024)}KB)`);
       
       aiResult = JSON.parse(responseText);
       console.log("[generate-repose-single] JSON parsed successfully, checking for image...");
     } catch (parseError) {
-      console.error("[generate-repose-single] JSON parse error - truncated response:", parseError);
+      console.error("[generate-repose-single] JSON parse error:", parseError);
       
-      // Truncated response - requeue for retry
       await supabase
         .from("repose_outputs")
         .update({ 
           status: "queued", 
-          error_message: "Truncated AI response - will retry",
+          error_message: "Truncated response - will retry",
           started_running_at: null 
         })
         .eq("id", outputId);
@@ -211,38 +257,35 @@ The final image should look like the original photo, naturally repositioned in 3
       return;
     }
     
-    // Check for embedded error
-    const embeddedError = aiResult.choices?.[0]?.error;
-    if (embeddedError) {
-      const errorCode = embeddedError.code || "unknown";
-      const errorMessage = embeddedError.message || "";
-      console.error("[generate-repose-single] Embedded error:", errorCode, errorMessage.slice(0, 100));
-      
-      const allErrorText = `${errorCode} ${errorMessage}`.toLowerCase();
-      if (allErrorText.includes("resource_exhausted") || allErrorText.includes("429") || allErrorText.includes("rate")) {
-        await supabase
-          .from("repose_outputs")
-          .update({ status: "queued", error_message: "Rate limited - will retry", started_running_at: null })
-          .eq("id", outputId);
-        activeOutputId = null;
-        return;
-      }
+    // Check for API error in response
+    if (aiResult.error) {
+      const errorMessage = aiResult.error.message || JSON.stringify(aiResult.error);
+      console.error("[generate-repose-single] API error in response:", errorMessage.slice(0, 200));
       
       await supabase
         .from("repose_outputs")
-        .update({ status: "failed", error_message: `AI error: ${errorCode}` })
+        .update({ status: "failed", error_message: `API error: ${errorMessage.slice(0, 200)}` })
         .eq("id", outputId);
       activeOutputId = null;
       return;
     }
     
-    const imageData = aiResult.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-
-    if (!imageData) {
-      console.error("[generate-repose-single] No image in response");
+    // Extract image from Google's response format
+    const candidates = aiResult.candidates || [];
+    const parts = candidates[0]?.content?.parts || [];
+    const imagePart = parts.find((p: any) => p.inlineData);
+    
+    if (!imagePart?.inlineData?.data) {
+      console.error("[generate-repose-single] No image in response. Parts:", parts.map((p: any) => Object.keys(p)));
+      
+      // Check if there's a text response explaining why
+      const textPart = parts.find((p: any) => p.text);
+      const textResponse = textPart?.text || "No explanation provided";
+      console.log("[generate-repose-single] Text response:", textResponse.slice(0, 200));
+      
       await supabase
         .from("repose_outputs")
-        .update({ status: "failed", error_message: "No image in AI response" })
+        .update({ status: "failed", error_message: `No image generated: ${textResponse.slice(0, 100)}` })
         .eq("id", outputId);
       activeOutputId = null;
       return;
@@ -251,31 +294,15 @@ The final image should look like the original photo, naturally repositioned in 3
     const parseTime = Date.now();
     console.log(`[generate-repose-single] Image data extracted, ${Math.round((parseTime - startTime) / 1000)}s elapsed`);
 
-    // Extract base64 data
-    const base64Match = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
-    if (!base64Match) {
-      console.error("[generate-repose-single] Invalid image format");
-      await supabase
-        .from("repose_outputs")
-        .update({ status: "failed", error_message: "Invalid image format from AI" })
-        .eq("id", outputId);
-      activeOutputId = null;
-      return;
-    }
-
-    const [, rawFormat, base64Data] = base64Match;
+    // Get base64 data directly from response
+    const base64Data = imagePart.inlineData.data;
+    const mimeType = imagePart.inlineData.mimeType || "image/jpeg";
+    const imageFormat = mimeType.includes("png") ? "png" : "jpg";
     
-    // Log what the AI actually returned vs what we requested
-    console.log(`[generate-repose-single] AI returned format: ${rawFormat}, requested resolution: ${imageSize || '1K'}`);
-    if (imageSize && imageSize !== "1K" && rawFormat !== "jpeg") {
-      console.warn(`[generate-repose-single] WARNING: Requested JPEG but got ${rawFormat}`);
-    }
-    
-    // Use jpg extension for JPEG format requests
-    const imageFormat = (imageSize && imageSize !== "1K") ? "jpg" : rawFormat;
+    // Decode base64 to binary
     const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
     
-    console.log(`[generate-repose-single] Base64 decoded: ${binaryData.length} bytes (${Math.round(binaryData.length / 1024)}KB), ${Math.round((Date.now() - parseTime) / 1000)}s to process`);
+    console.log(`[generate-repose-single] Image decoded: ${binaryData.length} bytes (${Math.round(binaryData.length / 1024)}KB)`);
 
     // Upload to storage
     const resolution = imageSize || "1K";
@@ -287,7 +314,7 @@ The final image should look like the original photo, naturally repositioned in 3
     const { error: uploadError } = await supabase.storage
       .from("images")
       .upload(fileName, binaryData, {
-        contentType: `image/${imageFormat}`,
+        contentType: mimeType,
         upsert: true,
       });
 
@@ -346,7 +373,7 @@ serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const lovableApiKey = Deno.env.get("LOVABLE_API_KEY")!;
+  const geminiApiKey = Deno.env.get("NANO_BANANA_API_KEY")!;
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
@@ -358,6 +385,13 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: "Missing outputId" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!geminiApiKey) {
+      return new Response(
+        JSON.stringify({ error: "NANO_BANANA_API_KEY not configured" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -421,7 +455,7 @@ serve(async (req) => {
         outputId,
         supabaseUrl,
         supabaseKey,
-        lovableApiKey,
+        geminiApiKey,
         sourceUrl,
         poseUrl,
         imageSize,
