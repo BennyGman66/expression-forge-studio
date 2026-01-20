@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
@@ -58,6 +59,7 @@ export function InfiniteLookSection({
   onUndoSkipView,
   onRefresh,
 }: InfiniteLookSectionProps) {
+  const queryClient = useQueryClient();
   const [rerenderCount, setRerenderCount] = useState<string>("5");
   const [isRerendering, setIsRerendering] = useState(false);
   const [selectedShotTypes, setSelectedShotTypes] = useState<OutputShotType[]>([]);
@@ -209,13 +211,17 @@ export function InfiniteLookSection({
       
       if (error) throw error;
       
+      // Force invalidate queries to refresh UI
+      await queryClient.invalidateQueries({ queryKey: ["repose-outputs"] });
+      await queryClient.invalidateQueries({ queryKey: ["repose-batch-items"] });
+      
       toast.success(`Cancelled ${pendingOutputIds.length} pending renders`);
       onRefresh();
     } catch (error) {
       console.error("Cancel error:", error);
       toast.error("Failed to cancel pending renders");
     }
-  }, [allOutputs, onRefresh]);
+  }, [allOutputs, onRefresh, queryClient]);
 
   // Resume processing stalled pending outputs
   const handleResumePending = useCallback(async (e: React.MouseEvent) => {
