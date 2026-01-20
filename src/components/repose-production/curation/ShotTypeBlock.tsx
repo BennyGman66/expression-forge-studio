@@ -157,12 +157,13 @@ export function ShotTypeBlock({
 
       if (runsError) throw runsError;
 
-      // Trigger the queue processor
+      // Trigger the queue processor with 4K resolution
       const { error: invokeError } = await supabase.functions.invoke("process-repose-queue", {
         body: {
           batchId,
           pipelineJobId: pipelineJob.id,
           model: (batch.config_json as any)?.model || "google/gemini-3-pro-image-preview",
+          imageSize: "4K",
         },
       });
 
