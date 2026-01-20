@@ -76,6 +76,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
   const [selectedShotTypes, setSelectedShotTypes] = useState<Set<string>>(new Set());
   const [selectedRanks, setSelectedRanks] = useState<Set<number>>(new Set());
   const [skuSearch, setSkuSearch] = useState('');
+  const [selectedResolution, setSelectedResolution] = useState<'2K' | '4K'>('2K'); // Default to 2K (more reliable)
 
   // Toggle shot type filter
   const toggleShotType = (type: string) => {
@@ -270,8 +271,8 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     };
   }, [batchId, fetchFavorites]);
 
-  // Trigger individual 4K render
-  const handleRender4K = async (favorite: FavoriteOutput) => {
+  // Trigger individual high-res render (2K or 4K based on selection)
+  const handleRenderHighRes = async (favorite: FavoriteOutput) => {
     if (!batchId) return;
     
     // Prevent double-click
@@ -280,7 +281,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     setRenderingIds((prev) => new Set(prev).add(favorite.id));
     
     try {
-      // Create a new output record for the 4K version
+      // Create a new output record for the high-res version
       const { data: newOutput, error: insertError } = await supabase
         .from("repose_outputs")
         .insert({
@@ -289,38 +290,38 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           shot_type: favorite.shot_type,
           pose_url: favorite.pose_url,
           status: "queued",
-          is_favorite: false, // 4K version isn't a favorite yet
-          requested_resolution: "4K", // Mark as 4K request
+          is_favorite: false,
+          requested_resolution: selectedResolution, // Use selected resolution (2K or 4K)
         })
         .select()
         .single();
 
       if (insertError) throw insertError;
 
-      toast.info("Starting 4K render...");
+      toast.info(`Starting ${selectedResolution} render...`);
 
-      // Call generate-repose-single directly with 4K size
+      // Call generate-repose-single with selected resolution
       const { data, error } = await supabase.functions.invoke("generate-repose-single", {
         body: {
           outputId: newOutput.id,
           model: "google/gemini-3-pro-image-preview",
-          imageSize: "4K",
+          imageSize: selectedResolution,
         },
       });
 
       if (error) throw error;
 
       if (data?.status === "uploading") {
-        toast.success("4K render started - processing in background");
+        toast.success(`${selectedResolution} render started - processing in background`);
       } else if (data?.error) {
         toast.error(`Render failed: ${data.error}`);
       }
 
-      // Refresh to show the new 4K output
+      // Refresh to show the new output
       fetchFavorites();
     } catch (error) {
-      console.error("Error starting 4K render:", error);
-      toast.error("Failed to start 4K render");
+      console.error(`Error starting ${selectedResolution} render:`, error);
+      toast.error(`Failed to start ${selectedResolution} render`);
     } finally {
       setRenderingIds((prev) => {
         const next = new Set(prev);
@@ -424,23 +425,45 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-purple-500" />
-              4K Re-render
+              High-Res Re-render
             </CardTitle>
             
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={fetchFavorites}
-              className="gap-2"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* Resolution toggle */}
+              <div className="flex items-center border rounded-md overflow-hidden">
+                <Button
+                  variant={selectedResolution === '2K' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-8 px-3 rounded-none"
+                  onClick={() => setSelectedResolution('2K')}
+                >
+                  2K
+                </Button>
+                <Button
+                  variant={selectedResolution === '4K' ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-8 px-3 rounded-none"
+                  onClick={() => setSelectedResolution('4K')}
+                >
+                  4K
+                </Button>
+              </div>
+              
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={fetchFavorites}
+                className="gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="pt-0">
           <p className="text-sm text-muted-foreground mb-3">
-            Click any favorite to render it in 4K resolution. Each tile shows the original 1K render.
+            Click any favorite to render it in {selectedResolution} resolution ({selectedResolution === '2K' ? '1536×2048' : '3072×4096'}). Each tile shows the original 1K render.
           </p>
           
           {/* Filter buttons */}
@@ -598,8 +621,9 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
                       <FavoriteTile
                         key={fav.id}
                         favorite={fav}
-                        onRender={() => handleRender4K(fav)}
+                        onRender={() => handleRenderHighRes(fav)}
                         isRendering={renderingIds.has(fav.id)}
+                        selectedResolution={selectedResolution}
                       />
                     ))}
                   </div>
@@ -618,9 +642,10 @@ interface FavoriteTileProps {
   favorite: FavoriteOutput;
   onRender: () => void;
   isRendering: boolean;
+  selectedResolution: '2K' | '4K';
 }
 
-function FavoriteTile({ favorite, onRender, isRendering }: FavoriteTileProps) {
+function FavoriteTile({ favorite, onRender, isRendering, selectedResolution }: FavoriteTileProps) {
   const [isImgLoading, setIsImgLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
@@ -711,19 +736,19 @@ function FavoriteTile({ favorite, onRender, isRendering }: FavoriteTileProps) {
         />
       )}
 
-      {/* 4K rendering overlay */}
+      {/* High-res rendering overlay */}
       {is4KRendering && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80">
           <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-          <span className="text-xs font-medium text-blue-500">Rendering 4K...</span>
+          <span className="text-xs font-medium text-blue-500">Rendering...</span>
         </div>
       )}
 
-      {/* 4K failed overlay */}
+      {/* Failed overlay */}
       {is4KFailed && !is4KRendering && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80">
           <X className="w-8 h-8 text-destructive" />
-          <span className="text-xs font-medium text-destructive">4K Failed</span>
+          <span className="text-xs font-medium text-destructive">Render Failed</span>
           {favorite.fourK_error && (
             <span className="text-[10px] text-destructive/70 px-2 text-center line-clamp-2">
               {favorite.fourK_error}
@@ -733,11 +758,11 @@ function FavoriteTile({ favorite, onRender, isRendering }: FavoriteTileProps) {
         </div>
       )}
 
-      {/* Hover overlay for items without 4K */}
+      {/* Hover overlay for items without high-res */}
       {!has4K && !is4KRendering && !is4KFailed && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity">
           <Zap className="w-8 h-8 text-purple-500" />
-          <span className="text-xs font-medium text-purple-500">Click to render 4K</span>
+          <span className="text-xs font-medium text-purple-500">Click to render {selectedResolution}</span>
         </div>
       )}
 
