@@ -75,10 +75,13 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Mark as running
+    // Mark as running and set resolution
     await supabase
       .from('repose_outputs')
-      .update({ status: 'running' })
+      .update({ 
+        status: 'running',
+        requested_resolution: selectedImageSize || '1K',
+      })
       .eq('id', outputId);
 
     // Get the output with batch item and pose info

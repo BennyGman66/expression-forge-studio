@@ -2981,6 +2981,7 @@ export type Database = {
           is_favorite: boolean | null
           pose_id: string | null
           pose_url: string | null
+          requested_resolution: string | null
           result_url: string | null
           run_id: string | null
           selected_at: string | null
@@ -3000,6 +3001,7 @@ export type Database = {
           is_favorite?: boolean | null
           pose_id?: string | null
           pose_url?: string | null
+          requested_resolution?: string | null
           result_url?: string | null
           run_id?: string | null
           selected_at?: string | null
@@ -3019,6 +3021,7 @@ export type Database = {
           is_favorite?: boolean | null
           pose_id?: string | null
           pose_url?: string | null
+          requested_resolution?: string | null
           result_url?: string | null
           run_id?: string | null
           selected_at?: string | null
