@@ -368,35 +368,50 @@ serve(async (req) => {
         }
       }
 
-      // Check for existing pending outputs that can be resumed
+      // Normalize view name before querying
+      const normalizedViewName = normalizeView(currentView);
+
+      // Count ALL completed outputs for this look/view (across ALL jobs, not just this one)
+      const { data: allCompletedOutputs } = await supabase
+        .from('ai_apply_outputs')
+        .select('id')
+        .eq('look_id', lookId)
+        .eq('view', normalizedViewName)
+        .eq('status', 'completed');
+
+      const existingCompletedCount = allCompletedOutputs?.length || 0;
+
+      // Check for existing pending/generating outputs for this look/view (across all jobs)
       const { data: pendingToResume } = await supabase
         .from('ai_apply_outputs')
         .select('id')
-        .eq('job_id', jobId)
-        .eq('view', currentView)
-        .eq('status', 'pending');
+        .eq('look_id', lookId)
+        .eq('view', normalizedViewName)
+        .in('status', ['pending', 'generating']);
       
       const pendingCount = pendingToResume?.length || 0;
-      if (pendingCount > 0) {
-        console.log(`[AI Apply] Found ${pendingCount} pending outputs to resume for ${currentView}`);
+      
+      // Calculate how many MORE outputs we need to reach the target
+      const totalExisting = existingCompletedCount + pendingCount;
+      const newOutputsNeeded = Math.max(0, attemptsToCreate - totalExisting);
+      
+      console.log(`[AI Apply] View ${normalizedViewName}: ${existingCompletedCount} completed, ${pendingCount} pending, target: ${attemptsToCreate}, will create: ${newOutputsNeeded}`);
+
+      if (newOutputsNeeded <= 0) {
+        console.log(`[AI Apply] SKIP ${normalizedViewName}: Already have ${totalExisting} outputs (target: ${attemptsToCreate})`);
+        continue;  // Skip to next view
       }
 
-      // Get current attempt count for this view
+      // Get highest attempt_index for THIS job (for numbering new outputs)
       const { data: existingOutputs } = await supabase
         .from('ai_apply_outputs')
         .select('attempt_index')
         .eq('job_id', jobId)
-        .eq('view', currentView)
+        .eq('view', normalizedViewName)
         .order('attempt_index', { ascending: false })
         .limit(1);
 
       const startIndex = existingOutputs?.[0]?.attempt_index ?? -1;
-
-      // Only create NEW outputs if we need more than what's already pending
-      const newOutputsNeeded = Math.max(0, attemptsToCreate - pendingCount);
-      
-      // Normalize view name before inserting
-      const normalizedViewName = normalizeView(currentView);
       
       // Create output records with 'pending' status (not 'generating')
       for (let i = 0; i < newOutputsNeeded; i++) {
@@ -405,13 +420,13 @@ serve(async (req) => {
         await supabase.from('ai_apply_outputs').insert({
           job_id: jobId,
           look_id: lookId,
-          view: normalizedViewName,  // Always use normalized view name
+          view: normalizedViewName,
           attempt_index: attemptIndex,
           head_image_id: null,
-          head_image_url: talentPortraitUrl,  // Store talent portrait as reference
+          head_image_url: talentPortraitUrl,
           body_image_id: bodyImage.id,
-          body_image_url: cropImageUrl,        // Store the crop as the body reference
-          status: 'pending',  // Start as pending, mark generating only when actively processing
+          body_image_url: cropImageUrl,
+          status: 'pending',
           prompt_version: 'v4-3-image-dynamic',
         });
       }
