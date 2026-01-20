@@ -26,7 +26,7 @@ import type { ReposeOutput } from "@/types/repose";
 import type { LookWithOutputs } from "@/hooks/useReposeSelection";
 import { ShotTypeBlock } from "./ShotTypeBlock";
 import { cn } from "@/lib/utils";
-import { Check, RotateCw, Loader2, AlertCircle, X, ChevronDown, Trash2 } from "lucide-react";
+import { Check, RotateCw, Loader2, AlertCircle, X, ChevronDown, Trash2, Play } from "lucide-react";
 import { getImageUrl } from "@/lib/imageUtils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -189,15 +189,9 @@ export function InfiniteLookSection({
   const handleCancelPending = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    console.log("[InfiniteLookSection] Cancel clicked for look:", look.lookCode);
-    console.log("[InfiniteLookSection] All outputs count:", allOutputs.length);
-    console.log("[InfiniteLookSection] Pending outputs:", allOutputs.filter(o => o.status === 'queued' || o.status === 'running'));
-    
     const pendingOutputIds = allOutputs
       .filter(o => o.status === 'queued' || o.status === 'running')
       .map(o => o.id);
-    
-    console.log("[InfiniteLookSection] Pending IDs to cancel:", pendingOutputIds.length);
     
     if (pendingOutputIds.length === 0) {
       toast.info("No pending outputs to cancel");
@@ -205,7 +199,7 @@ export function InfiniteLookSection({
     }
     
     try {
-      const { error, count } = await supabase
+      const { error } = await supabase
         .from("repose_outputs")
         .update({ 
           status: "failed", 
@@ -215,14 +209,38 @@ export function InfiniteLookSection({
       
       if (error) throw error;
       
-      console.log("[InfiniteLookSection] Cancelled count:", count);
       toast.success(`Cancelled ${pendingOutputIds.length} pending renders`);
       onRefresh();
     } catch (error) {
       console.error("Cancel error:", error);
       toast.error("Failed to cancel pending renders");
     }
-  }, [allOutputs, onRefresh, look.lookCode]);
+  }, [allOutputs, onRefresh]);
+
+  // Resume processing stalled pending outputs
+  const handleResumePending = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    const pendingCount = queuedCount + runningCount;
+    if (pendingCount === 0) {
+      toast.info("No pending outputs to resume");
+      return;
+    }
+    
+    try {
+      toast.info(`Resuming ${pendingCount} pending outputs...`);
+      
+      const { error } = await supabase.functions.invoke("process-repose-queue", {
+        body: { batchId },
+      });
+      
+      if (error) throw error;
+      toast.success(`Queue processing resumed`);
+    } catch (error) {
+      console.error("Resume error:", error);
+      toast.error("Failed to resume processing");
+    }
+  }, [batchId, queuedCount, runningCount]);
 
   // Retry all failed outputs
   const handleRetryAllFailed = useCallback(async () => {
@@ -303,16 +321,33 @@ export function InfiniteLookSection({
           <div className="flex items-center gap-3">
             {/* Status Indicators */}
             {hasPending && (
-              <Badge 
-                variant="outline" 
-                className="gap-1.5 text-blue-600 border-blue-300 cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-colors"
-                onClick={handleCancelPending}
-                title="Click to cancel pending renders"
-              >
-                <Loader2 className="w-3 h-3 animate-spin" />
-                {queuedCount + runningCount} pending
-                <X className="w-3 h-3 ml-1 opacity-60 hover:opacity-100" />
-              </Badge>
+              <div className="flex items-center gap-1">
+                <Badge 
+                  variant="outline" 
+                  className="gap-1.5 text-blue-600 border-blue-300"
+                >
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {queuedCount + runningCount} pending
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-green-600 hover:text-green-700 hover:bg-green-100"
+                  onClick={handleResumePending}
+                  title="Resume processing"
+                >
+                  <Play className="w-3.5 h-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  onClick={handleCancelPending}
+                  title="Cancel pending renders"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </Button>
+              </div>
             )}
             
             {hasFailed && (

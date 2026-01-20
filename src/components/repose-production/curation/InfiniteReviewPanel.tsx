@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { AlertCircle, Check, Play, Trash2 } from "lucide-react";
 import { useReposeBatch } from "@/hooks/useReposeBatches";
 import { useReposeSelection, LookWithOutputs } from "@/hooks/useReposeSelection";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
@@ -12,6 +13,8 @@ import { ALL_OUTPUT_SHOT_TYPES, OutputShotType, slotToShotType } from "@/types/s
 import type { ReposeOutput } from "@/types/repose";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface InfiniteReviewPanelProps {
   batchId: string | undefined;
@@ -49,10 +52,11 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [currentLightboxLookId, setCurrentLightboxLookId] = useState<string | null>(null);
 
-  // Calculate shot types complete
-  const shotTypesStats = useMemo(() => {
+  // Calculate shot types complete and pending counts
+  const { shotTypesStats, pendingCount } = useMemo(() => {
     let totalShotTypes = 0;
     let completeShotTypes = 0;
+    let pending = 0;
     
     for (const look of groupedByLook) {
       for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
@@ -62,10 +66,62 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
           if (stats.isComplete) completeShotTypes++;
         }
       }
+      // Count pending outputs across all looks
+      const allLookOutputs = Object.values(look.outputsByView).flat();
+      pending += allLookOutputs.filter(o => o.status === 'queued' || o.status === 'running').length;
     }
     
-    return { total: totalShotTypes, complete: completeShotTypes };
+    return { 
+      shotTypesStats: { total: totalShotTypes, complete: completeShotTypes },
+      pendingCount: pending
+    };
   }, [groupedByLook]);
+
+  // Resume all pending outputs
+  const handleResumeAll = useCallback(async () => {
+    if (pendingCount === 0) {
+      toast.info("No pending outputs to resume");
+      return;
+    }
+    
+    try {
+      toast.info(`Resuming ${pendingCount} pending outputs...`);
+      
+      const { error } = await supabase.functions.invoke("process-repose-queue", {
+        body: { batchId },
+      });
+      
+      if (error) throw error;
+      toast.success("Queue processing resumed");
+    } catch (error) {
+      console.error("Resume all error:", error);
+      toast.error("Failed to resume processing");
+    }
+  }, [batchId, pendingCount]);
+
+  // Clear all stale pending outputs
+  const handleClearAllPending = useCallback(async () => {
+    if (pendingCount === 0) {
+      toast.info("No pending outputs to clear");
+      return;
+    }
+    
+    try {
+      const { error, count } = await supabase
+        .from("repose_outputs")
+        .update({ status: "failed", error_message: "Cleared - stale queue" })
+        .eq("batch_id", batchId)
+        .in("status", ["queued", "running"]);
+      
+      if (error) throw error;
+      
+      toast.success(`Cleared ${count || pendingCount} stale pending outputs`);
+      refetchAll();
+    } catch (error) {
+      console.error("Clear pending error:", error);
+      toast.error("Failed to clear pending outputs");
+    }
+  }, [batchId, pendingCount, refetchAll]);
 
   // Scroll to look - simple DOM scrolling
   const scrollToLook = useCallback((lookId: string) => {
@@ -201,12 +257,37 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
               </div>
             </div>
 
-            {overallStats.isAllComplete && (
-              <Badge variant="default" className="gap-1.5 bg-primary">
-                <Check className="w-3 h-3" />
-                Ready to Export
-              </Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {pendingCount > 0 && (
+                <>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleResumeAll}
+                    className="gap-1.5 text-green-600 border-green-300 hover:bg-green-50"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    Resume {pendingCount} Pending
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleClearAllPending}
+                    className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Clear Stale
+                  </Button>
+                </>
+              )}
+
+              {overallStats.isAllComplete && (
+                <Badge variant="default" className="gap-1.5 bg-primary">
+                  <Check className="w-3 h-3" />
+                  Ready to Export
+                </Badge>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>

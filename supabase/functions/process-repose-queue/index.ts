@@ -272,7 +272,14 @@ async function processQueueBackground(
 
     // After all runs processed, check for orphaned queued outputs and process them
     console.log(`[process-repose-queue] All runs processed, checking for orphaned outputs...`);
-    await processOrphanedOutputs(supabase, batchId, model, pipelineJobId, startTime);
+    const orphanResult = await processOrphanedOutputs(supabase, batchId, model, pipelineJobId, startTime);
+    
+    // If orphan processing timed out, spawn a continuation worker
+    if (orphanResult.needsContinuation) {
+      console.log(`[process-repose-queue] Orphan processing incomplete, spawning continuation worker`);
+      await continueLater();
+      return;
+    }
 
     // Final log
     const finalStats = await logHeartbeat();
@@ -709,7 +716,7 @@ async function processOrphanedOutputs(
   model: string,
   pipelineJobId: string | null,
   startTime: number
-) {
+): Promise<{ needsContinuation: boolean }> {
   console.log(`[process-repose-queue] Checking for orphaned outputs...`);
 
   // Get all queued outputs for this batch
@@ -722,12 +729,12 @@ async function processOrphanedOutputs(
 
   if (error) {
     console.error(`[process-repose-queue] Error fetching orphaned outputs:`, error);
-    return;
+    return { needsContinuation: false };
   }
 
   if (!queuedOutputs?.length) {
     console.log(`[process-repose-queue] No orphaned outputs to process`);
-    return;
+    return { needsContinuation: false };
   }
 
   console.log(`[process-repose-queue] Found ${queuedOutputs.length} orphaned queued outputs, processing...`);
@@ -737,10 +744,10 @@ async function processOrphanedOutputs(
 
   // Process in batches of OUTPUT_CONCURRENCY
   for (let i = 0; i < queuedOutputs.length; i += OUTPUT_CONCURRENCY) {
-    // Check if we're approaching timeout - if so, we'll continue in a new worker
+    // Check if we're approaching timeout - if so, signal caller to spawn new worker
     if (Date.now() - startTime > MAX_PROCESSING_TIME_MS) {
-      console.log(`[process-repose-queue] Approaching timeout during orphan processing, will continue in new worker`);
-      return; // The caller will handle continuation
+      console.log(`[process-repose-queue] Approaching timeout during orphan processing, needs continuation`);
+      return { needsContinuation: true };
     }
 
     const batch = queuedOutputs.slice(i, i + OUTPUT_CONCURRENCY);
@@ -834,4 +841,5 @@ async function processOrphanedOutputs(
   }
 
   console.log(`[process-repose-queue] Orphaned outputs complete: ${successCount} success, ${failCount} failed`);
+  return { needsContinuation: false };
 }
