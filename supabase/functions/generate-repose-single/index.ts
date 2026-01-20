@@ -1,4 +1,4 @@
-// Version: 2026-01-20-v6 - Two-phase 4K: save base64 to temp storage, let queue processor complete upload
+// Version: 2026-01-20-v7 - Increased timeouts: 90s AI call, 180s total for 4K renders (platform limit is 400s)
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -44,7 +44,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Prom
   ]);
 }
 
-const AI_TIMEOUT_MS = 35000; // 35 second timeout for AI calls - leaves room for temp upload
+const AI_TIMEOUT_MS = 90000; // 90 second timeout for AI calls - 4K renders can take up to 3 minutes
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -206,7 +206,7 @@ The final image should look like the original photo, naturally repositioned in 3
     // Read response body BEFORE returning - this ensures we get the full 4K payload
     // Calculate remaining time budget for body reading (need to stay under 60s total)
     const elapsedMs = Date.now() - startTime;
-    const bodyTimeoutMs = Math.max(55000 - elapsedMs, 15000); // At least 15s, max leaves 5s buffer
+    const bodyTimeoutMs = Math.max(180000 - elapsedMs, 60000); // At least 60s for large 4K body reads
     console.log(`[generate-repose-single] Starting body read with ${Math.round(bodyTimeoutMs/1000)}s timeout...`);
     
     let responseText: string;
