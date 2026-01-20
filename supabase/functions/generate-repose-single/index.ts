@@ -1,4 +1,4 @@
-// Version: 2026-01-20-v14 - Background task pattern for 5-minute 4K renders
+// Version: 2026-01-20-v15 - Crash-proof logging for large JSON responses
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -182,10 +182,17 @@ The final image should look like the original photo, naturally repositioned in 3
       return;
     }
 
-    // Parse response - with error handling for truncated JSON
+    // Parse response - with crash-proof logging for large payloads
+    console.log(`[generate-repose-single] Starting response body fetch...`);
+    console.log(`[generate-repose-single] Response headers content-length: ${aiResponse.headers.get('content-length') || 'unknown'}`);
+    
     let aiResult;
     try {
-      aiResult = await aiResponse.json();
+      // Use text() first for visibility into payload size before parsing
+      const responseText = await aiResponse.text();
+      console.log(`[generate-repose-single] Response text fetched: ${responseText.length} chars (${Math.round(responseText.length / 1024)}KB)`);
+      
+      aiResult = JSON.parse(responseText);
       console.log("[generate-repose-single] JSON parsed successfully, checking for image...");
     } catch (parseError) {
       console.error("[generate-repose-single] JSON parse error - truncated response:", parseError);
