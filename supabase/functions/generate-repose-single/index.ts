@@ -170,7 +170,7 @@ The final image should look like the original photo, naturally repositioned in 3
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
 
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=${geminiApiKey}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${geminiApiKey}`;
     console.log("[generate-repose-single] Calling Google Gemini API directly...");
 
     let aiResponse: Response;
