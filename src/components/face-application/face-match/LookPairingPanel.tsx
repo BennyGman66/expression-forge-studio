@@ -15,6 +15,7 @@ interface LookPairingPanelProps {
   onClearPairing: (sourceImageId: string) => void;
   onApplyAutoMatches: () => void;
   onSkipImage: (imageId: string) => void;
+  onUnskipImage: (imageId: string) => void;
   onCropComplete: (updatedImage: LookSourceImage) => void;
   dragOverSlotId: string | null;
 }
@@ -28,6 +29,7 @@ export function LookPairingPanel({
   onClearPairing,
   onApplyAutoMatches,
   onSkipImage,
+  onUnskipImage,
   onCropComplete,
   dragOverSlotId,
 }: LookPairingPanelProps) {
@@ -135,6 +137,7 @@ export function LookPairingPanel({
               onClearPairing={() => onClearPairing(img.id)}
               onCropClick={() => handleCropClick(img)}
               onSkip={() => handleSkipImageClick(img.id)}
+              onUnskip={() => onUnskipImage(img.id)}
               isOver={dragOverSlotId === img.id}
               isSkipped={skippedImageIds.has(img.id)}
             />
