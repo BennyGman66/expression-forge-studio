@@ -125,6 +125,8 @@ export function useBatchReposeRuns(batchId: string | undefined) {
       return data as ReposeRun[];
     },
     enabled: !!batchId,
+    refetchInterval: 5000, // Poll every 5 seconds while active
+    staleTime: 2000, // Consider data stale after 2 seconds
   });
 }
 
