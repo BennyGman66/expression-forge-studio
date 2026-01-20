@@ -90,7 +90,7 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
       toast.info(`Resuming ${pendingCount} pending outputs...`);
       
       const { error } = await supabase.functions.invoke("process-repose-queue", {
-        body: { batchId },
+        body: { batchId, imageSize: "4K" },
       });
       
       if (error) throw error;

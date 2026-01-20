@@ -166,12 +166,13 @@ export function InfiniteLookSection({
 
       if (runsError) throw runsError;
 
-      // Trigger the queue processor
+      // Trigger the queue processor with 4K resolution
       const { error: invokeError } = await supabase.functions.invoke("process-repose-queue", {
         body: {
           batchId,
           pipelineJobId: pipelineJob.id,
           model: (batch.config_json as any)?.model || "google/gemini-3-pro-image-preview",
+          imageSize: "4K",
         },
       });
 
@@ -237,7 +238,7 @@ export function InfiniteLookSection({
       toast.info(`Resuming ${pendingCount} pending outputs...`);
       
       const { error } = await supabase.functions.invoke("process-repose-queue", {
-        body: { batchId },
+        body: { batchId, imageSize: "4K" },
       });
       
       if (error) throw error;
