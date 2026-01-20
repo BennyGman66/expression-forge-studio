@@ -292,7 +292,8 @@ export function useReposeSelection(batchId: string | undefined) {
           lookCode,
           batchItemIds: [item.id],
           batchItemId: item.id,
-          sourceUrl: item.source_url,
+          // Prefer front image for header thumbnail
+          sourceUrl: detectedView === 'front' ? itemSourceUrl : '',
           sourceUrlsByView,
           outputsByView: {} as Record<OutputShotType, ReposeOutput[]>,
           selectionStats: {
@@ -305,8 +306,16 @@ export function useReposeSelection(batchId: string | undefined) {
           exportedAt: item.exported_at || null,
         });
       } else {
-        // Update exportedAt if this batch item has a more recent export
         const existingLook = lookMap.get(lookId)!;
+        // Prefer front image for header thumbnail
+        if (detectedView === 'front' && (!existingLook.sourceUrl || existingLook.sourceUrl === '')) {
+          existingLook.sourceUrl = itemSourceUrl;
+        }
+        // Fallback: if no front detected yet, use any available source
+        if (!existingLook.sourceUrl && itemSourceUrl) {
+          existingLook.sourceUrl = itemSourceUrl;
+        }
+        // Update exportedAt if this batch item has a more recent export
         if (item.exported_at && (!existingLook.exportedAt || item.exported_at > existingLook.exportedAt)) {
           existingLook.exportedAt = item.exported_at;
         }
@@ -325,8 +334,13 @@ export function useReposeSelection(batchId: string | undefined) {
       }
     }
 
-    // Add outputs to their respective looks and views
+    // Add outputs to their respective looks and views (prevent duplicates)
+    const processedOutputIds = new Set<string>();
     for (const output of outputs) {
+      // Skip if already processed (prevents duplicate counting)
+      if (processedOutputIds.has(output.id)) continue;
+      processedOutputIds.add(output.id);
+
       const item = batchItems.find(i => i.id === output.batch_item_id);
       if (!item) continue;
 
@@ -339,7 +353,11 @@ export function useReposeSelection(batchId: string | undefined) {
       if (!look.outputsByView[shotType]) {
         look.outputsByView[shotType] = [];
       }
-      look.outputsByView[shotType].push(output);
+      
+      // Double-check to prevent duplicates within view
+      if (!look.outputsByView[shotType].some(o => o.id === output.id)) {
+        look.outputsByView[shotType].push(output);
+      }
     }
 
     // Calculate selection stats for each look
