@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
     refetchAll,
   } = useReposeSelection(batchId);
 
+  const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
   const lookRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -115,13 +117,17 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
       
       if (error) throw error;
       
+      // Force invalidate ALL repose-related queries to refresh UI
+      await queryClient.invalidateQueries({ queryKey: ["repose-outputs"] });
+      await queryClient.invalidateQueries({ queryKey: ["repose-batch-items"] });
+      
       toast.success(`Cleared ${count || pendingCount} stale pending outputs`);
       refetchAll();
     } catch (error) {
       console.error("Clear pending error:", error);
       toast.error("Failed to clear pending outputs");
     }
-  }, [batchId, pendingCount, refetchAll]);
+  }, [batchId, pendingCount, refetchAll, queryClient]);
 
   // Scroll to look - simple DOM scrolling
   const scrollToLook = useCallback((lookId: string) => {
