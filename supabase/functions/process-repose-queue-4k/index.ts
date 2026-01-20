@@ -23,8 +23,8 @@ const RATE_LIMIT_DELAY_MS = 15000; // 15 second delay for rate limit errors
 // Heartbeat logging interval
 const LOG_INTERVAL_MS = 10 * 1000;
 
-// Stale output threshold - 45 seconds (generation takes ~20s, so 45s means something is stuck)
-const STALE_THRESHOLD_MS = 45 * 1000;
+// Stale output threshold - 6 minutes (4K renders can take up to 5 min, so 6 min means stuck)
+const STALE_THRESHOLD_MS = 360 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {

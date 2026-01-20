@@ -1,4 +1,4 @@
-// Version: 2026-01-20-v7 - Increased timeouts: 90s AI call, 180s total for 4K renders (platform limit is 400s)
+// Version: 2026-01-20-v8 - Maximized timeouts: 300s AI call, 350s body read to use full 400s platform limit
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -44,7 +44,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Prom
   ]);
 }
 
-const AI_TIMEOUT_MS = 90000; // 90 second timeout for AI calls - 4K renders can take up to 3 minutes
+const AI_TIMEOUT_MS = 300000; // 300 second (5 min) timeout for AI calls - 4K renders need time
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -209,7 +209,7 @@ The final image should look like the original photo, naturally repositioned in 3
     // Read response body BEFORE returning - this ensures we get the full 4K payload
     // Calculate remaining time budget for body reading (need to stay under 60s total)
     const elapsedMs = Date.now() - startTime;
-    const bodyTimeoutMs = Math.max(180000 - elapsedMs, 60000); // At least 60s for large 4K body reads
+    const bodyTimeoutMs = Math.max(350000 - elapsedMs, 60000); // Up to 350s for large 4K body reads, 50s margin
     console.log(`[generate-repose-single] Starting body read with ${Math.round(bodyTimeoutMs/1000)}s timeout...`);
     
     let responseText: string;
