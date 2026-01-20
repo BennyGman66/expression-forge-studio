@@ -925,6 +925,36 @@ function FavoriteTile({
     }
   };
 
+  // Download original body reference image
+  const handleDownloadBodyRef = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!favorite.source_url) {
+      toast.error("No body reference available");
+      return;
+    }
+    
+    try {
+      const response = await fetch(favorite.source_url);
+      const blob = await response.blob();
+      
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${sku}_BodyRef.png`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success("Body reference download started");
+    } catch (error) {
+      console.error("Body reference download failed:", error);
+      toast.error("Body reference download failed");
+    }
+  };
+
   return (
     <div
       onClick={handleClick}
@@ -1044,6 +1074,19 @@ function FavoriteTile({
       >
         <Download className="w-3.5 h-3.5" />
       </Button>
+
+      {/* Download body reference button */}
+      {favorite.source_url && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute bottom-1 right-7 h-5 w-5 p-0 rounded bg-background/80 hover:bg-background opacity-0 group-hover:opacity-100 transition-all z-30"
+          onClick={handleDownloadBodyRef}
+          title="Download original body reference"
+        >
+          <Download className="w-3 h-3" />
+        </Button>
+      )}
 
       {/* Grayscale pose toggle */}
       {favorite.pose_url && (
