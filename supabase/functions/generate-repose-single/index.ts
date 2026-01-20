@@ -1,4 +1,4 @@
-// Version: 2026-01-20-v10 - Background task architecture for 4K renders to avoid 150s platform timeout
+// Version: 2026-01-20-v11 - Restored 400s platform limit timeouts for 4K renders
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -72,9 +72,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Prom
   ]);
 }
 
-// Conservative timeouts to stay under 150s platform limit
-const AI_TIMEOUT_MS = 90000; // 90s for AI call - most complete in 20-40s
-const BODY_TIMEOUT_MS = 45000; // 45s for body read - should be enough for streaming
+// Extended timeouts for 400s platform limit
+const AI_TIMEOUT_MS = 300000; // 300s (5 min) for AI call - 4K renders need time
+const BODY_TIMEOUT_MS = 350000; // 350s for body read - large 4K payloads need time
 
 serve(async (req) => {
   // Handle CORS preflight
