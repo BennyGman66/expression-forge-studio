@@ -333,7 +333,7 @@ export function useReposeSelection(batchId: string | undefined) {
         const selectedCount = completedOutputs.filter(o => o.is_favorite).length;
         const viewIsSkipped = isViewSkipped(look.lookId, shotType);
         
-        if (completedOutputs.length > 0 || viewIsSkipped) {
+        if (viewOutputs.length > 0 || viewIsSkipped) {
           totalViews++;
           const isComplete = selectedCount >= MAX_FAVORITES_PER_VIEW || viewIsSkipped;
           if (isComplete) completedViews++;
