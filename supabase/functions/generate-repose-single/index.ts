@@ -75,12 +75,13 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Mark as running and set resolution
+    // Mark as running and set resolution + start time
     await supabase
       .from('repose_outputs')
       .update({ 
         status: 'running',
         requested_resolution: selectedImageSize || '1K',
+        started_running_at: new Date().toISOString(),
       })
       .eq('id', outputId);
 

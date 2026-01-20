@@ -59,31 +59,57 @@ Deno.serve(async (req) => {
       })
       .eq("id", pipelineJobId);
 
-    // Reset stale running outputs (stuck for > 45 seconds)
+    // Reset stale running outputs - mark as FAILED (not queued) so user sees the timeout
     const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
+    
+    // First: outputs with started_running_at set (preferred tracking)
     const { data: staleOutputs } = await supabase
       .from("repose_outputs")
-      .update({ status: "queued" })
+      .update({ 
+        status: "failed", 
+        error_message: "Render timed out - click to retry" 
+      })
       .eq("batch_id", batchId)
       .eq("status", "running")
-      .lt("created_at", staleThreshold)
+      .not("started_running_at", "is", null)
+      .lt("started_running_at", staleThreshold)
       .select("id");
 
     if (staleOutputs?.length) {
-      console.log(`[process-repose-queue-4k] Reset ${staleOutputs.length} stale running outputs`);
+      console.log(`[process-repose-queue-4k] Marked ${staleOutputs.length} stale running outputs as failed`);
     }
 
-    // Reset stale 'uploading' outputs (AI succeeded but upload timed out)
+    // Fallback: legacy outputs without started_running_at
+    const { data: legacyStale } = await supabase
+      .from("repose_outputs")
+      .update({ 
+        status: "failed", 
+        error_message: "Render timed out - click to retry" 
+      })
+      .eq("batch_id", batchId)
+      .eq("status", "running")
+      .is("started_running_at", null)
+      .lt("created_at", staleThreshold)
+      .select("id");
+
+    if (legacyStale?.length) {
+      console.log(`[process-repose-queue-4k] Marked ${legacyStale.length} legacy stale outputs as failed`);
+    }
+
+    // Reset stale 'uploading' outputs - mark as failed
     const { data: staleUploading } = await supabase
       .from("repose_outputs")
-      .update({ status: "queued", error_message: "Upload timeout, retrying" })
+      .update({ 
+        status: "failed", 
+        error_message: "Upload timed out - click to retry" 
+      })
       .eq("batch_id", batchId)
       .eq("status", "uploading")
       .lt("created_at", staleThreshold)
       .select("id");
 
     if (staleUploading?.length) {
-      console.log(`[process-repose-queue-4k] Reset ${staleUploading.length} stale uploading outputs`);
+      console.log(`[process-repose-queue-4k] Marked ${staleUploading.length} stale uploading outputs as failed`);
     }
 
     // Track processed outputs for continuation
@@ -265,18 +291,21 @@ async function processQueueBackground(
       // Longer delay between batches for rate limit safety
       await new Promise((r) => setTimeout(r, 3000));
 
-      // Periodically reset stale running/uploading outputs during processing
+      // Periodically mark stale running/uploading outputs as failed during processing
       const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS).toISOString();
       const { data: resetStale } = await supabase
         .from("repose_outputs")
-        .update({ status: "queued" })
+        .update({ 
+          status: "failed", 
+          error_message: "Render timed out - click to retry" 
+        })
         .eq("batch_id", batchId)
         .in("status", ["running", "uploading"])
         .lt("created_at", staleThreshold)
         .select("id");
 
       if (resetStale?.length) {
-        console.log(`[process-repose-queue-4k] Reset ${resetStale.length} stale outputs during processing`);
+        console.log(`[process-repose-queue-4k] Marked ${resetStale.length} stale outputs as failed during processing`);
       }
     }
 
