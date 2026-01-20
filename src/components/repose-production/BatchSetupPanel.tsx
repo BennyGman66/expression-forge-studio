@@ -1227,17 +1227,6 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {queueStats.failed > 0 && (
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={handleRetryFailed}
-                  className="gap-1.5"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  Retry {queueStats.failed} Failed
-                </Button>
-              )}
               {selectedLookIds.size > 0 && (
                 <>
                   <Button variant="ghost" size="sm" onClick={clearSelection}>
