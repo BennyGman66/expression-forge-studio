@@ -703,8 +703,10 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
       setIsGenerating(false);
       pipelineJobIdRef.current = null;
       
-      refetchRuns();
-      refetchActivePipelineJob();
+      // Invalidate and await refetches to ensure UI updates immediately
+      queryClient.invalidateQueries({ queryKey: ['repose-runs', 'batch', batchId] });
+      await refetchRuns();
+      await refetchActivePipelineJob();
     } catch (error) {
       console.error('Failed to stop:', error);
       toast.error('Failed to stop generation');
@@ -997,17 +999,30 @@ export function BatchSetupPanel({ batchId }: BatchSetupPanelProps) {
                     </span>
                   )}
                 </div>
-                {isQueueStalled && (
+                <div className="flex items-center gap-2">
                   <Button 
                     size="sm" 
-                    variant="outline"
-                    onClick={handleResumeQueue}
-                    className="h-6 text-xs gap-1"
+                    variant="ghost"
+                    onClick={async () => {
+                      await refetchRuns();
+                      toast.info('Queue refreshed');
+                    }}
+                    className="h-6 text-xs gap-1 text-muted-foreground hover:text-foreground"
                   >
                     <RefreshCw className="w-3 h-3" />
-                    Resume Queue
                   </Button>
-                )}
+                  {isQueueStalled && (
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={handleResumeQueue}
+                      className="h-6 text-xs gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Resume Queue
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
