@@ -251,18 +251,39 @@ export function useReposeSelection(batchId: string | undefined) {
       }
       
       // Determine which shot types this batch item provides based on assigned_view
-      const assignedView = item.assigned_view?.toLowerCase();
+      // with fallback detection from view field or source_url
+      let detectedView = item.assigned_view?.toLowerCase();
       const itemSourceUrl = item.source_url;
+      
+      // Fallback: detect view from the 'view' field if assigned_view is null
+      if (!detectedView && (item as any).view) {
+        const viewLower = ((item as any).view as string).toLowerCase();
+        if (viewLower.includes('_back') || viewLower.includes('back') || viewLower.includes('-back')) {
+          detectedView = 'back';
+        } else if (viewLower.includes('_front') || viewLower.includes('front') || viewLower.includes('-front')) {
+          detectedView = 'front';
+        }
+      }
+      
+      // Also check source_url as final fallback
+      if (!detectedView && itemSourceUrl) {
+        const urlLower = itemSourceUrl.toLowerCase();
+        if (urlLower.includes('/back-') || urlLower.includes('_back') || urlLower.includes('-back')) {
+          detectedView = 'back';
+        } else if (urlLower.includes('/front-') || urlLower.includes('_front') || urlLower.includes('-front')) {
+          detectedView = 'front';
+        }
+      }
       
       if (!lookMap.has(lookId)) {
         const sourceUrlsByView: Partial<Record<OutputShotType, string>> = {};
         
-        // Map assigned_view to shot types
-        if (assignedView === 'front') {
+        // Map detected view to shot types
+        if (detectedView === 'front') {
           sourceUrlsByView.FRONT_FULL = itemSourceUrl;
           sourceUrlsByView.FRONT_CROPPED = itemSourceUrl;
           sourceUrlsByView.DETAIL = itemSourceUrl;
-        } else if (assignedView === 'back') {
+        } else if (detectedView === 'back') {
           sourceUrlsByView.BACK_FULL = itemSourceUrl;
         }
         
@@ -294,11 +315,11 @@ export function useReposeSelection(batchId: string | undefined) {
           existingLook.batchItemIds.push(item.id);
         }
         // Add source URLs for this batch item's shot types
-        if (assignedView === 'front') {
+        if (detectedView === 'front') {
           existingLook.sourceUrlsByView.FRONT_FULL = itemSourceUrl;
           existingLook.sourceUrlsByView.FRONT_CROPPED = itemSourceUrl;
           existingLook.sourceUrlsByView.DETAIL = itemSourceUrl;
-        } else if (assignedView === 'back') {
+        } else if (detectedView === 'back') {
           existingLook.sourceUrlsByView.BACK_FULL = itemSourceUrl;
         }
       }
