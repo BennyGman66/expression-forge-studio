@@ -9,7 +9,6 @@ import { toast } from "sonner";
 import { 
   Loader2, 
   Check, 
-  X, 
   RefreshCw,
   ImageIcon,
   Sparkles,
@@ -31,13 +30,9 @@ interface FavoriteOutput {
   result_url: string | null;
   pose_url: string | null;
   favorite_rank: number;
+  requested_resolution: string | null;
   source_url?: string | null;
   look_code?: string;
-  // 4K version info
-  fourK_output_id?: string;
-  fourK_status?: string;
-  fourK_result_url?: string | null;
-  fourK_error?: string | null;
 }
 
 // Extract SKU from source URL filename
@@ -76,7 +71,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
   const [selectedShotTypes, setSelectedShotTypes] = useState<Set<string>>(new Set());
   const [selectedRanks, setSelectedRanks] = useState<Set<number>>(new Set());
   const [skuSearch, setSkuSearch] = useState('');
-  const [selectedResolution, setSelectedResolution] = useState<'2K' | '4K'>('2K'); // Default to 2K (more reliable)
+  const [selectedResolution, setSelectedResolution] = useState<'2K' | '4K'>('2K');
 
   // Toggle shot type filter
   const toggleShotType = (type: string) => {
@@ -138,11 +133,11 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           status,
           result_url,
           pose_url,
-          favorite_rank
+          favorite_rank,
+          requested_resolution
         `)
         .eq("batch_id", batchId)
         .eq("is_favorite", true)
-        .eq("status", "complete")
         .not("result_url", "is", null)
         .order("favorite_rank", { ascending: true });
 
@@ -170,7 +165,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           
           const lookIds = [...new Set(itemsData.map((i) => i.look_id).filter(Boolean))] as string[];
           if (lookIds.length > 0) {
-            // Fetch look codes - cast to any to bypass type inference issues with 'looks' table
+            // Fetch look codes
             const { data: looksData } = await (supabase as any)
               .from("looks")
               .select("id, look_code")
@@ -178,7 +173,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
             
             if (looksData) {
               const lookIdToCode: Record<string, string> = {};
-              looksData.forEach((l) => { 
+              looksData.forEach((l: { id: string; look_code: string }) => { 
                 lookIdToCode[l.id] = l.look_code; 
               });
               itemsData.forEach((i) => {
@@ -191,48 +186,11 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
         }
       }
 
-      // Check for existing 4K versions - only match outputs explicitly marked as 4K
-      let fourKVersions: Record<string, { id: string; status: string; result_url: string | null; error_message: string | null }> = {};
-      
-      // Query for 4K outputs specifically using requested_resolution column
-      const { data: fourKData } = await supabase
-        .from("repose_outputs")
-        .select("id, batch_item_id, shot_type, pose_url, status, result_url, error_message, created_at, requested_resolution")
-        .eq("batch_id", batchId)
-        .eq("requested_resolution", "4K") // Only actual 4K requests
-        .in("status", ["queued", "running", "uploading", "failed", "complete"]);
-
-      if (fourKData && fourKData.length > 0) {
-        // Match by batch_item_id + shot_type + pose_url - find latest 4K attempt for each favorite
-        favData?.forEach((fav) => {
-          const matching4K = fourKData
-            .filter((fourK) => 
-              fourK.batch_item_id === fav.batch_item_id &&
-              fourK.shot_type === fav.shot_type &&
-              fourK.pose_url === fav.pose_url
-            )
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-
-          if (matching4K) {
-            fourKVersions[fav.id] = {
-              id: matching4K.id,
-              status: matching4K.status,
-              result_url: matching4K.result_url,
-              error_message: matching4K.error_message,
-            };
-          }
-        });
-      }
-
-      // Combine favorites with look codes and 4K status
+      // Combine favorites with look codes
       const enriched: FavoriteOutput[] = (favData || []).map((f) => ({
         ...f,
         source_url: batchItemInfo[f.batch_item_id]?.source_url,
         look_code: lookCodes[f.batch_item_id],
-        fourK_output_id: fourKVersions[f.id]?.id,
-        fourK_status: fourKVersions[f.id]?.status,
-        fourK_result_url: fourKVersions[f.id]?.result_url,
-        fourK_error: fourKVersions[f.id]?.error_message,
       }));
 
       setFavorites(enriched);
@@ -251,7 +209,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     if (!batchId) return;
 
     const channel = supabase
-      .channel(`4k-favorites-${batchId}`)
+      .channel(`highres-favorites-${batchId}`)
       .on(
         "postgres_changes",
         {
@@ -271,39 +229,20 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     };
   }, [batchId, fetchFavorites]);
 
-  // Trigger individual high-res render (2K or 4K based on selection)
-  const handleRenderHighRes = async (favorite: FavoriteOutput) => {
-    if (!batchId) return;
-    
-    // Prevent double-click
+  // Re-render the SAME output at higher resolution
+  const handleRerender = async (favorite: FavoriteOutput) => {
     if (renderingIds.has(favorite.id)) return;
     
     setRenderingIds((prev) => new Set(prev).add(favorite.id));
     
     try {
-      // Create a new output record for the high-res version
-      const { data: newOutput, error: insertError } = await supabase
-        .from("repose_outputs")
-        .insert({
-          batch_id: batchId,
-          batch_item_id: favorite.batch_item_id,
-          shot_type: favorite.shot_type,
-          pose_url: favorite.pose_url,
-          status: "queued",
-          is_favorite: false,
-          requested_resolution: selectedResolution, // Use selected resolution (2K or 4K)
-        })
-        .select()
-        .single();
+      toast.info(`Re-rendering at ${selectedResolution}...`);
 
-      if (insertError) throw insertError;
-
-      toast.info(`Starting ${selectedResolution} render...`);
-
-      // Call generate-repose-single with selected resolution
+      // Call generate-repose-single with the SAME outputId
+      // This will re-run the generation and update result_url in place
       const { data, error } = await supabase.functions.invoke("generate-repose-single", {
         body: {
-          outputId: newOutput.id,
+          outputId: favorite.id,
           model: "google/gemini-3-pro-image-preview",
           imageSize: selectedResolution,
         },
@@ -311,17 +250,16 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
 
       if (error) throw error;
 
-      if (data?.status === "uploading") {
-        toast.success(`${selectedResolution} render started - processing in background`);
-      } else if (data?.error) {
-        toast.error(`Render failed: ${data.error}`);
+      if (data?.error) {
+        toast.error(`Re-render failed: ${data.error}`);
+      } else {
+        toast.success(`${selectedResolution} render started`);
       }
 
-      // Refresh to show the new output
       fetchFavorites();
     } catch (error) {
-      console.error(`Error starting ${selectedResolution} render:`, error);
-      toast.error(`Failed to start ${selectedResolution} render`);
+      console.error(`Error re-rendering:`, error);
+      toast.error(`Failed to start re-render`);
     } finally {
       setRenderingIds((prev) => {
         const next = new Set(prev);
@@ -331,70 +269,14 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
     }
   };
 
-  // Cancel all rendering 4K jobs
-  const handleCancelRendering = async () => {
-    const toCancel = filteredFavorites
-      .filter(f => f.fourK_output_id && ['queued', 'running', 'uploading'].includes(f.fourK_status || ''))
-      .map(f => f.fourK_output_id)
-      .filter((id): id is string => !!id);
-    
-    if (toCancel.length === 0) {
-      toast.info("No rendering jobs to cancel");
-      return;
-    }
-    
-    try {
-      const { error } = await supabase
-        .from('repose_outputs')
-        .delete()
-        .in('id', toCancel);
-      
-      if (error) throw error;
-      
-      toast.success(`Cancelled ${toCancel.length} 4K render(s)`);
-      fetchFavorites();
-    } catch (error) {
-      console.error("Error cancelling renders:", error);
-      toast.error("Failed to cancel renders");
-    }
-  };
-
-  // Clear all failed 4K jobs
-  const handleClearFailed = async () => {
-    const toClear = filteredFavorites
-      .filter(f => f.fourK_output_id && f.fourK_status === 'failed')
-      .map(f => f.fourK_output_id)
-      .filter((id): id is string => !!id);
-    
-    if (toClear.length === 0) {
-      toast.info("No failed jobs to clear");
-      return;
-    }
-    
-    try {
-      const { error } = await supabase
-        .from('repose_outputs')
-        .delete()
-        .in('id', toClear);
-      
-      if (error) throw error;
-      
-      toast.success(`Cleared ${toClear.length} failed 4K render(s)`);
-      fetchFavorites();
-    } catch (error) {
-      console.error("Error clearing failed:", error);
-      toast.error("Failed to clear failed renders");
-    }
-  };
-
   // Stats - based on filtered favorites
   const stats = useMemo(() => {
     const total = filteredFavorites.length;
     const allTotal = favorites.length;
-    const with4K = filteredFavorites.filter((f) => f.fourK_status === "complete").length;
-    const rendering = filteredFavorites.filter((f) => f.fourK_status === "running" || f.fourK_status === "uploading" || f.fourK_status === "queued").length;
-    const failed = filteredFavorites.filter((f) => f.fourK_status === "failed").length;
-    return { total, allTotal, with4K, rendering, failed };
+    const at2K = filteredFavorites.filter((f) => f.requested_resolution === "2K").length;
+    const at4K = filteredFavorites.filter((f) => f.requested_resolution === "4K").length;
+    const rendering = filteredFavorites.filter((f) => f.status === "running" || f.status === "uploading" || f.status === "queued").length;
+    return { total, allTotal, at2K, at4K, rendering };
   }, [favorites, filteredFavorites]);
 
   // Group by look code for easier browsing (using filtered favorites)
@@ -463,7 +345,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
         </CardHeader>
         <CardContent className="pt-0">
           <p className="text-sm text-muted-foreground mb-3">
-            Click any favorite to render it in {selectedResolution} resolution ({selectedResolution === '2K' ? '1536×2048' : '3072×4096'}). Each tile shows the original 1K render.
+            Click any favorite to re-render it at {selectedResolution} resolution. The image will be replaced in place.
           </p>
           
           {/* Filter buttons */}
@@ -552,43 +434,23 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
                   : `${stats.total} Favorites`
                 }
               </Badge>
-              {stats.with4K > 0 && (
+              {stats.at2K > 0 && (
+                <Badge variant="outline" className="gap-1.5 text-blue-600 border-blue-200">
+                  <Check className="w-3 h-3" />
+                  {stats.at2K} at 2K
+                </Badge>
+              )}
+              {stats.at4K > 0 && (
                 <Badge variant="outline" className="gap-1.5 text-green-600 border-green-200">
                   <Check className="w-3 h-3" />
-                  {stats.with4K} in 4K
+                  {stats.at4K} at 4K
                 </Badge>
               )}
               {stats.rendering > 0 && (
-                <div className="flex items-center gap-1">
-                  <Badge variant="outline" className="gap-1.5 text-blue-600 border-blue-200">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    {stats.rendering} Rendering
-                  </Badge>
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="h-6 px-2 text-xs text-destructive hover:text-destructive"
-                    onClick={handleCancelRendering}
-                  >
-                    <X className="w-3 h-3 mr-1" /> Cancel
-                  </Button>
-                </div>
-              )}
-              {stats.failed > 0 && (
-                <div className="flex items-center gap-1">
-                  <Badge variant="destructive" className="gap-1.5">
-                    <X className="w-3 h-3" />
-                    {stats.failed} Failed
-                  </Badge>
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="h-6 px-2 text-xs"
-                    onClick={handleClearFailed}
-                  >
-                    Clear
-                  </Button>
-                </div>
+                <Badge variant="outline" className="gap-1.5 text-amber-600 border-amber-200">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  {stats.rendering} Rendering
+                </Badge>
               )}
             </div>
           )}
@@ -621,8 +483,8 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
                       <FavoriteTile
                         key={fav.id}
                         favorite={fav}
-                        onRender={() => handleRenderHighRes(fav)}
-                        isRendering={renderingIds.has(fav.id)}
+                        onRerender={() => handleRerender(fav)}
+                        isRendering={renderingIds.has(fav.id) || fav.status === "running" || fav.status === "uploading"}
                         selectedResolution={selectedResolution}
                       />
                     ))}
@@ -640,52 +502,48 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
 // Individual favorite tile component
 interface FavoriteTileProps {
   favorite: FavoriteOutput;
-  onRender: () => void;
+  onRerender: () => void;
   isRendering: boolean;
   selectedResolution: '2K' | '4K';
 }
 
-function FavoriteTile({ favorite, onRender, isRendering, selectedResolution }: FavoriteTileProps) {
+function FavoriteTile({ favorite, onRerender, isRendering, selectedResolution }: FavoriteTileProps) {
   const [isImgLoading, setIsImgLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
   const thumbnailUrl = favorite.result_url ? getImageUrl(favorite.result_url, "thumb") : null;
   const sku = favorite.look_code || extractSKU(favorite.source_url);
   const shotLabel = SHOT_TYPE_LABELS[favorite.shot_type] || favorite.shot_type;
-
-  // Determine 4K status
-  const has4K = favorite.fourK_status === "complete";
-  const is4KRendering = favorite.fourK_status === "running" || favorite.fourK_status === "uploading" || favorite.fourK_status === "queued" || isRendering;
-  const is4KFailed = favorite.fourK_status === "failed";
+  
+  // Determine current resolution
+  const currentRes = favorite.requested_resolution || "1K";
 
   const handleClick = () => {
-    if (!has4K && !is4KRendering) {
-      onRender();
+    if (!isRendering) {
+      onRerender();
     }
   };
 
   const handleDownload = async (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent triggering render
+    e.stopPropagation();
     
-    // Use 4K URL if available, otherwise original
-    const downloadUrl = favorite.fourK_result_url || favorite.result_url;
-    if (!downloadUrl) {
+    if (!favorite.result_url) {
       toast.error("No image available to download");
       return;
     }
     
     try {
-      const response = await fetch(downloadUrl);
+      const response = await fetch(favorite.result_url);
       const blob = await response.blob();
       
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       
-      // Build filename: SKU_ShotType_Rank.png
+      // Build filename: SKU_ShotType_Rank_Resolution.png
       const shotLabelClean = shotLabel.replace(/\s+/g, "_");
       const rankSuffix = RANK_LABELS[favorite.favorite_rank] || `${favorite.favorite_rank}`;
-      link.download = `${sku}_${shotLabelClean}_${rankSuffix}.png`;
+      link.download = `${sku}_${shotLabelClean}_${rankSuffix}_${currentRes}.png`;
       
       document.body.appendChild(link);
       link.click();
@@ -705,10 +563,10 @@ function FavoriteTile({ favorite, onRender, isRendering, selectedResolution }: F
       className={cn(
         "relative aspect-[3/4] rounded-lg overflow-hidden border-2 cursor-pointer group",
         "transition-all bg-muted/50",
-        has4K && "border-green-500/50 ring-2 ring-green-500/20",
-        is4KRendering && "border-blue-500/50",
-        is4KFailed && "border-destructive/50",
-        !has4K && !is4KRendering && !is4KFailed && "border-muted-foreground/30 hover:border-purple-400 hover:ring-2 hover:ring-purple-400/20"
+        currentRes === "4K" && "border-green-500/50 ring-2 ring-green-500/20",
+        currentRes === "2K" && "border-blue-500/50 ring-2 ring-blue-500/20",
+        isRendering && "border-amber-500/50",
+        currentRes === "1K" && !isRendering && "border-muted-foreground/30 hover:border-purple-400 hover:ring-2 hover:ring-purple-400/20"
       )}
     >
       {/* Loading state */}
@@ -736,43 +594,42 @@ function FavoriteTile({ favorite, onRender, isRendering, selectedResolution }: F
         />
       )}
 
-      {/* High-res rendering overlay */}
-      {is4KRendering && (
+      {/* Rendering overlay */}
+      {isRendering && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-          <span className="text-xs font-medium text-blue-500">Rendering...</span>
+          <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+          <span className="text-xs font-medium text-amber-500">Re-rendering...</span>
         </div>
       )}
 
-      {/* Failed overlay */}
-      {is4KFailed && !is4KRendering && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80">
-          <X className="w-8 h-8 text-destructive" />
-          <span className="text-xs font-medium text-destructive">Render Failed</span>
-          {favorite.fourK_error && (
-            <span className="text-[10px] text-destructive/70 px-2 text-center line-clamp-2">
-              {favorite.fourK_error}
-            </span>
-          )}
-          <span className="text-[10px] text-muted-foreground">Click to retry</span>
-        </div>
-      )}
-
-      {/* Hover overlay for items without high-res */}
-      {!has4K && !is4KRendering && !is4KFailed && (
+      {/* Hover overlay */}
+      {!isRendering && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity">
           <Zap className="w-8 h-8 text-purple-500" />
-          <span className="text-xs font-medium text-purple-500">Click to render {selectedResolution}</span>
+          <span className="text-xs font-medium text-purple-500">
+            Re-render at {selectedResolution}
+          </span>
+          {currentRes !== "1K" && (
+            <span className="text-[10px] text-muted-foreground">
+              Currently at {currentRes}
+            </span>
+          )}
         </div>
       )}
 
-      {/* 4K complete badge */}
-      {has4K && (
-        <Badge className="absolute top-1 right-1 bg-green-600 text-white text-[10px] px-1.5 py-0.5 gap-1">
-          <Check className="w-2.5 h-2.5" />
-          4K
-        </Badge>
-      )}
+      {/* Resolution badge */}
+      <Badge 
+        className={cn(
+          "absolute top-1 right-1 text-[10px] px-1.5 py-0.5 gap-1",
+          currentRes === "4K" && "bg-green-600 text-white",
+          currentRes === "2K" && "bg-blue-600 text-white",
+          currentRes === "1K" && "bg-muted text-muted-foreground"
+        )}
+      >
+        {currentRes === "4K" && <Check className="w-2.5 h-2.5" />}
+        {currentRes === "2K" && <Check className="w-2.5 h-2.5" />}
+        {currentRes}
+      </Badge>
 
       {/* Rank badge */}
       <Badge
@@ -786,9 +643,9 @@ function FavoriteTile({ favorite, onRender, isRendering, selectedResolution }: F
       <Button
         variant="ghost"
         size="icon"
-        className="absolute top-1 right-10 h-6 w-6 bg-background/80 hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-7 right-1 h-6 w-6 bg-background/80 hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity"
         onClick={handleDownload}
-        title={`Download ${has4K ? "4K" : "original"} image`}
+        title={`Download ${currentRes} image`}
       >
         <Download className="w-3.5 h-3.5" />
       </Button>
