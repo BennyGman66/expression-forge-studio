@@ -190,41 +190,37 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
         }
       }
 
-      // Check for existing 4K versions of these favorites (by matching batch_item + shot_type + pose_url)
-      const favoriteIds = (favData || []).map((f) => f.id);
+      // Check for existing 4K versions - only match outputs explicitly marked as 4K
       let fourKVersions: Record<string, { id: string; status: string; result_url: string | null; error_message: string | null }> = {};
       
-      if (favoriteIds.length > 0) {
-        // Find 4K outputs that reference these favorites (via matching batch_item + shot_type + pose_url, created after the original)
-        const { data: fourKData } = await supabase
-          .from("repose_outputs")
-          .select("id, batch_item_id, shot_type, pose_url, status, result_url, error_message, created_at")
-          .eq("batch_id", batchId)
-          .in("status", ["queued", "running", "uploading", "failed", "complete"])
-          .eq("is_favorite", false); // 4K versions are not favorites
+      // Query for 4K outputs specifically using requested_resolution column
+      const { data: fourKData } = await supabase
+        .from("repose_outputs")
+        .select("id, batch_item_id, shot_type, pose_url, status, result_url, error_message, created_at, requested_resolution")
+        .eq("batch_id", batchId)
+        .eq("requested_resolution", "4K") // Only actual 4K requests
+        .in("status", ["queued", "running", "uploading", "failed", "complete"]);
 
-        if (fourKData) {
-          // Match by batch_item_id + shot_type + pose_url - find latest 4K attempt for each favorite
-          favData?.forEach((fav) => {
-            const matching4K = fourKData
-              .filter((fourK) => 
-                fourK.batch_item_id === fav.batch_item_id &&
-                fourK.shot_type === fav.shot_type &&
-                fourK.pose_url === fav.pose_url &&
-                fourK.id !== fav.id // Not the same output
-              )
-              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+      if (fourKData && fourKData.length > 0) {
+        // Match by batch_item_id + shot_type + pose_url - find latest 4K attempt for each favorite
+        favData?.forEach((fav) => {
+          const matching4K = fourKData
+            .filter((fourK) => 
+              fourK.batch_item_id === fav.batch_item_id &&
+              fourK.shot_type === fav.shot_type &&
+              fourK.pose_url === fav.pose_url
+            )
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
 
-            if (matching4K) {
-              fourKVersions[fav.id] = {
-                id: matching4K.id,
-                status: matching4K.status,
-                result_url: matching4K.result_url,
-                error_message: matching4K.error_message,
-              };
-            }
-          });
-        }
+          if (matching4K) {
+            fourKVersions[fav.id] = {
+              id: matching4K.id,
+              status: matching4K.status,
+              result_url: matching4K.result_url,
+              error_message: matching4K.error_message,
+            };
+          }
+        });
       }
 
       // Combine favorites with look codes and 4K status
@@ -294,6 +290,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           pose_url: favorite.pose_url,
           status: "queued",
           is_favorite: false, // 4K version isn't a favorite yet
+          requested_resolution: "4K", // Mark as 4K request
         })
         .select()
         .single();
@@ -330,6 +327,62 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
         next.delete(favorite.id);
         return next;
       });
+    }
+  };
+
+  // Cancel all rendering 4K jobs
+  const handleCancelRendering = async () => {
+    const toCancel = filteredFavorites
+      .filter(f => f.fourK_output_id && ['queued', 'running', 'uploading'].includes(f.fourK_status || ''))
+      .map(f => f.fourK_output_id)
+      .filter((id): id is string => !!id);
+    
+    if (toCancel.length === 0) {
+      toast.info("No rendering jobs to cancel");
+      return;
+    }
+    
+    try {
+      const { error } = await supabase
+        .from('repose_outputs')
+        .delete()
+        .in('id', toCancel);
+      
+      if (error) throw error;
+      
+      toast.success(`Cancelled ${toCancel.length} 4K render(s)`);
+      fetchFavorites();
+    } catch (error) {
+      console.error("Error cancelling renders:", error);
+      toast.error("Failed to cancel renders");
+    }
+  };
+
+  // Clear all failed 4K jobs
+  const handleClearFailed = async () => {
+    const toClear = filteredFavorites
+      .filter(f => f.fourK_output_id && f.fourK_status === 'failed')
+      .map(f => f.fourK_output_id)
+      .filter((id): id is string => !!id);
+    
+    if (toClear.length === 0) {
+      toast.info("No failed jobs to clear");
+      return;
+    }
+    
+    try {
+      const { error } = await supabase
+        .from('repose_outputs')
+        .delete()
+        .in('id', toClear);
+      
+      if (error) throw error;
+      
+      toast.success(`Cleared ${toClear.length} failed 4K render(s)`);
+      fetchFavorites();
+    } catch (error) {
+      console.error("Error clearing failed:", error);
+      toast.error("Failed to clear failed renders");
     }
   };
 
@@ -483,16 +536,36 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
                 </Badge>
               )}
               {stats.rendering > 0 && (
-                <Badge variant="outline" className="gap-1.5 text-blue-600 border-blue-200">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  {stats.rendering} Rendering
-                </Badge>
+                <div className="flex items-center gap-1">
+                  <Badge variant="outline" className="gap-1.5 text-blue-600 border-blue-200">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    {stats.rendering} Rendering
+                  </Badge>
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="h-6 px-2 text-xs text-destructive hover:text-destructive"
+                    onClick={handleCancelRendering}
+                  >
+                    <X className="w-3 h-3 mr-1" /> Cancel
+                  </Button>
+                </div>
               )}
               {stats.failed > 0 && (
-                <Badge variant="destructive" className="gap-1.5">
-                  <X className="w-3 h-3" />
-                  {stats.failed} Failed
-                </Badge>
+                <div className="flex items-center gap-1">
+                  <Badge variant="destructive" className="gap-1.5">
+                    <X className="w-3 h-3" />
+                    {stats.failed} Failed
+                  </Badge>
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="h-6 px-2 text-xs"
+                    onClick={handleClearFailed}
+                  >
+                    Clear
+                  </Button>
+                </div>
               )}
             </div>
           )}
