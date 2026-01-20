@@ -1,11 +1,7 @@
-// Version: 2026-01-19-v5 - Add timeout to body reading to prevent worker termination
+// Version: 2026-01-20-v6 - Two-phase 4K: save base64 to temp storage, let queue processor complete upload
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-declare const EdgeRuntime: {
-  waitUntil(promise: Promise<unknown>): void;
-};
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -316,29 +312,115 @@ The final image should look like the original photo, naturally repositioned in 3
     
     const imageFormat = base64Match[1];
     const base64Data = base64Match[2];
-    console.log(`[generate-repose-single] Extracted ${imageFormat} base64: ${Math.round(base64Data.length / 1024)}KB`);
-    
-    // Mark as uploading now that we have valid image data
-    await supabase
-      .from('repose_outputs')
-      .update({ status: 'uploading' })
-      .eq('id', outputId);
+    const base64SizeKB = Math.round(base64Data.length / 1024);
+    console.log(`[generate-repose-single] Extracted ${imageFormat} base64: ${base64SizeKB}KB`);
     
     const totalElapsed = Math.round((Date.now() - startTime) / 1000);
-    console.log(`[generate-repose-single] AI + parse complete in ${totalElapsed}s, uploading in background`);
+    console.log(`[generate-repose-single] AI + parse complete in ${totalElapsed}s`);
     
-    // Background: just the storage upload (we already have the parsed data)
-    const backgroundPromise = uploadImageInBackground(supabase, outputId, output.batch_id, base64Data, imageFormat, selectedImageSize);
-    EdgeRuntime.waitUntil(backgroundPromise);
+    // TWO-PHASE APPROACH: For large 4K images, save base64 to temp storage first
+    // This ensures we don't lose the data if the function times out during upload
+    const is4K = selectedImageSize === '4K' || base64SizeKB > 5000; // >5MB suggests 4K
     
-    // Return 202 Accepted - upload happens in background
+    if (is4K) {
+      // Phase 1: Save base64 to temp storage (fast text upload ~1-2s)
+      const tempPath = `temp/${outputId}_${Date.now()}.${imageFormat}.b64`;
+      console.log(`[generate-repose-single] 4K detected (${base64SizeKB}KB), saving to temp: ${tempPath}`);
+      
+      const encoder = new TextEncoder();
+      const tempBytes = encoder.encode(base64Data);
+      
+      const { error: tempError } = await supabase.storage
+        .from('images')
+        .upload(tempPath, tempBytes, {
+          contentType: 'text/plain',
+          upsert: true,
+        });
+
+      if (tempError) {
+        console.error('[generate-repose-single] Temp save failed:', tempError);
+        await supabase
+          .from('repose_outputs')
+          .update({ status: 'failed', error_message: 'Temp storage save failed' })
+          .eq('id', outputId);
+        return new Response(
+          JSON.stringify({ error: 'Temp storage save failed' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      // Update status with temp_path so complete-repose-upload can finish the job
+      await supabase
+        .from('repose_outputs')
+        .update({ 
+          status: 'uploading',
+          temp_path: tempPath,
+          error_message: null,
+        })
+        .eq('id', outputId);
+
+      console.log(`[generate-repose-single] Saved ${base64SizeKB}KB to temp in ${Math.round((Date.now() - startTime) / 1000)}s, returning 202`);
+
+      // Return 202 - the queue processor will call complete-repose-upload
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          status: 'uploading',
+          temp_path: tempPath,
+          message: 'Image saved to temp storage, awaiting final upload',
+        }),
+        { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // For smaller images (<5MB), do direct upload (original approach)
+    console.log(`[generate-repose-single] Standard size (${base64SizeKB}KB), doing direct upload`);
+    
+    const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+    const fileName = `repose/${output.batch_id}/${outputId}_${Date.now()}.${imageFormat}`;
+    
+    const { error: uploadError } = await supabase.storage
+      .from('images')
+      .upload(fileName, imageBytes, {
+        contentType: `image/${imageFormat}`,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error('[generate-repose-single] Direct upload failed:', uploadError);
+      await supabase
+        .from('repose_outputs')
+        .update({ status: 'failed', error_message: 'Storage upload failed' })
+        .eq('id', outputId);
+      return new Response(
+        JSON.stringify({ error: 'Storage upload failed' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { data: publicUrl } = supabase.storage
+      .from('images')
+      .getPublicUrl(fileName);
+
+    await supabase
+      .from('repose_outputs')
+      .update({ 
+        status: 'complete',
+        result_url: publicUrl.publicUrl,
+        error_message: null,
+        temp_path: null,
+      })
+      .eq('id', outputId);
+
+    console.log(`[generate-repose-single] Direct upload complete: ${publicUrl.publicUrl}`);
+    
     return new Response(
       JSON.stringify({ 
         success: true, 
-        status: 'uploading',
-        message: 'Image generated, uploading to storage',
+        status: 'complete',
+        result_url: publicUrl.publicUrl,
       }),
-      { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error: unknown) {
@@ -393,63 +475,7 @@ The final image should look like the original photo, naturally repositioned in 3
   }
 });
 
-/**
- * Uploads the image to storage in the background.
- * The AI response has already been parsed - we just need to upload.
- */
-async function uploadImageInBackground(
-  supabase: any,
-  outputId: string,
-  batchId: string,
-  base64Data: string,
-  imageFormat: string,
-  imageSize: string | null
-): Promise<void> {
-  try {
-    console.log(`[generate-repose-single:bg] Starting upload for ${outputId}`);
-    
-    const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-    const fileName = `repose/${batchId}/${outputId}_${Date.now()}.${imageFormat}`;
-    
-    console.log(`[generate-repose-single:bg] Uploading ${Math.round(imageBytes.length / 1024)}KB to ${fileName}`);
-    
-    const { error: uploadError } = await supabase.storage
-      .from('images')
-      .upload(fileName, imageBytes, {
-        contentType: `image/${imageFormat}`,
-        upsert: true,
-      });
-
-    if (uploadError) {
-      console.error('[generate-repose-single:bg] Upload error:', uploadError);
-      await supabase
-        .from('repose_outputs')
-        .update({ status: 'failed', error_message: 'Storage upload failed' })
-        .eq('id', outputId);
-      return;
-    }
-
-    const { data: publicUrl } = supabase.storage
-      .from('images')
-      .getPublicUrl(fileName);
-
-    await supabase
-      .from('repose_outputs')
-      .update({ 
-        status: 'complete',
-        result_url: publicUrl.publicUrl,
-        error_message: null,
-        temp_path: null,
-      })
-      .eq('id', outputId);
-
-    console.log(`[generate-repose-single:bg] Upload complete: ${publicUrl.publicUrl}`);
-  } catch (error) {
-    console.error('[generate-repose-single:bg] Upload failed:', error);
-    await supabase
-      .from('repose_outputs')
-      .update({ status: 'failed', error_message: 'Upload exception' })
-      .eq('id', outputId);
-  }
-}
+// NOTE: Background upload function removed - we now use two-phase approach
+// Phase 1: generate-repose-single saves base64 to temp storage
+// Phase 2: complete-repose-upload handles final upload (called by queue processor)
 
