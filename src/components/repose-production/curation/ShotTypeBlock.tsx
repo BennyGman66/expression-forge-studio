@@ -380,15 +380,7 @@ export function ShotTypeBlock({
                 </div>
               ))}
               
-              {/* Failed outputs */}
-              {failedOutputs.map((output) => (
-                <div
-                  key={output.id}
-                  className="aspect-[3/4] rounded-lg border-2 border-dashed border-destructive/30 flex flex-col items-center justify-center gap-2 bg-destructive/5"
-                >
-                  <span className="text-xs text-destructive">Failed</span>
-                </div>
-              ))}
+              {/* Failed outputs hidden from grid - badge + retry button still visible */}
             </div>
           )}
           
