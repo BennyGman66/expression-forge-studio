@@ -277,13 +277,21 @@ The final image should look like the original photo, naturally repositioned in 3
       aiResult = JSON.parse(responseText);
     } catch (parseError) {
       console.error('[generate-repose-single] JSON parse error:', parseError);
+      console.error('[generate-repose-single] Response preview:', responseText.slice(0, 500));
+      
+      // Truncated/malformed JSON is a transient error - requeue for retry
+      // This happens when the AI returns an incomplete response
       await supabase
         .from('repose_outputs')
-        .update({ status: 'failed', error_message: 'Invalid JSON response from AI' })
+        .update({ 
+          status: 'queued', 
+          error_message: 'Truncated AI response - retrying',
+          started_running_at: null,
+        })
         .eq('id', outputId);
       return new Response(
-        JSON.stringify({ error: 'Invalid AI response' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Invalid AI response - requeued for retry' }),
+        { status: 202, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
     
