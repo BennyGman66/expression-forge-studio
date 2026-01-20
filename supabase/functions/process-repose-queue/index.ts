@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
   const startTime = Date.now();
 
   try {
-    const { batchId, pipelineJobId, model, resumeContext } = await req.json();
+    const { batchId, pipelineJobId, model, imageSize, resumeContext } = await req.json();
 
     if (!batchId) {
       return new Response(
@@ -122,9 +122,9 @@ Deno.serve(async (req) => {
       ? new Set(resumeContext.processedRunIds)
       : new Set();
 
-    // Start background processing
+    // Start background processing - default to 4K for production quality
     EdgeRuntime.waitUntil(
-      processQueueBackground(supabase, batchId, pipelineJobId, model || "google/gemini-3-pro-image-preview", processedRunIds, startTime)
+      processQueueBackground(supabase, batchId, pipelineJobId, model || "google/gemini-3-pro-image-preview", imageSize || "4K", processedRunIds, startTime)
     );
 
     return new Response(
@@ -150,6 +150,7 @@ async function processQueueBackground(
   batchId: string,
   pipelineJobId: string | null,
   model: string,
+  imageSize: string,
   processedRunIds: Set<string>,
   startTime: number
 ) {
@@ -187,14 +188,15 @@ async function processQueueBackground(
         "Content-Type": "application/json",
         "Authorization": `Bearer ${supabaseKey}`,
       },
-      body: JSON.stringify({
-        batchId,
-        pipelineJobId,
-        model,
-        resumeContext: {
-          processedRunIds: Array.from(processedRunIds),
-        },
-      }),
+        body: JSON.stringify({
+          batchId,
+          pipelineJobId,
+          model,
+          imageSize,
+          resumeContext: {
+            processedRunIds: Array.from(processedRunIds),
+          },
+        }),
     });
   }
 
@@ -244,7 +246,7 @@ async function processQueueBackground(
 
       // Process runs concurrently
       await Promise.all(
-        queuedRuns.map((run: any) => processRun(supabase, run, batchId, model, pipelineJobId, processedRunIds))
+        queuedRuns.map((run: any) => processRun(supabase, run, batchId, model, imageSize, pipelineJobId, processedRunIds))
       );
 
       // Update pipeline job progress - track OUTPUTS not runs
@@ -272,7 +274,7 @@ async function processQueueBackground(
 
     // After all runs processed, check for orphaned queued outputs and process them
     console.log(`[process-repose-queue] All runs processed, checking for orphaned outputs...`);
-    const orphanResult = await processOrphanedOutputs(supabase, batchId, model, pipelineJobId, startTime);
+    const orphanResult = await processOrphanedOutputs(supabase, batchId, model, imageSize, pipelineJobId, startTime);
     
     // If orphan processing timed out, spawn a continuation worker
     if (orphanResult.needsContinuation) {
@@ -348,6 +350,7 @@ async function processRun(
   run: any,
   batchId: string,
   model: string,
+  imageSize: string,
   pipelineJobId: string | null,
   processedRunIds: Set<string>
 ) {
@@ -614,7 +617,7 @@ async function processRun(
               }
               
               const { error } = await supabase.functions.invoke("generate-repose-single", {
-                body: { outputId: output.id, model },
+                body: { outputId: output.id, model, imageSize },
               });
               
               if (error) {
@@ -714,6 +717,7 @@ async function processOrphanedOutputs(
   supabase: any,
   batchId: string,
   model: string,
+  imageSize: string,
   pipelineJobId: string | null,
   startTime: number
 ): Promise<{ needsContinuation: boolean }> {
@@ -766,7 +770,7 @@ async function processOrphanedOutputs(
             }
             
             const { error } = await supabase.functions.invoke("generate-repose-single", {
-              body: { outputId: output.id, model },
+              body: { outputId: output.id, model, imageSize },
             });
             
             if (error) {
