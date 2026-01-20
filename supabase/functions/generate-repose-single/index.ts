@@ -338,17 +338,12 @@ The final image should look like the original photo, naturally repositioned in 3
     const publicUrl = publicUrlData?.publicUrl;
     console.log(`[generate-repose-single] Uploaded: ${publicUrl?.slice(0, 100)}...`);
 
-    // Update based on resolution - 2K/4K goes to fourK_result_url, 1K to result_url
+    // Update with result - all resolutions use result_url (requested_resolution already set at start)
     const updateData: Record<string, unknown> = {
       status: "complete",
       error_message: null,
+      result_url: publicUrl,
     };
-
-    if (imageSize === "2K" || imageSize === "4K") {
-      updateData.fourK_result_url = publicUrl;
-    } else {
-      updateData.result_url = publicUrl;
-    }
 
     await supabase
       .from("repose_outputs")
