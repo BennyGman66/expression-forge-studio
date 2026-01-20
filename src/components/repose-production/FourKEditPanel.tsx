@@ -530,8 +530,10 @@ interface FavoriteTileProps {
 function FavoriteTile({ favorite, onRerender, isRendering, selectedResolution }: FavoriteTileProps) {
   const [isImgLoading, setIsImgLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [showPose, setShowPose] = useState(false);
 
   const thumbnailUrl = favorite.result_url ? getImageUrl(favorite.result_url, "thumb") : null;
+  const posePreviewUrl = favorite.pose_url ? getImageUrl(favorite.pose_url, "preview") : null;
   const sku = favorite.look_code || extractSKU(favorite.source_url);
   const shotLabel = SHOT_TYPE_LABELS[favorite.shot_type] || favorite.shot_type;
   
@@ -614,6 +616,17 @@ function FavoriteTile({ favorite, onRerender, isRendering, selectedResolution }:
         />
       )}
 
+      {/* Grayscale pose overlay */}
+      {showPose && posePreviewUrl && (
+        <div className="absolute inset-0 z-20 bg-background/95 flex items-center justify-center p-2">
+          <img
+            src={posePreviewUrl}
+            alt="Grayscale pose reference"
+            className="max-w-full max-h-full object-contain rounded"
+          />
+        </div>
+      )}
+
       {/* Rendering overlay */}
       {isRendering && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80">
@@ -623,7 +636,7 @@ function FavoriteTile({ favorite, onRerender, isRendering, selectedResolution }:
       )}
 
       {/* Hover overlay */}
-      {!isRendering && (
+      {!isRendering && !showPose && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity">
           <Zap className="w-8 h-8 text-purple-500" />
           <span className="text-xs font-medium text-purple-500">
@@ -669,6 +682,20 @@ function FavoriteTile({ favorite, onRerender, isRendering, selectedResolution }:
       >
         <Download className="w-3.5 h-3.5" />
       </Button>
+
+      {/* Grayscale pose button */}
+      {favorite.pose_url && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute top-7 left-1 h-5 px-1.5 text-[9px] bg-background/80 hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity z-10"
+          onMouseEnter={() => setShowPose(true)}
+          onMouseLeave={() => setShowPose(false)}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Grayscale
+        </Button>
+      )}
 
       {/* Shot type badge */}
       <Badge
