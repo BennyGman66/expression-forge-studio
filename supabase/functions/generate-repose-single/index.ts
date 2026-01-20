@@ -221,8 +221,29 @@ The final image should look like the original photo, naturally repositioned in 3
       );
     }
 
-    // Parse response
-    const aiResult = await aiResponse.json();
+    // Parse response - with error handling for truncated JSON
+    let aiResult;
+    try {
+      aiResult = await aiResponse.json();
+      console.log("[generate-repose-single] JSON parsed successfully, checking for image...");
+    } catch (parseError) {
+      console.error("[generate-repose-single] JSON parse error - truncated response:", parseError);
+      
+      // Truncated response - requeue for retry
+      await supabase
+        .from("repose_outputs")
+        .update({ 
+          status: "queued", 
+          error_message: "Truncated AI response - will retry",
+          started_running_at: null 
+        })
+        .eq("id", outputId);
+        
+      return new Response(
+        JSON.stringify({ error: "Invalid AI response - requeued" }),
+        { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
     
     // Check for embedded error
     const embeddedError = aiResult.choices?.[0]?.error;
