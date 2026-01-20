@@ -683,17 +683,23 @@ function FavoriteTile({ favorite, onRerender, isRendering, selectedResolution }:
         <Download className="w-3.5 h-3.5" />
       </Button>
 
-      {/* Grayscale pose button */}
+      {/* Grayscale pose toggle */}
       {favorite.pose_url && (
         <Button
           variant="ghost"
           size="sm"
-          className="absolute top-7 left-1 h-5 px-1.5 text-[9px] bg-background/80 hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity z-10"
-          onMouseEnter={() => setShowPose(true)}
-          onMouseLeave={() => setShowPose(false)}
-          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            "absolute top-1 right-1 h-5 w-5 p-0 text-[10px] font-bold rounded transition-all z-10",
+            showPose 
+              ? "bg-purple-500 text-white hover:bg-purple-600" 
+              : "bg-background/80 hover:bg-background opacity-0 group-hover:opacity-100"
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowPose(!showPose);
+          }}
         >
-          Grayscale
+          G
         </Button>
       )}
 
