@@ -5,7 +5,7 @@ import { Download, Loader2, CheckCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { HubHeader } from "@/components/layout/HubHeader";
-import { OUTPUT_SHOT_LABELS, OutputShotType } from "@/types/shot-types";
+import { OUTPUT_SHOT_LABELS, OutputShotType, SLOT_TO_SHOT_TYPE, LegacySlot } from "@/types/shot-types";
 
 // Tommy Hilfiger library ID
 const TOMMY_HILFIGER_LIBRARY_ID = "41e2a47b-ac37-4dbf-beeb-e056d41028a2";
@@ -60,19 +60,28 @@ export default function DataExport() {
       // Build lookup map
       const clayImageMap = new Map(clayImages?.map(ci => [ci.id, ci.stored_url]));
 
-      const exportData = poses?.map((pose) => ({
-        id: pose.id,
-        clay_image_url: clayImageMap.get(pose.clay_image_id) || null,
-        shot_type: pose.shot_type,
-        shot_type_label: pose.shot_type 
-          ? OUTPUT_SHOT_LABELS[pose.shot_type as OutputShotType] 
-          : null,
-        slot: pose.slot,
-        gender: pose.gender,
-        product_type: pose.product_type,
-        notes: pose.notes,
-        curation_status: pose.curation_status,
-      }));
+      const exportData = poses?.map((pose) => {
+        // Derive shot_type from slot if not set directly
+        const derivedShotType = pose.shot_type 
+          ? (pose.shot_type as OutputShotType)
+          : pose.slot && SLOT_TO_SHOT_TYPE[pose.slot as LegacySlot]
+            ? SLOT_TO_SHOT_TYPE[pose.slot as LegacySlot]
+            : null;
+
+        return {
+          id: pose.id,
+          clay_image_url: clayImageMap.get(pose.clay_image_id) || null,
+          shot_type: derivedShotType,
+          shot_type_label: derivedShotType 
+            ? OUTPUT_SHOT_LABELS[derivedShotType] 
+            : null,
+          slot: pose.slot,
+          gender: pose.gender,
+          product_type: pose.product_type,
+          notes: pose.notes,
+          curation_status: pose.curation_status,
+        };
+      });
 
       downloadJson(exportData, "clay-poses-export.json");
       toast.success(`Exported ${exportData?.length || 0} clay poses`);
