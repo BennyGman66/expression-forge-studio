@@ -61,8 +61,7 @@ export default function DataExport() {
             )
           )
         `)
-        .eq("library_id", TOMMY_HILFIGER_LIBRARY_ID)
-        .eq("curation_status", "approved");
+        .eq("library_id", TOMMY_HILFIGER_LIBRARY_ID);
 
       if (error) throw error;
 
@@ -219,7 +218,7 @@ export default function DataExport() {
             <CardHeader>
               <CardTitle className="text-lg">Clay Poses (Tommy Hilfiger)</CardTitle>
               <CardDescription>
-                Approved clay poses with shot types, slots, and gender info.
+                All clay poses with shot types, slots, and gender info.
               </CardDescription>
             </CardHeader>
             <CardContent>
