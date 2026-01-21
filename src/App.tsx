@@ -21,6 +21,7 @@ import Unauthorized from "./pages/Unauthorized";
 import NotFound from "./pages/NotFound";
 import JobBoard from "./pages/JobBoard";
 import UserManagement from "./pages/UserManagement";
+import DataExport from "./pages/DataExport";
 
 import FreelancerJobList from "./pages/FreelancerJobList";
 import FreelancerJobDetail from "./pages/FreelancerJobDetail";
@@ -195,6 +196,14 @@ const App = () => (
               element={
                 <ProtectedRoute requiredRoles={['admin']}>
                   <UserManagement />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/data-export" 
+              element={
+                <ProtectedRoute requiredRoles={['admin', 'internal']}>
+                  <DataExport />
                 </ProtectedRoute>
               } 
             />
