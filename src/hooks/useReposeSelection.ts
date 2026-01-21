@@ -303,13 +303,30 @@ export function useReposeSelection(batchId: string | undefined) {
         // Map detected view to shot types
         applySourceUrlToShotTypes(sourceUrlsByView, detectedView, itemSourceUrl);
         
+        // Find front URL for this look from all batch items (handles any processing order)
+        let headerUrl = detectedView === 'front' ? itemSourceUrl : '';
+        if (!headerUrl) {
+          // Look ahead to find a front image for this look
+          const frontItem = (batchItems as ReposeBatchItemWithLook[]).find(bi => {
+            if ((bi.look_id || bi.id) !== lookId) return false;
+            const biView = bi.assigned_view?.toLowerCase() || '';
+            const biViewField = ((bi as any).view as string || '').toLowerCase();
+            const biUrl = (bi.source_url || '').toLowerCase();
+            return biView === 'front' || 
+                   biViewField.includes('_front') || biViewField.includes('front') ||
+                   biUrl.includes('/front-') || biUrl.includes('/front_');
+          });
+          if (frontItem) {
+            headerUrl = frontItem.source_url || '';
+          }
+        }
+        
         lookMap.set(lookId, {
           lookId,
           lookCode,
           batchItemIds: [item.id],
           batchItemId: item.id,
-          // Prefer front image for header thumbnail
-          sourceUrl: detectedView === 'front' ? itemSourceUrl : '',
+          sourceUrl: headerUrl,
           sourceUrlsByView,
           outputsByView: {} as Record<OutputShotType, ReposeOutput[]>,
           selectionStats: {
