@@ -268,24 +268,40 @@ export function useReposeSelection(batchId: string | undefined) {
       // Also check source_url as final fallback
       if (!detectedView && itemSourceUrl) {
         const urlLower = itemSourceUrl.toLowerCase();
-        if (urlLower.includes('/back-') || urlLower.includes('_back') || urlLower.includes('-back')) {
+        // Check for back patterns first (more specific)
+        if (urlLower.includes('/back-') || urlLower.includes('/back_') || urlLower.includes('_back') || urlLower.includes('-back.')) {
           detectedView = 'back';
-        } else if (urlLower.includes('/front-') || urlLower.includes('_front') || urlLower.includes('-front')) {
+        } else if (urlLower.includes('/detail-') || urlLower.includes('/detail_')) {
+          // Detail images should use the front source image for display
+          detectedView = 'front';
+        } else if (urlLower.includes('/front-') || urlLower.includes('/front_') || urlLower.includes('_front') || urlLower.includes('-front.')) {
           detectedView = 'front';
         }
       }
+      
+      // Helper to apply source URL to shot types based on detected view
+      const applySourceUrlToShotTypes = (
+        sourceUrlsByView: Partial<Record<OutputShotType, string>>,
+        view: string | undefined,
+        url: string
+      ) => {
+        if (!url || !view) return;
+        
+        if (view === 'front') {
+          // Front source is used for FRONT_FULL, FRONT_CROPPED, and DETAIL
+          sourceUrlsByView.FRONT_FULL = url;
+          sourceUrlsByView.FRONT_CROPPED = url;
+          sourceUrlsByView.DETAIL = url;
+        } else if (view === 'back') {
+          sourceUrlsByView.BACK_FULL = url;
+        }
+      };
       
       if (!lookMap.has(lookId)) {
         const sourceUrlsByView: Partial<Record<OutputShotType, string>> = {};
         
         // Map detected view to shot types
-        if (detectedView === 'front') {
-          sourceUrlsByView.FRONT_FULL = itemSourceUrl;
-          sourceUrlsByView.FRONT_CROPPED = itemSourceUrl;
-          sourceUrlsByView.DETAIL = itemSourceUrl;
-        } else if (detectedView === 'back') {
-          sourceUrlsByView.BACK_FULL = itemSourceUrl;
-        }
+        applySourceUrlToShotTypes(sourceUrlsByView, detectedView, itemSourceUrl);
         
         lookMap.set(lookId, {
           lookId,
@@ -307,30 +323,26 @@ export function useReposeSelection(batchId: string | undefined) {
         });
       } else {
         const existingLook = lookMap.get(lookId)!;
-        // Prefer front image for header thumbnail
-        if (detectedView === 'front' && (!existingLook.sourceUrl || existingLook.sourceUrl === '')) {
+        
+        // Update header thumbnail - prefer front, fallback to any
+        if (detectedView === 'front') {
+          existingLook.sourceUrl = itemSourceUrl;
+        } else if (!existingLook.sourceUrl && itemSourceUrl) {
           existingLook.sourceUrl = itemSourceUrl;
         }
-        // Fallback: if no front detected yet, use any available source
-        if (!existingLook.sourceUrl && itemSourceUrl) {
-          existingLook.sourceUrl = itemSourceUrl;
-        }
+        
         // Update exportedAt if this batch item has a more recent export
         if (item.exported_at && (!existingLook.exportedAt || item.exported_at > existingLook.exportedAt)) {
           existingLook.exportedAt = item.exported_at;
         }
+        
         // Add additional batch item ID to existing look
         if (!existingLook.batchItemIds.includes(item.id)) {
           existingLook.batchItemIds.push(item.id);
         }
+        
         // Add source URLs for this batch item's shot types
-        if (detectedView === 'front') {
-          existingLook.sourceUrlsByView.FRONT_FULL = itemSourceUrl;
-          existingLook.sourceUrlsByView.FRONT_CROPPED = itemSourceUrl;
-          existingLook.sourceUrlsByView.DETAIL = itemSourceUrl;
-        } else if (detectedView === 'back') {
-          existingLook.sourceUrlsByView.BACK_FULL = itemSourceUrl;
-        }
+        applySourceUrlToShotTypes(existingLook.sourceUrlsByView, detectedView, itemSourceUrl);
       }
     }
 
