@@ -140,38 +140,56 @@ export default function DataExport() {
   const exportFaceFoundations = async () => {
     setStatus((s) => ({ ...s, foundations: "loading" }));
     try {
-      // Fetch rendered face foundation outputs (the actual generated heads)
-      const { data: outputs, error } = await supabase
+      // First fetch all face foundation outputs
+      const { data: outputs, error: outputsError } = await supabase
         .from("face_pairing_outputs")
-        .select(`
-          id,
-          stored_url,
-          status,
-          created_at,
-          face_pairings!inner(
-            digital_talent_id,
-            digital_talents!face_pairings_digital_talent_id_fkey(
-              id,
-              name,
-              gender
-            )
-          )
-        `)
+        .select("id, stored_url, status, created_at, pairing_id")
         .eq("is_face_foundation", true)
         .eq("status", "completed")
         .not("stored_url", "is", null)
         .order("created_at", { ascending: false });
 
-      if (error) throw error;
+      if (outputsError) throw outputsError;
 
-      const exportData = outputs?.map((output) => ({
-        id: output.id,
-        stored_url: output.stored_url,
-        talent_id: output.face_pairings?.digital_talent_id || output.face_pairings?.digital_talents?.id || null,
-        talent_name: output.face_pairings?.digital_talents?.name || null,
-        talent_gender: output.face_pairings?.digital_talents?.gender || null,
-        created_at: output.created_at,
-      }));
+      // Get unique pairing IDs to fetch talent info
+      const pairingIds = [...new Set(outputs?.map(o => o.pairing_id).filter(Boolean))];
+      
+      // Fetch pairings with talent info
+      const { data: pairings, error: pairingsError } = await supabase
+        .from("face_pairings")
+        .select("id, digital_talent_id")
+        .in("id", pairingIds);
+
+      if (pairingsError) throw pairingsError;
+
+      // Get unique talent IDs
+      const talentIds = [...new Set(pairings?.map(p => p.digital_talent_id).filter(Boolean))];
+
+      // Fetch talent details
+      const { data: talents, error: talentsError } = await supabase
+        .from("digital_talents")
+        .select("id, name, gender")
+        .in("id", talentIds);
+
+      if (talentsError) throw talentsError;
+
+      // Build lookup maps
+      const pairingToTalent = new Map(pairings?.map(p => [p.id, p.digital_talent_id]));
+      const talentInfo = new Map(talents?.map(t => [t.id, { name: t.name, gender: t.gender }]));
+
+      const exportData = outputs?.map((output) => {
+        const talentId = pairingToTalent.get(output.pairing_id);
+        const talent = talentId ? talentInfo.get(talentId) : null;
+        
+        return {
+          id: output.id,
+          stored_url: output.stored_url,
+          talent_id: talentId || null,
+          talent_name: talent?.name || null,
+          talent_gender: talent?.gender || null,
+          created_at: output.created_at,
+        };
+      });
 
       downloadJson(exportData, "face-foundations-export.json");
       toast.success(`Exported ${exportData?.length || 0} face foundation images`);
