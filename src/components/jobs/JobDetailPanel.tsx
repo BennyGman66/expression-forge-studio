@@ -486,13 +486,29 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
                               alt={input.label || "Input"}
                               className="w-full h-full object-cover"
                             />
-                            <a
-                              href={input.artifact.file_url}
-                              download
+                            <button
+                              onClick={async (e) => {
+                                e.preventDefault();
+                                try {
+                                  const response = await fetch(input.artifact!.file_url);
+                                  const blob = await response.blob();
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = input.label || 'input-image.png';
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  document.body.removeChild(a);
+                                  URL.revokeObjectURL(url);
+                                } catch (err) {
+                                  console.error('Download failed:', err);
+                                  toast.error('Download failed');
+                                }
+                              }}
                               className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
                             >
                               <Download className="h-5 w-5 text-white" />
-                            </a>
+                            </button>
                           </>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-muted-foreground">
@@ -543,13 +559,29 @@ export function JobDetailPanel({ jobId, open, onClose }: JobDetailPanelProps) {
                               alt={output.label || "Output"}
                               className="w-full h-full object-cover"
                             />
-                            <a
-                              href={output.file_url}
-                              download
+                            <button
+                              onClick={async (e) => {
+                                e.preventDefault();
+                                try {
+                                  const response = await fetch(output.file_url);
+                                  const blob = await response.blob();
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = output.label || 'output-image.png';
+                                  document.body.appendChild(a);
+                                  a.click();
+                                  document.body.removeChild(a);
+                                  URL.revokeObjectURL(url);
+                                } catch (err) {
+                                  console.error('Download failed:', err);
+                                  toast.error('Download failed');
+                                }
+                              }}
                               className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
                             >
                               <Download className="h-5 w-5 text-white" />
-                            </a>
+                            </button>
                           </>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-muted-foreground">
