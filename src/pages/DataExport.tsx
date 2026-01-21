@@ -140,52 +140,41 @@ export default function DataExport() {
   const exportFaceFoundations = async () => {
     setStatus((s) => ({ ...s, foundations: "loading" }));
     try {
-      // Fetch face identities with representative images
-      const { data: identities, error } = await supabase
-        .from("face_identities")
+      // Fetch rendered face foundation outputs (the actual generated heads)
+      const { data: outputs, error } = await supabase
+        .from("face_pairing_outputs")
         .select(`
           id,
-          name,
-          gender,
-          image_count,
-          scrape_run_id,
-          digital_talent_id,
-          linked_twin_id,
-          representative_image_id,
-          face_scrape_images!face_identities_representative_image_id_fkey(
-            stored_url,
-            source_url,
-            face_crops(
-              cropped_stored_url
+          stored_url,
+          status,
+          created_at,
+          face_pairings!inner(
+            talent_id,
+            digital_talents(
+              id,
+              name,
+              gender
             )
-          ),
-          face_scrape_runs!face_identities_scrape_run_id_fkey(
-            brand_name
           )
         `)
-        .is("archived_at", null)
-        .order("name");
+        .eq("is_face_foundation", true)
+        .eq("status", "completed")
+        .not("stored_url", "is", null)
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
 
-      const exportData = identities?.map((identity) => {
-        const repImage = identity.face_scrape_images;
-        const croppedUrl = repImage?.face_crops?.[0]?.cropped_stored_url;
-
-        return {
-          id: identity.id,
-          name: identity.name,
-          gender: identity.gender,
-          image_count: identity.image_count,
-          representative_image_url: croppedUrl || repImage?.stored_url || null,
-          source_brand: identity.face_scrape_runs?.brand_name || null,
-          linked_talent_id: identity.digital_talent_id,
-          linked_twin_id: identity.linked_twin_id,
-        };
-      });
+      const exportData = outputs?.map((output) => ({
+        id: output.id,
+        stored_url: output.stored_url,
+        talent_id: output.face_pairings?.talent_id,
+        talent_name: output.face_pairings?.digital_talents?.name || null,
+        talent_gender: output.face_pairings?.digital_talents?.gender || null,
+        created_at: output.created_at,
+      }));
 
       downloadJson(exportData, "face-foundations-export.json");
-      toast.success(`Exported ${exportData?.length || 0} face foundations`);
+      toast.success(`Exported ${exportData?.length || 0} face foundation images`);
       setStatus((s) => ({ ...s, foundations: "done" }));
     } catch (error) {
       console.error("Error exporting face foundations:", error);
@@ -256,7 +245,7 @@ export default function DataExport() {
             <CardHeader>
               <CardTitle className="text-lg">Face Foundations</CardTitle>
               <CardDescription>
-                Face identities with representative images and source brand info.
+                Rendered face foundation images for all digital talents.
               </CardDescription>
             </CardHeader>
             <CardContent>
