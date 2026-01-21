@@ -158,6 +158,8 @@ export function useReposeOutputs(batchId: string | undefined) {
       return allOutputs;
     },
     enabled: !!batchId,
+    staleTime: 5000, // Consider data stale after 5 seconds to refresh more often
+    refetchInterval: 15000, // Auto-refetch every 15 seconds when tab is focused
   });
 }
 
