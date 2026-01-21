@@ -149,8 +149,8 @@ export default function DataExport() {
           status,
           created_at,
           face_pairings!inner(
-            talent_id,
-            digital_talents(
+            digital_talent_id,
+            digital_talents!face_pairings_digital_talent_id_fkey(
               id,
               name,
               gender
@@ -167,7 +167,7 @@ export default function DataExport() {
       const exportData = outputs?.map((output) => ({
         id: output.id,
         stored_url: output.stored_url,
-        talent_id: output.face_pairings?.talent_id,
+        talent_id: output.face_pairings?.digital_talent_id || output.face_pairings?.digital_talents?.id || null,
         talent_name: output.face_pairings?.digital_talents?.name || null,
         talent_gender: output.face_pairings?.digital_talents?.gender || null,
         created_at: output.created_at,
