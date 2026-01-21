@@ -5,6 +5,7 @@ import { Download, Loader2, CheckCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { HubHeader } from "@/components/layout/HubHeader";
+import { OUTPUT_SHOT_LABELS, OutputShotType } from "@/types/shot-types";
 
 // Tommy Hilfiger library ID
 const TOMMY_HILFIGER_LIBRARY_ID = "41e2a47b-ac37-4dbf-beeb-e056d41028a2";
@@ -63,6 +64,9 @@ export default function DataExport() {
         id: pose.id,
         clay_image_url: clayImageMap.get(pose.clay_image_id) || null,
         shot_type: pose.shot_type,
+        shot_type_label: pose.shot_type 
+          ? OUTPUT_SHOT_LABELS[pose.shot_type as OutputShotType] 
+          : null,
         slot: pose.slot,
         gender: pose.gender,
         product_type: pose.product_type,
