@@ -209,11 +209,32 @@ The final image should look like the original photo, naturally repositioned in 3
       const errorText = await aiResponse.text();
       console.error("[generate-repose-single] Gemini error:", aiResponse.status, errorText.slice(0, 500));
       
-      // Rate limit - requeue for retry
-      if (aiResponse.status === 429) {
+      // Rate limit (429) or Model Overloaded (503) - requeue with exponential backoff
+      if (aiResponse.status === 429 || aiResponse.status === 503) {
+        // Get current retry count
+        const { data: currentOutput } = await supabase
+          .from("repose_outputs")
+          .select("retry_count")
+          .eq("id", outputId)
+          .single();
+        
+        const retryCount = (currentOutput?.retry_count || 0) + 1;
+        // Exponential backoff: 60s, 120s, 240s, 480s, 960s, max 3600s (1 hour)
+        const backoffSeconds = Math.min(60 * Math.pow(2, retryCount - 1), 3600);
+        const retryAfter = new Date(Date.now() + backoffSeconds * 1000).toISOString();
+        
+        const errorType = aiResponse.status === 429 ? "Rate limited" : "Model overloaded";
+        console.log(`[generate-repose-single] ${errorType} - retry ${retryCount} scheduled in ${backoffSeconds}s`);
+        
         await supabase
           .from("repose_outputs")
-          .update({ status: "queued", error_message: "Rate limited - will retry", started_running_at: null })
+          .update({ 
+            status: "queued", 
+            error_message: `${errorType} - retry ${retryCount} at ${retryAfter}`,
+            started_running_at: null,
+            retry_count: retryCount,
+            retry_after: retryAfter,
+          })
           .eq("id", outputId);
         activeOutputId = null;
         return;

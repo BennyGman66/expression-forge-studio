@@ -723,12 +723,16 @@ async function processOrphanedOutputs(
 ): Promise<{ needsContinuation: boolean }> {
   console.log(`[process-repose-queue] Checking for orphaned outputs...`);
 
-  // Get all queued outputs for this batch
+  const now = new Date().toISOString();
+
+  // Get all queued outputs for this batch that are ready to process
+  // (retry_after is null OR retry_after has passed)
   const { data: queuedOutputs, error } = await supabase
     .from("repose_outputs")
-    .select("id")
+    .select("id, retry_after")
     .eq("batch_id", batchId)
     .eq("status", "queued")
+    .or(`retry_after.is.null,retry_after.lt.${now}`)
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -736,8 +740,36 @@ async function processOrphanedOutputs(
     return { needsContinuation: false };
   }
 
+  // Check if there are items waiting with future retry_after
+  const { data: backoffItems } = await supabase
+    .from("repose_outputs")
+    .select("id, retry_after")
+    .eq("batch_id", batchId)
+    .eq("status", "queued")
+    .gt("retry_after", now)
+    .order("retry_after", { ascending: true })
+    .limit(1);
+
   if (!queuedOutputs?.length) {
-    console.log(`[process-repose-queue] No orphaned outputs to process`);
+    if (backoffItems?.length) {
+      // There are items waiting for backoff - schedule continuation if soon
+      const waitMs = new Date(backoffItems[0].retry_after).getTime() - Date.now();
+      console.log(`[process-repose-queue] No ready outputs, ${backoffItems.length}+ waiting. Next retry in ${Math.round(waitMs / 1000)}s`);
+      
+      // If the next retry is within our remaining time, wait for it
+      const remainingTime = MAX_PROCESSING_TIME_MS - (Date.now() - startTime);
+      if (waitMs > 0 && waitMs < remainingTime - 5000) {
+        console.log(`[process-repose-queue] Waiting ${Math.round(waitMs / 1000)}s for next retry...`);
+        await new Promise(r => setTimeout(r, waitMs + 1000));
+        // Recursive call to process the now-ready items
+        return processOrphanedOutputs(supabase, batchId, model, imageSize, pipelineJobId, startTime);
+      } else if (waitMs < 60000) {
+        // If within 1 minute, mark as needs continuation
+        console.log(`[process-repose-queue] Next retry soon but timeout approaching, needs continuation`);
+        return { needsContinuation: true };
+      }
+    }
+    console.log(`[process-repose-queue] No orphaned outputs ready to process`);
     return { needsContinuation: false };
   }
 
