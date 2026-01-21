@@ -37,43 +37,37 @@ export default function DataExport() {
   const exportClayPoses = async () => {
     setStatus((s) => ({ ...s, clayPoses: "loading" }));
     try {
-      // Fetch library poses with clay image URLs
-      const { data: poses, error } = await supabase
+      // Fetch library poses
+      const { data: poses, error: posesError } = await supabase
         .from("library_poses")
-        .select(`
-          id,
-          slot,
-          gender,
-          product_type,
-          shot_type,
-          notes,
-          curation_status,
-          clay_images!inner(
-            id,
-            stored_url,
-            product_images!inner(
-              id,
-              source_url,
-              products!inner(
-                sku,
-                gender
-              )
-            )
-          )
-        `)
+        .select("id, slot, gender, product_type, shot_type, notes, curation_status, clay_image_id")
         .eq("library_id", TOMMY_HILFIGER_LIBRARY_ID);
 
-      if (error) throw error;
+      if (posesError) throw posesError;
+
+      // Get clay image IDs
+      const clayImageIds = [...new Set(poses?.map(p => p.clay_image_id).filter(Boolean))];
+
+      // Fetch clay images
+      const { data: clayImages, error: clayError } = await supabase
+        .from("clay_images")
+        .select("id, stored_url")
+        .in("id", clayImageIds);
+
+      if (clayError) throw clayError;
+
+      // Build lookup map
+      const clayImageMap = new Map(clayImages?.map(ci => [ci.id, ci.stored_url]));
 
       const exportData = poses?.map((pose) => ({
         id: pose.id,
-        clay_image_url: pose.clay_images?.stored_url,
+        clay_image_url: clayImageMap.get(pose.clay_image_id) || null,
         shot_type: pose.shot_type,
         slot: pose.slot,
         gender: pose.gender,
         product_type: pose.product_type,
         notes: pose.notes,
-        sku: pose.clay_images?.product_images?.products?.sku,
+        curation_status: pose.curation_status,
       }));
 
       downloadJson(exportData, "clay-poses-export.json");
