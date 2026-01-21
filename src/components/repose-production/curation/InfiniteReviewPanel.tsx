@@ -3,9 +3,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, Check, Play, Trash2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { AlertCircle, Check, Loader2, Play, RefreshCw, RotateCcw, Trash2, Zap } from "lucide-react";
 import { useReposeBatch } from "@/hooks/useReposeBatches";
-import { useReposeSelection, LookWithOutputs } from "@/hooks/useReposeSelection";
+import { useReposeSelection } from "@/hooks/useReposeSelection";
+import { useAutoResumeQueue } from "@/hooks/useAutoResumeQueue";
 import { LeapfrogLoader } from "@/components/ui/LeapfrogLoader";
 import { CurationLightbox } from "./CurationLightbox";
 import { InfiniteLookSection } from "./InfiniteLookSection";
@@ -16,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { formatDistanceToNow } from "date-fns";
 
 interface InfiniteReviewPanelProps {
   batchId: string | undefined;
@@ -47,6 +52,14 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
     refetchAll,
   } = useReposeSelection(batchId);
 
+  // Auto-resume queue hook
+  const autoResume = useAutoResumeQueue({
+    batchId,
+    enabled: true,
+    pollIntervalMs: 30000,
+    onResume: refetchAll,
+  });
+
   const queryClient = useQueryClient();
   const scrollRef = useRef<HTMLDivElement>(null);
   const lookRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -54,11 +67,12 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [currentLightboxLookId, setCurrentLightboxLookId] = useState<string | null>(null);
 
-  // Calculate shot types complete and pending counts
-  const { shotTypesStats, pendingCount } = useMemo(() => {
+  // Calculate shot types complete, pending, and failed counts
+  const { shotTypesStats, pendingCount, failedCount } = useMemo(() => {
     let totalShotTypes = 0;
     let completeShotTypes = 0;
     let pending = 0;
+    let failed = 0;
     
     for (const look of groupedByLook) {
       for (const shotType of ALL_OUTPUT_SHOT_TYPES) {
@@ -68,40 +82,18 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
           if (stats.isComplete) completeShotTypes++;
         }
       }
-      // Count pending outputs across all looks
+      // Count pending and failed outputs across all looks
       const allLookOutputs = Object.values(look.outputsByView).flat();
       pending += allLookOutputs.filter(o => o.status === 'queued' || o.status === 'running').length;
+      failed += allLookOutputs.filter(o => o.status === 'failed').length;
     }
     
     return { 
       shotTypesStats: { total: totalShotTypes, complete: completeShotTypes },
-      pendingCount: pending
+      pendingCount: pending,
+      failedCount: failed,
     };
   }, [groupedByLook]);
-
-  // Resume all pending outputs
-  const handleResumeAll = useCallback(async () => {
-    if (pendingCount === 0) {
-      toast.info("No pending outputs to resume");
-      return;
-    }
-    
-    try {
-      toast.info(`Resuming ${pendingCount} pending outputs...`);
-      
-      const { error } = await supabase.functions.invoke("process-repose-queue", {
-        body: { batchId, imageSize: "4K" },
-      });
-      
-      if (error) throw error;
-      toast.success("Queue processing resumed");
-    } catch (error) {
-      console.error("Resume all error:", error);
-      toast.error("Failed to resume processing");
-    }
-  }, [batchId, pendingCount]);
-
-  // Clear all stale pending outputs
   const handleClearAllPending = useCallback(async () => {
     if (pendingCount === 0) {
       toast.info("No pending outputs to clear");
@@ -263,28 +255,100 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              {/* Auto-resume toggle */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="auto-resume"
+                        checked={autoResume.isEnabled}
+                        onCheckedChange={autoResume.setEnabled}
+                        disabled={autoResume.isAutoResuming}
+                      />
+                      <Label htmlFor="auto-resume" className="text-sm cursor-pointer flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5" />
+                        Auto
+                      </Label>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    <p>Auto-resume stalled queue every 30s</p>
+                    {autoResume.nextRetryTime && (
+                      <p className="text-xs text-muted-foreground">
+                        Next retry: {formatDistanceToNow(autoResume.nextRetryTime, { addSuffix: true })}
+                      </p>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Auto-resuming indicator */}
+              {autoResume.isAutoResuming && (
+                <Badge variant="outline" className="gap-1.5 animate-pulse">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Resuming...
+                </Badge>
+              )}
+
+              {/* Pending with backoff indicator */}
+              {autoResume.pendingWithBackoff > 0 && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge variant="secondary" className="gap-1.5">
+                        <RefreshCw className="w-3 h-3" />
+                        {autoResume.pendingWithBackoff} waiting
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{autoResume.pendingWithBackoff} items waiting for rate limit cooldown</p>
+                      {autoResume.nextRetryTime && (
+                        <p className="text-xs">Next: {formatDistanceToNow(autoResume.nextRetryTime, { addSuffix: true })}</p>
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+
+              {/* Resume buttons */}
+              {(pendingCount > 0 || autoResume.readyCount > 0) && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={autoResume.resumeNow}
+                  disabled={autoResume.isAutoResuming}
+                  className="gap-1.5 text-green-600 border-green-300 hover:bg-green-50"
+                >
+                  <Play className="w-3.5 h-3.5" />
+                  Resume {autoResume.readyCount || pendingCount}
+                </Button>
+              )}
+
+              {failedCount > 0 && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={autoResume.resumeAllFailed}
+                  disabled={autoResume.isAutoResuming}
+                  className="gap-1.5 text-amber-600 border-amber-300 hover:bg-amber-50"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Retry {failedCount} Failed
+                </Button>
+              )}
+
               {pendingCount > 0 && (
-                <>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleResumeAll}
-                    className="gap-1.5 text-green-600 border-green-300 hover:bg-green-50"
-                  >
-                    <Play className="w-3.5 h-3.5" />
-                    Resume {pendingCount} Pending
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleClearAllPending}
-                    className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Clear Stale
-                  </Button>
-                </>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handleClearAllPending}
+                  className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear Stale
+                </Button>
               )}
 
               {overallStats.isAllComplete && (

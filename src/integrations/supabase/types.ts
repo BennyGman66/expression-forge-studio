@@ -2983,6 +2983,8 @@ export type Database = {
           pose_url: string | null
           requested_resolution: string | null
           result_url: string | null
+          retry_after: string | null
+          retry_count: number | null
           run_id: string | null
           selected_at: string | null
           shot_type: string | null
@@ -3004,6 +3006,8 @@ export type Database = {
           pose_url?: string | null
           requested_resolution?: string | null
           result_url?: string | null
+          retry_after?: string | null
+          retry_count?: number | null
           run_id?: string | null
           selected_at?: string | null
           shot_type?: string | null
@@ -3025,6 +3029,8 @@ export type Database = {
           pose_url?: string | null
           requested_resolution?: string | null
           result_url?: string | null
+          retry_after?: string | null
+          retry_count?: number | null
           run_id?: string | null
           selected_at?: string | null
           shot_type?: string | null
