@@ -56,7 +56,7 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
   const autoResume = useAutoResumeQueue({
     batchId,
     enabled: true,
-    pollIntervalMs: 30000,
+    pollIntervalMs: 15000, // Faster polling for fresher data
     onResume: refetchAll,
   });
 
@@ -311,6 +311,17 @@ export function InfiniteReviewPanel({ batchId, onExportReady }: InfiniteReviewPa
                   </Tooltip>
                 </TooltipProvider>
               )}
+
+              {/* Manual Refresh Button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={refetchAll}
+                className="gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Refresh
+              </Button>
 
               {/* Resume buttons */}
               {(pendingCount > 0 || autoResume.readyCount > 0) && (
