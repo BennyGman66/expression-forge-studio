@@ -9,7 +9,8 @@ import {
   Users, 
   ExternalLink,
   Eye,
-  Workflow
+  Workflow,
+  Download
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -118,6 +119,18 @@ export default function Hub() {
       <HubHeader />
 
       <main className="px-6 py-8">
+        {/* Utility Actions */}
+        <div className="flex justify-end mb-4">
+          <Button
+            variant="outline"
+            onClick={() => navigate("/data-export")}
+            className="gap-2"
+          >
+            <Download className="h-4 w-4" />
+            Data Export
+          </Button>
+        </div>
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-6">
             <TabsTrigger value="internal">Leapfrog Internal</TabsTrigger>
