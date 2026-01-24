@@ -46,8 +46,6 @@ interface FavoriteOutput {
   source_url?: string | null;
   look_code?: string;
   look_id?: string | null;
-  ai_apply_front_url?: string | null;
-  ai_apply_back_url?: string | null;
 }
 
 // Extract SKU from source URL filename
@@ -130,7 +128,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
       
       let batchItemInfo: Record<string, { source_url: string | null; look_id: string | null }> = {};
       let lookCodes: Record<string, string> = {};
-      let lookAiApplies: Record<string, { front_url: string | null; back_url: string | null }> = {};
+      
       
       if (batchItemIds.length > 0) {
         const { data: itemsData } = await supabase
@@ -163,58 +161,11 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
               });
             }
 
-            // Fetch AI Apply outputs (head-swapped versions) - these are the selected outputs
-            const { data: aiApplyOutputs } = await supabase
-              .from("ai_apply_outputs")
-              .select("look_id, view, stored_url")
-              .in("look_id", lookIds)
-              .eq("is_selected", true)
-              .not("stored_url", "is", null);
-            
-            if (aiApplyOutputs) {
-              // Group by look_id and find front/back
-              aiApplyOutputs.forEach((output) => {
-                if (!output.look_id) return;
-                if (!lookAiApplies[output.look_id]) {
-                  lookAiApplies[output.look_id] = { front_url: null, back_url: null };
-                }
-                const viewLower = (output.view || "").toLowerCase();
-                if (viewLower.includes("front")) {
-                  lookAiApplies[output.look_id].front_url = output.stored_url;
-                } else if (viewLower.includes("back")) {
-                  lookAiApplies[output.look_id].back_url = output.stored_url;
-                }
-              });
-            }
-
-            // Fallback: For looks without AI Apply, fetch from look_source_images
-            const lookIdsWithoutAiApply = lookIds.filter(id => !lookAiApplies[id]?.front_url && !lookAiApplies[id]?.back_url);
-            if (lookIdsWithoutAiApply.length > 0) {
-              const { data: sourceImages } = await (supabase as any)
-                .from("look_source_images")
-                .select("look_id, view, original_source_url, source_url")
-                .in("look_id", lookIdsWithoutAiApply);
-              
-              if (sourceImages) {
-                sourceImages.forEach((img: { look_id: string; view: string; original_source_url: string | null; source_url: string | null }) => {
-                  if (!lookAiApplies[img.look_id]) {
-                    lookAiApplies[img.look_id] = { front_url: null, back_url: null };
-                  }
-                  const viewLower = (img.view || "").toLowerCase();
-                  const url = img.original_source_url || img.source_url;
-                  if (viewLower.includes("front") && !lookAiApplies[img.look_id].front_url) {
-                    lookAiApplies[img.look_id].front_url = url;
-                  } else if (viewLower.includes("back") && !lookAiApplies[img.look_id].back_url) {
-                    lookAiApplies[img.look_id].back_url = url;
-                  }
-                });
-              }
-            }
           }
         }
       }
 
-      // Combine favorites with look codes and original URLs
+      // Combine favorites with look codes
       const enriched: FavoriteOutput[] = (favData || []).map((f) => {
         const lookId = batchItemInfo[f.batch_item_id]?.look_id;
         return {
@@ -222,8 +173,6 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           source_url: batchItemInfo[f.batch_item_id]?.source_url,
           look_code: lookCodes[f.batch_item_id],
           look_id: lookId,
-          ai_apply_front_url: lookId ? lookAiApplies[lookId]?.front_url : null,
-          ai_apply_back_url: lookId ? lookAiApplies[lookId]?.back_url : null,
         };
       });
 
@@ -1045,63 +994,34 @@ function FavoriteTile({
     }
   };
 
-  // Download AI Apply front image (head-swapped version)
-  const handleDownloadAiApplyFront = async (e: React.MouseEvent) => {
+  // Download source image (the actual input used for this repose generation)
+  const handleDownloadSource = async (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!favorite.ai_apply_front_url) {
-      toast.error("No AI Apply front image available");
+    if (!favorite.source_url) {
+      toast.error("No source image available");
       return;
     }
     
     try {
-      const response = await fetch(favorite.ai_apply_front_url);
+      const response = await fetch(favorite.source_url);
       const blob = await response.blob();
       
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${sku}_AIApply_Front.png`;
+      const shotLabelClean = shotLabel.replace(/\s+/g, "_");
+      link.download = `${sku}_${shotLabelClean}_Source.png`;
       
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
       
-      toast.success("AI Apply front download started");
+      toast.success("Source image download started");
     } catch (error) {
-      console.error("AI Apply front download failed:", error);
-      toast.error("AI Apply front download failed");
-    }
-  };
-
-  // Download AI Apply back image (head-swapped version)
-  const handleDownloadAiApplyBack = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    
-    if (!favorite.ai_apply_back_url) {
-      toast.error("No AI Apply back image available");
-      return;
-    }
-    
-    try {
-      const response = await fetch(favorite.ai_apply_back_url);
-      const blob = await response.blob();
-      
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${sku}_AIApply_Back.png`;
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-      
-      toast.success("AI Apply back download started");
-    } catch (error) {
-      console.error("AI Apply back download failed:", error);
-      toast.error("AI Apply back download failed");
+      console.error("Source image download failed:", error);
+      toast.error("Source image download failed");
     }
   };
 
@@ -1271,31 +1191,18 @@ function FavoriteTile({
         </Button>
       )}
 
-      {/* AI Apply front/back download buttons - left side */}
-      <div className="absolute left-1 bottom-12 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all z-30">
-        {favorite.ai_apply_front_url && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 w-5 p-0 rounded bg-background/80 hover:bg-background text-[9px] font-bold"
-            onClick={handleDownloadAiApplyFront}
-            title="Download AI Apply front (head-swapped)"
-          >
-            F
-          </Button>
-        )}
-        {favorite.ai_apply_back_url && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 w-5 p-0 rounded bg-background/80 hover:bg-background text-[9px] font-bold"
-            onClick={handleDownloadAiApplyBack}
-            title="Download AI Apply back (head-swapped)"
-          >
-            B
-          </Button>
-        )}
-      </div>
+      {/* Source image download button - the actual input used for this generation */}
+      {favorite.source_url && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute left-1 bottom-12 h-5 w-5 p-0 rounded bg-background/80 hover:bg-background text-[9px] font-bold opacity-0 group-hover:opacity-100 transition-all z-30"
+          onClick={handleDownloadSource}
+          title="Download source image (input used for generation)"
+        >
+          S
+        </Button>
+      )}
 
       {/* Shot type badge */}
       <Badge
