@@ -166,17 +166,17 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
             // Fetch original source images (front and back)
             const { data: sourceImages } = await (supabase as any)
               .from("look_source_images")
-              .select("look_id, view, original_source_url, stored_url")
+              .select("look_id, view, original_source_url, source_url")
               .in("look_id", lookIds);
             
             if (sourceImages) {
               // Group by look_id and find front/back
-              sourceImages.forEach((img: { look_id: string; view: string; original_source_url: string | null; stored_url: string | null }) => {
+              sourceImages.forEach((img: { look_id: string; view: string; original_source_url: string | null; source_url: string | null }) => {
                 if (!lookOriginals[img.look_id]) {
                   lookOriginals[img.look_id] = { front_url: null, back_url: null };
                 }
                 const viewLower = (img.view || "").toLowerCase();
-                const url = img.original_source_url || img.stored_url;
+                const url = img.original_source_url || img.source_url;
                 if (viewLower.includes("front")) {
                   lookOriginals[img.look_id].front_url = url;
                 } else if (viewLower.includes("back")) {
