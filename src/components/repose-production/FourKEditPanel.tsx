@@ -186,6 +186,30 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
                 }
               });
             }
+
+            // Fallback: For looks without AI Apply, fetch from look_source_images
+            const lookIdsWithoutAiApply = lookIds.filter(id => !lookAiApplies[id]?.front_url && !lookAiApplies[id]?.back_url);
+            if (lookIdsWithoutAiApply.length > 0) {
+              const { data: sourceImages } = await (supabase as any)
+                .from("look_source_images")
+                .select("look_id, view, original_source_url, source_url")
+                .in("look_id", lookIdsWithoutAiApply);
+              
+              if (sourceImages) {
+                sourceImages.forEach((img: { look_id: string; view: string; original_source_url: string | null; source_url: string | null }) => {
+                  if (!lookAiApplies[img.look_id]) {
+                    lookAiApplies[img.look_id] = { front_url: null, back_url: null };
+                  }
+                  const viewLower = (img.view || "").toLowerCase();
+                  const url = img.original_source_url || img.source_url;
+                  if (viewLower.includes("front") && !lookAiApplies[img.look_id].front_url) {
+                    lookAiApplies[img.look_id].front_url = url;
+                  } else if (viewLower.includes("back") && !lookAiApplies[img.look_id].back_url) {
+                    lookAiApplies[img.look_id].back_url = url;
+                  }
+                });
+              }
+            }
           }
         }
       }
