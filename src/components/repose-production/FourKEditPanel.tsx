@@ -925,6 +925,38 @@ function FavoriteTile({
     }
   };
 
+  // Download grayscale pose reference
+  const handleDownloadPose = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (!favorite.pose_url) {
+      toast.error("No grayscale pose available");
+      return;
+    }
+    
+    try {
+      const response = await fetch(favorite.pose_url);
+      const blob = await response.blob();
+      
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      
+      const shotLabelClean = shotLabel.replace(/\s+/g, "_");
+      link.download = `${sku}_${shotLabelClean}_GrayscalePose.png`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success("Grayscale pose download started");
+    } catch (error) {
+      console.error("Grayscale pose download failed:", error);
+      toast.error("Grayscale pose download failed");
+    }
+  };
+
   // Download original body reference image
   const handleDownloadBodyRef = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1105,6 +1137,19 @@ function FavoriteTile({
           }}
         >
           G
+        </Button>
+      )}
+
+      {/* Grayscale pose download button */}
+      {favorite.pose_url && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute bottom-1 right-7 h-5 w-5 p-0 rounded bg-background/80 hover:bg-background opacity-0 group-hover:opacity-100 transition-all z-30"
+          onClick={handleDownloadPose}
+          title="Download grayscale pose reference"
+        >
+          <Download className="w-3 h-3" />
         </Button>
       )}
 
