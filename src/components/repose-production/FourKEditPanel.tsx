@@ -46,8 +46,8 @@ interface FavoriteOutput {
   source_url?: string | null;
   look_code?: string;
   look_id?: string | null;
-  original_front_url?: string | null;
-  original_back_url?: string | null;
+  ai_apply_front_url?: string | null;
+  ai_apply_back_url?: string | null;
 }
 
 // Extract SKU from source URL filename
@@ -130,7 +130,7 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
       
       let batchItemInfo: Record<string, { source_url: string | null; look_id: string | null }> = {};
       let lookCodes: Record<string, string> = {};
-      let lookOriginals: Record<string, { front_url: string | null; back_url: string | null }> = {};
+      let lookAiApplies: Record<string, { front_url: string | null; back_url: string | null }> = {};
       
       if (batchItemIds.length > 0) {
         const { data: itemsData } = await supabase
@@ -163,24 +163,26 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
               });
             }
 
-            // Fetch original source images (front and back)
-            const { data: sourceImages } = await (supabase as any)
-              .from("look_source_images")
-              .select("look_id, view, original_source_url, source_url")
-              .in("look_id", lookIds);
+            // Fetch AI Apply outputs (head-swapped versions) - these are the selected outputs
+            const { data: aiApplyOutputs } = await supabase
+              .from("ai_apply_outputs")
+              .select("look_id, view, stored_url")
+              .in("look_id", lookIds)
+              .eq("is_selected", true)
+              .not("stored_url", "is", null);
             
-            if (sourceImages) {
+            if (aiApplyOutputs) {
               // Group by look_id and find front/back
-              sourceImages.forEach((img: { look_id: string; view: string; original_source_url: string | null; source_url: string | null }) => {
-                if (!lookOriginals[img.look_id]) {
-                  lookOriginals[img.look_id] = { front_url: null, back_url: null };
+              aiApplyOutputs.forEach((output) => {
+                if (!output.look_id) return;
+                if (!lookAiApplies[output.look_id]) {
+                  lookAiApplies[output.look_id] = { front_url: null, back_url: null };
                 }
-                const viewLower = (img.view || "").toLowerCase();
-                const url = img.original_source_url || img.source_url;
+                const viewLower = (output.view || "").toLowerCase();
                 if (viewLower.includes("front")) {
-                  lookOriginals[img.look_id].front_url = url;
+                  lookAiApplies[output.look_id].front_url = output.stored_url;
                 } else if (viewLower.includes("back")) {
-                  lookOriginals[img.look_id].back_url = url;
+                  lookAiApplies[output.look_id].back_url = output.stored_url;
                 }
               });
             }
@@ -196,8 +198,8 @@ export function FourKEditPanel({ batchId }: FourKEditPanelProps) {
           source_url: batchItemInfo[f.batch_item_id]?.source_url,
           look_code: lookCodes[f.batch_item_id],
           look_id: lookId,
-          original_front_url: lookId ? lookOriginals[lookId]?.front_url : null,
-          original_back_url: lookId ? lookOriginals[lookId]?.back_url : null,
+          ai_apply_front_url: lookId ? lookAiApplies[lookId]?.front_url : null,
+          ai_apply_back_url: lookId ? lookAiApplies[lookId]?.back_url : null,
         };
       });
 
@@ -1019,63 +1021,63 @@ function FavoriteTile({
     }
   };
 
-  // Download original front look image
-  const handleDownloadOriginalFront = async (e: React.MouseEvent) => {
+  // Download AI Apply front image (head-swapped version)
+  const handleDownloadAiApplyFront = async (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!favorite.original_front_url) {
-      toast.error("No original front image available");
+    if (!favorite.ai_apply_front_url) {
+      toast.error("No AI Apply front image available");
       return;
     }
     
     try {
-      const response = await fetch(favorite.original_front_url);
+      const response = await fetch(favorite.ai_apply_front_url);
       const blob = await response.blob();
       
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${sku}_Original_Front.png`;
+      link.download = `${sku}_AIApply_Front.png`;
       
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
       
-      toast.success("Original front download started");
+      toast.success("AI Apply front download started");
     } catch (error) {
-      console.error("Original front download failed:", error);
-      toast.error("Original front download failed");
+      console.error("AI Apply front download failed:", error);
+      toast.error("AI Apply front download failed");
     }
   };
 
-  // Download original back look image
-  const handleDownloadOriginalBack = async (e: React.MouseEvent) => {
+  // Download AI Apply back image (head-swapped version)
+  const handleDownloadAiApplyBack = async (e: React.MouseEvent) => {
     e.stopPropagation();
     
-    if (!favorite.original_back_url) {
-      toast.error("No original back image available");
+    if (!favorite.ai_apply_back_url) {
+      toast.error("No AI Apply back image available");
       return;
     }
     
     try {
-      const response = await fetch(favorite.original_back_url);
+      const response = await fetch(favorite.ai_apply_back_url);
       const blob = await response.blob();
       
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${sku}_Original_Back.png`;
+      link.download = `${sku}_AIApply_Back.png`;
       
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
       
-      toast.success("Original back download started");
+      toast.success("AI Apply back download started");
     } catch (error) {
-      console.error("Original back download failed:", error);
-      toast.error("Original back download failed");
+      console.error("AI Apply back download failed:", error);
+      toast.error("AI Apply back download failed");
     }
   };
 
@@ -1245,26 +1247,26 @@ function FavoriteTile({
         </Button>
       )}
 
-      {/* Original front/back download buttons - left side */}
+      {/* AI Apply front/back download buttons - left side */}
       <div className="absolute left-1 bottom-12 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all z-30">
-        {favorite.original_front_url && (
+        {favorite.ai_apply_front_url && (
           <Button
             variant="ghost"
             size="sm"
             className="h-5 w-5 p-0 rounded bg-background/80 hover:bg-background text-[9px] font-bold"
-            onClick={handleDownloadOriginalFront}
-            title="Download original front photo"
+            onClick={handleDownloadAiApplyFront}
+            title="Download AI Apply front (head-swapped)"
           >
             F
           </Button>
         )}
-        {favorite.original_back_url && (
+        {favorite.ai_apply_back_url && (
           <Button
             variant="ghost"
             size="sm"
             className="h-5 w-5 p-0 rounded bg-background/80 hover:bg-background text-[9px] font-bold"
-            onClick={handleDownloadOriginalBack}
-            title="Download original back photo"
+            onClick={handleDownloadAiApplyBack}
+            title="Download AI Apply back (head-swapped)"
           >
             B
           </Button>
