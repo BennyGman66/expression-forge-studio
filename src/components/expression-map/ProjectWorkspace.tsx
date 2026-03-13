@@ -12,6 +12,7 @@ import { useProjectData } from "@/hooks/useProject";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { RECIPE_EXTRACTION_SYSTEM_PROMPT, buildFullPrompt } from "@/lib/constants";
+import { useExpressionQueueWorkers } from "@/hooks/useExpressionQueueWorkers";
 import type { Project } from "@/types";
 
 const VALID_STEPS: WorkflowStep[] = ["brand-refs", "recipes", "talent", "generate", "review", "expression-maps"];
@@ -36,6 +37,9 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [outputsCount, setOutputsCount] = useState(0);
   const [exportsCount, setExportsCount] = useState(0);
+
+  // Client-side concurrent workers — supplement server-side cron
+  const { stop: stopWorkers } = useExpressionQueueWorkers(activeJobId);
 
   const {
     brandRefs,
