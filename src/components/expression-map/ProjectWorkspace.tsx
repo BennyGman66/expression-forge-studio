@@ -397,7 +397,9 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
             recipes={recipes}
             brandRefs={brandRefs}
             masterPrompt={masterPrompt}
+            projectId={project.id}
             onUpdateRecipe={updateRecipe}
+            onAddRecipes={addRecipes}
           />
         )}
 

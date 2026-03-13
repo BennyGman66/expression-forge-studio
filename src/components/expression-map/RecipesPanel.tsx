@@ -2,17 +2,32 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ChevronDown, ChevronUp, Copy, Check } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Check, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buildFullPrompt } from "@/lib/constants";
 import { toast } from "sonner";
-import type { ExpressionRecipe, BrandRef } from "@/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import type { ExpressionRecipe, BrandRef, RecipeJson } from "@/types";
 
 interface RecipesPanelProps {
   recipes: ExpressionRecipe[];
   brandRefs: BrandRef[];
   masterPrompt: string;
+  projectId: string;
   onUpdateRecipe: (id: string, updates: Partial<ExpressionRecipe>) => void;
+  onAddRecipes: (recipes: Array<{
+    project_id: string;
+    name: string;
+    recipe_json: RecipeJson;
+    delta_line: string;
+    full_prompt_text: string;
+  }>) => Promise<void>;
 }
 
 export function RecipesPanel({ recipes, brandRefs, masterPrompt, onUpdateRecipe }: RecipesPanelProps) {
