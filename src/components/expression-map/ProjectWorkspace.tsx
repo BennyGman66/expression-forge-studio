@@ -12,6 +12,7 @@ import { useProjectData } from "@/hooks/useProject";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { RECIPE_EXTRACTION_SYSTEM_PROMPT, buildFullPrompt } from "@/lib/constants";
+import { useExpressionQueueWorkers } from "@/hooks/useExpressionQueueWorkers";
 import type { Project } from "@/types";
 
 const VALID_STEPS: WorkflowStep[] = ["brand-refs", "recipes", "talent", "generate", "review", "expression-maps"];
