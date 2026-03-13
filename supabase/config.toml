@@ -140,3 +140,6 @@ verify_jwt = false
 
 [functions.complete-repose-upload]
 verify_jwt = false
+
+[functions.process-expression-queue]
+verify_jwt = false
