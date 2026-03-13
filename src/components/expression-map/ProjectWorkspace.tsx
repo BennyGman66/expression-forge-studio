@@ -40,7 +40,6 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
 
   // Client-side concurrent workers — supplement server-side cron
   const { stop: stopWorkers } = useExpressionQueueWorkers(activeJobId);
-  const [exportsCount, setExportsCount] = useState(0);
 
   const {
     brandRefs,
