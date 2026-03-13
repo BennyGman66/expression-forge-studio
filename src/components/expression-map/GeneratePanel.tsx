@@ -22,6 +22,7 @@ interface GeneratePanelProps {
   recipes: ExpressionRecipe[];
   masterPrompt: string;
   projectId: string;
+  activeJobId?: string | null;
   onGenerate: (payload: {
     modelIds: string[];
     recipeIds: string[];
