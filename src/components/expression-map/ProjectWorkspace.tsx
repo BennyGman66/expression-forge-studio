@@ -417,6 +417,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
             recipes={recipes}
             masterPrompt={masterPrompt}
             projectId={project.id}
+            activeJobId={activeJobId}
             onGenerate={handleGenerate}
             isGenerating={isGenerating}
           />

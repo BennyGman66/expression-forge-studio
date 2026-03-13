@@ -381,7 +381,7 @@ export function GeneratePanel({
       </div>
 
       {/* Generation Progress & Outputs */}
-      <GenerationProgress projectId={projectId} />
+      <GenerationProgress projectId={projectId} activeJobId={activeJobId || null} />
     </div>
   );
 }
