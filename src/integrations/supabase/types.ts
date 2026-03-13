@@ -947,6 +947,74 @@ export type Database = {
           },
         ]
       }
+      expression_render_queue: {
+        Row: {
+          ai_model: string
+          attempts: number
+          completed_at: string | null
+          created_at: string
+          digital_model_id: string
+          error_message: string | null
+          id: string
+          job_id: string
+          max_attempts: number
+          model_ref_url: string
+          output_id: string | null
+          project_id: string
+          prompt: string
+          recipe_id: string
+          retry_after: string | null
+          started_at: string | null
+          status: string
+        }
+        Insert: {
+          ai_model?: string
+          attempts?: number
+          completed_at?: string | null
+          created_at?: string
+          digital_model_id: string
+          error_message?: string | null
+          id?: string
+          job_id: string
+          max_attempts?: number
+          model_ref_url: string
+          output_id?: string | null
+          project_id: string
+          prompt: string
+          recipe_id: string
+          retry_after?: string | null
+          started_at?: string | null
+          status?: string
+        }
+        Update: {
+          ai_model?: string
+          attempts?: number
+          completed_at?: string | null
+          created_at?: string
+          digital_model_id?: string
+          error_message?: string | null
+          id?: string
+          job_id?: string
+          max_attempts?: number
+          model_ref_url?: string
+          output_id?: string | null
+          project_id?: string
+          prompt?: string
+          recipe_id?: string
+          retry_after?: string | null
+          started_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expression_render_queue_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       external_clients: {
         Row: {
           created_at: string
@@ -4091,6 +4159,34 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_expression_queue_items: {
+        Args: { p_batch_size?: number }
+        Returns: {
+          ai_model: string
+          attempts: number
+          completed_at: string | null
+          created_at: string
+          digital_model_id: string
+          error_message: string | null
+          id: string
+          job_id: string
+          max_attempts: number
+          model_ref_url: string
+          output_id: string | null
+          project_id: string
+          prompt: string
+          recipe_id: string
+          retry_after: string | null
+          started_at: string | null
+          status: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "expression_render_queue"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -4103,6 +4199,7 @@ export type Database = {
         Returns: number
       }
       is_internal_user: { Args: { _user_id: string }; Returns: boolean }
+      recover_stale_expression_queue_items: { Args: never; Returns: number }
     }
     Enums: {
       annotation_shape: "RECT"

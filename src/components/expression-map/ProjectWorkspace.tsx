@@ -33,6 +33,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
 
   const [isExtracting, setIsExtracting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [outputsCount, setOutputsCount] = useState(0);
   const [exportsCount, setExportsCount] = useState(0);
 
@@ -302,7 +303,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
     await processGenerationPrompts(prompts, payload.aiModel);
   };
 
-  // Shared generation logic
+  // Shared generation logic — bulk-insert into expression_render_queue
   const processGenerationPrompts = async (
     prompts: Array<{
       modelId: string;
@@ -314,7 +315,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
     }>,
     aiModel: string
   ) => {
-    // Step 1: Create the job first
+    // Step 1: Create the job record (reuse existing edge function)
     const { data: jobData, error: jobError } = await supabase.functions.invoke("generate-images", {
       body: {
         action: "create-job",
@@ -331,96 +332,31 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
     }
 
     const jobId = jobData.jobId;
-    toast.success(`Generation started! Processing ${prompts.length} images...`);
+    setActiveJobId(jobId);
 
-    // Step 2: Process prompts one at a time from the frontend
-    (async () => {
-      const MAX_RETRIES = 3;
-      const BASE_DELAY = 1000;
+    // Step 2: Bulk-insert all prompts into the render queue
+    const queueItems = prompts.map((p) => ({
+      job_id: jobId,
+      project_id: project.id,
+      digital_model_id: p.modelId,
+      recipe_id: p.recipeId,
+      prompt: p.fullPrompt,
+      model_ref_url: p.modelRefUrl,
+      ai_model: aiModel,
+    }));
 
-      for (let i = 0; i < prompts.length; i++) {
-        let retryCount = 0;
-        let success = false;
+    const { error: insertError } = await (supabase as any)
+      .from("expression_render_queue")
+      .insert(queueItems);
 
-        while (retryCount <= MAX_RETRIES && !success) {
-          try {
-            const response = await supabase.functions.invoke("generate-images", {
-              body: {
-                projectId: project.id,
-                jobId,
-                promptIndex: i,
-                prompt: prompts[i],
-                total: prompts.length,
-                aiModel,
-              },
-            });
+    if (insertError) {
+      console.error("Failed to enqueue items:", insertError);
+      toast.error("Failed to enqueue generation items");
+      return;
+    }
 
-            if (response.error) {
-              console.error(`Error on prompt ${i} (attempt ${retryCount + 1}):`, response.error);
-              retryCount++;
-              if (retryCount <= MAX_RETRIES) {
-                const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
-                console.log(`Retrying in ${delay}ms...`);
-                await new Promise(r => setTimeout(r, delay));
-                continue;
-              }
-              break;
-            }
-
-            const result = response.data;
-
-            if (result?.rateLimited) {
-              retryCount++;
-              const delay = result.retryAfter || BASE_DELAY * Math.pow(2, retryCount);
-              console.log(`Rate limited, waiting ${delay}ms (attempt ${retryCount})...`);
-              await new Promise(r => setTimeout(r, delay));
-              continue;
-            }
-
-            if (result?.stopped || result?.creditsExhausted) {
-              console.log("Generation stopped or credits exhausted");
-              return;
-            }
-
-            if (result?.success === false && !result?.skipped) {
-              retryCount++;
-              if (retryCount <= MAX_RETRIES) {
-                const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
-                console.log(`Generation failed, retrying in ${delay}ms (attempt ${retryCount})...`);
-                await new Promise(r => setTimeout(r, delay));
-                continue;
-              }
-              console.error(`Failed after ${MAX_RETRIES} retries, moving on`);
-              break;
-            }
-
-            success = true;
-
-            if (i < prompts.length - 1) {
-              await new Promise(r => setTimeout(r, 500));
-            }
-          } catch (err) {
-            console.error(`Error processing prompt ${i} (attempt ${retryCount + 1}):`, err);
-            retryCount++;
-            if (retryCount <= MAX_RETRIES) {
-              const delay = BASE_DELAY * Math.pow(2, retryCount - 1);
-              console.log(`Exception caught, retrying in ${delay}ms...`);
-              await new Promise(r => setTimeout(r, delay));
-            }
-          }
-        }
-      }
-
-      // Mark job as completed
-      await supabase
-        .from("jobs")
-        .update({
-          status: "completed",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", jobId)
-        .eq("status", "running");
-    })();
+    toast.success(`Queued ${prompts.length} images for server-side generation!`);
+    setIsGenerating(false);
   };
 
   return (
@@ -481,6 +417,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
             recipes={recipes}
             masterPrompt={masterPrompt}
             projectId={project.id}
+            activeJobId={activeJobId}
             onGenerate={handleGenerate}
             isGenerating={isGenerating}
           />

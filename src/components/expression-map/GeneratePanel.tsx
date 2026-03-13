@@ -22,6 +22,7 @@ interface GeneratePanelProps {
   recipes: ExpressionRecipe[];
   masterPrompt: string;
   projectId: string;
+  activeJobId?: string | null;
   onGenerate: (payload: {
     modelIds: string[];
     recipeIds: string[];
@@ -37,6 +38,7 @@ export function GeneratePanel({
   recipes,
   masterPrompt,
   projectId,
+  activeJobId,
   onGenerate,
   isGenerating,
 }: GeneratePanelProps) {
@@ -379,7 +381,7 @@ export function GeneratePanel({
       </div>
 
       {/* Generation Progress & Outputs */}
-      <GenerationProgress projectId={projectId} />
+      <GenerationProgress projectId={projectId} activeJobId={activeJobId || null} />
     </div>
   );
 }
