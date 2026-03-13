@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle, XCircle, Image as ImageIcon, X, Square, AlertTriangle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useExpressionQueueProgress } from "@/hooks/useExpressionQueueProgress";
 import type { Json } from "@/integrations/supabase/types";
 
 interface Job {
