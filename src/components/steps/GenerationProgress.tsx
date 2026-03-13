@@ -42,6 +42,9 @@ export function GenerationProgress({ projectId, activeJobId, onClose }: Generati
   const [isStopping, setIsStopping] = useState(false);
   const [isStalled, setIsStalled] = useState(false);
   const lastProgressRef = useRef<{ progress: number; time: number } | null>(null);
+  
+  // Queue-based progress tracking
+  const { progress: queueProgress, cancelPending } = useExpressionQueueProgress(activeJobId || null);
 
   const handleStopGeneration = async () => {
     const activeJob = jobs.find((j) => j.status === "running");
