@@ -33,6 +33,7 @@ export function ProjectWorkspace({ project, onBack, onDelete }: ProjectWorkspace
 
   const [isExtracting, setIsExtracting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [outputsCount, setOutputsCount] = useState(0);
   const [exportsCount, setExportsCount] = useState(0);
 
