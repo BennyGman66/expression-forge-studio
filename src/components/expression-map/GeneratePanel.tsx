@@ -38,6 +38,7 @@ export function GeneratePanel({
   recipes,
   masterPrompt,
   projectId,
+  activeJobId,
   onGenerate,
   isGenerating,
 }: GeneratePanelProps) {
