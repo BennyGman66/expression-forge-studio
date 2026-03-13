@@ -29,6 +29,7 @@ interface Output {
 
 interface GenerationProgressProps {
   projectId: string;
+  activeJobId?: string | null;
   onClose?: () => void;
 }
 
