@@ -35,7 +35,7 @@ interface GenerationProgressProps {
 
 const STALL_THRESHOLD_MS = 90000; // 90 seconds without progress = stalled
 
-export function GenerationProgress({ projectId, onClose }: GenerationProgressProps) {
+export function GenerationProgress({ projectId, activeJobId, onClose }: GenerationProgressProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [outputs, setOutputs] = useState<Output[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
